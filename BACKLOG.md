@@ -1657,10 +1657,8 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   and its `waitid` → `CreateProcess` + anonymous pipes, preserving the separate stdout/stderr
   capture, the output cap, the timeout kill and the process-group kill (a job object). Not needed
   by the shipped game so not a Milestone A blocker; it *is* needed by Milestone B and the game's
-  offline bake. Note `analysis_service_driver.sprout` shells out via `["sh", "-c", …]` and there is
-  no `sh` on Windows, so the driver needs its own fix beyond the builtin. **DECISION PENDING
-  (owner):** implement, or ship a loud stub? A stub is a legitimate answer, but that is a product
-  call.
+  offline bake. **DECISION PENDING (owner):** implement, or ship a loud stub? A stub is a
+  legitimate answer, but that is a product call.
 - [ ] `P2` **The CPR `_unboxed` externs have no Windows x64 ABI.** Emitted IR declares
   `i128 @X_unboxed` and gets it back in rax/rdx. MSVC returns a 16-byte struct through `sret`,
   clang returns `__int128` in XMM0 there, and `cl.exe` has no `__int128`, so no C form of

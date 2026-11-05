@@ -2,6 +2,8 @@ import stdlib.test (TestState, new_state, assert_true, assert_false, assert_eq, 
 import stdlib.fs as fs
 import stdlib.bytes as bytes
 import stdlib.process as process
+import stdlib.string as string
+import stdlib.fs.path as fspath
 
 # Every assertion below reduces a `Result FsError a` to a short classification
 # string. That is deliberate: the point of FsError is that a caller can tell
@@ -93,6 +95,12 @@ fn byte_count(r: Result fs.FsError Bytes) -> Int =
 # module system (bundler.sprout:597 drops ExternFnDecl), so a wrong import graph
 # does not produce a scoping diagnostic — it produces `Unknown variable` from the
 # typechecker or an undefined symbol at link time.
+
+# First line of `ls -ld <dir>`: the file type and permission bits, e.g. "drwx------".
+fn long_listing(dir: String) -> String !{IO} =
+  match process.proc_run(["ls", "-ld", dir]) with
+  | Err _ -> ""
+  | Ok r -> process.proc_stdout_or(r, "")
 
 fn main() -> Unit !{IO} =
   do
@@ -272,5 +280,43 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "remove_dir_all clears a populated tree",
       outcome(fs.remove_dir_all(root)), "ok")
     assert_eq(state, "the tree is gone afterwards", outcome(fs.stat(root)), "not_found")
+
+    # --- make_temp_dir ------------------------------------------------------
+
+    # A failure shows as "" here and is reported by the assertions below, so the rest still run.
+    let temp_a = result_with_default("", fs.make_temp_dir("sprout-fs-test-"))
+    let temp_b = result_with_default("", fs.make_temp_dir("sprout-fs-test-"))
+    let temp_c = result_with_default("", fs.make_temp_dir(""))
+
+    assert_true(state, "make_temp_dir returns a path", temp_a != "")
+    assert_eq(state, "make_temp_dir creates a directory", kind_of(fs.stat(temp_a)), "dir")
+    assert_true(state, "make_temp_dir name starts with the prefix",
+      string.starts_with(fspath.basename(temp_a), "sprout-fs-test-"))
+    assert_true(state, "make_temp_dir adds a random suffix after the prefix",
+      string.length(fspath.basename(temp_a)) > string.length("sprout-fs-test-"))
+    assert_true(state, "two make_temp_dir calls give different paths", temp_a != temp_b)
+    assert_true(state, "make_temp_dir accepts an empty prefix", temp_c != "")
+    assert_eq(state, "an empty-prefix temp dir exists", kind_of(fs.stat(temp_c)), "dir")
+
+    # mkdir applies the umask, which only clears bits, so owner-only is the most it can be.
+    assert_true(state, "make_temp_dir creates an owner-only directory",
+      string.starts_with(long_listing(temp_a), "drwx------"))
+
+    assert_eq(state, "make_temp_dir rejects a prefix with a slash",
+      outcome(fs.make_temp_dir("a/b")), "invalid_path")
+    assert_eq(state, "make_temp_dir rejects a prefix that is only a slash",
+      outcome(fs.make_temp_dir("/")), "invalid_path")
+
+    # `make_dir` passes its own mode through the new argument and still creates.
+    let plain = temp_a ++ "/plain"
+    assert_eq(state, "make_dir creates a directory under a temp dir",
+      outcome(fs.make_dir(plain)), "ok")
+    assert_eq(state, "the make_dir directory exists", kind_of(fs.stat(plain)), "dir")
+
+    assert_eq(state, "remove_dir_all clears the first temp dir", outcome(fs.remove_dir_all(temp_a)), "ok")
+    assert_eq(state, "remove_dir_all clears the second temp dir", outcome(fs.remove_dir_all(temp_b)), "ok")
+    assert_eq(state, "remove_dir_all clears the empty-prefix temp dir",
+      outcome(fs.remove_dir_all(temp_c)), "ok")
+    assert_eq(state, "a removed temp dir is gone", outcome(fs.stat(temp_a)), "not_found")
 
     summary(state)

@@ -4331,14 +4331,15 @@ long long fs_write_bytes(long long path_i, long long bytes_h) {
   return fs_ok_unit();
 }
 
-/* One level only, 0777 before umask. Recursive creation is make_dir_all in
- * Sprout, which is also what makes an existing-tree call a success rather than
- * an EEXIST. */
-long long fs_make_dir(long long path_i) {
+/* One level only, created with the caller's permission bits (the low 12 bits of `mode`, minus the
+ * process umask). Callers pass 0777 for an ordinary directory and 0700 for a private one. Recursive
+ * creation is make_dir_all in Sprout, which is also what makes an existing-tree call a success
+ * rather than an EEXIST. The create mode is the only mode control: there is no chmod. */
+long long fs_make_dir(long long path_i, long long mode_i) {
   const char* path = (const char*)(uintptr_t)path_i;
   long long rejected;
   if (fs_path_rejected(path, &rejected)) return rejected;
-  if (mkdir(path, 0777) != 0) return fs_err(errno, path);
+  if (mkdir(path, (mode_t)(mode_i & 07777)) != 0) return fs_err(errno, path);
   return fs_ok_unit();
 }
 
@@ -5852,6 +5853,47 @@ static int sprout_analysis_service_is_stale(void) {
   }
   return 0;
 }
+/* Opens the analysis service's log for append and returns the fd, or -1. Accepts only a regular
+ * file owned by the current user that group and others cannot write and that has one name (link
+ * count 1); a symlink, hard link, FIFO, directory or file of another owner is refused. A missing
+ * file is created with mode 0600. O_NONBLOCK keeps the open of a FIFO with no reader from
+ * blocking (it fails with ENXIO); it is cleared again once the checks pass so later writes block
+ * as usual. Runs in the fork child, so it uses only
+ * async-signal-safe calls. */
+static int sprout_open_service_log(const char* path) {
+  int fd = cloexec_open(path, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_NONBLOCK, 0600);
+  if (fd < 0) return -1;
+  struct stat st;
+  if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_uid != getuid() ||
+      (st.st_mode & (S_IWGRP | S_IWOTH)) != 0 || st.st_nlink != 1) {
+    close(fd);
+    return -1;
+  }
+  int fl = fcntl(fd, F_GETFL, 0);
+  if (fl < 0 || fcntl(fd, F_SETFL, fl & ~O_NONBLOCK) != 0) {
+    close(fd);
+    return -1;
+  }
+  return fd;
+}
+/* Returns fd unchanged when it is above stderr; else a close-on-exec duplicate at 3 or higher, with
+ * fd closed; -1 on failure. A negative fd is returned as is. In the fork child, so
+ * async-signal-safe calls only. */
+static int sprout_fd_above_stdio(int fd) {
+  if (fd < 0 || fd > STDERR_FILENO) return fd;
+  int moved = fcntl(fd, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+  close(fd);
+  return moved;
+}
+/* The analysis service's log path: SPROUT_ANALYSIS_SERVICE_LOG when set and not empty, else a
+ * per-user file in /tmp, formatted into buf. Runs before fork: getenv and snprintf are not
+ * async-signal-safe. */
+static const char* sprout_analysis_service_log_path(char* buf, size_t cap) {
+  const char* log_target = getenv("SPROUT_ANALYSIS_SERVICE_LOG");
+  if (log_target != NULL && log_target[0] != '\0') return log_target;
+  snprintf(buf, cap, "/tmp/sprout_analysis_service-%lu.log", (unsigned long)getuid());
+  return buf;
+}
 static int sprout_ensure_analysis_service(char** error_out) {
   if (!sprout_analysis_service_sigpipe_ignored) {
     signal(SIGPIPE, SIG_IGN);
@@ -5876,6 +5918,8 @@ static int sprout_ensure_analysis_service(char** error_out) {
     *error_out = dup_cstr("analysis service: unable to create pipes");
     return 0;
   }
+  char default_log[64];
+  const char* log_target = sprout_analysis_service_log_path(default_log, sizeof(default_log));
   pid_t pid = fork();
   if (pid < 0) {
     close(request_pipe[0]);
@@ -5886,41 +5930,77 @@ static int sprout_ensure_analysis_service(char** error_out) {
     return 0;
   }
   if (pid == 0) {
-    dup2(request_pipe[0], STDIN_FILENO);   /* cloexec-gate: fork child */
-    dup2(response_pipe[1], STDOUT_FILENO);   /* cloexec-gate: fork child */
+    /* Own process group: job-control signals sent to the parent's foreground group (Ctrl-C,
+       Ctrl-Z) do not reach the daemon. It exits on its own when stdin reaches EOF, which
+       happens when the parent goes. */
+    setpgid(0, 0);
+    /* A pipe end that landed on fd 0, 1 or 2 (the parent had that descriptor closed) would be
+       overwritten by the dup2 calls below, or closed with them. Move every end above 2 first. */
+    int req_r = sprout_fd_above_stdio(request_pipe[0]);
+    int req_w = sprout_fd_above_stdio(request_pipe[1]);
+    int resp_r = sprout_fd_above_stdio(response_pipe[0]);
+    int resp_w = sprout_fd_above_stdio(response_pipe[1]);
+    if (req_r < 0 || req_w < 0 || resp_r < 0 || resp_w < 0) _exit(127);
+    dup2(req_r, STDIN_FILENO);   /* cloexec-gate: fork child */
+    dup2(resp_w, STDOUT_FILENO);   /* cloexec-gate: fork child */
     /* The daemon's stdout carries the JSON protocol, so stderr is a free
        diagnostic channel.  Historically it was sent to /dev/null, which
        silently discarded every panic, `sprout_tag: null pointer` abort, and
        stack-overflow backtrace — leaving a crashed daemon indistinguishable
        from a hang (the client just sees "empty response").  Capture stderr to
-       a logfile instead.  Override the path with SPROUT_ANALYSIS_SERVICE_LOG,
-       or set it to "off" to restore the previous /dev/null behavior. */
-    const char* log_target = getenv("SPROUT_ANALYSIS_SERVICE_LOG");
-    if (log_target == NULL || log_target[0] == '\0')
-      log_target = "/tmp/sprout_analysis_service.log";
-    /* Deliberately not close-on-exec: freopen puts the log (or /dev/null) on fd 2, which the exec'd
-       daemon must inherit as its stderr. */
-    if (strcmp(log_target, "off") == 0 || freopen(log_target, "a", stderr) == NULL) {
-      freopen("/dev/null", "w", stderr);
-    } else {
-      /* freopen reassigns fd 2 to the logfile; the fd (not the FILE* stream's
-         buffering state) is what survives the execl below, so the daemon
-         inherits the redirect.  C guarantees stderr is never fully buffered at
-         startup and both glibc and macOS libc leave it unbuffered, so the
-         daemon's post-exec fprintf(stderr,...) crash messages — including the
-         no-newline `sprout_tag: null pointer` abort — reach the log on their
-         own.  The banner is written with raw write(2) for the same reason the
-         stack-overflow handler does: no dependence on stdio state. */
-      char banner[160];
-      int bn = snprintf(banner, sizeof(banner),
-        "\n=== sprout analysis-service daemon started (pid %d) ===\n",
-        (int)getpid());
-      if (bn > 0) { ssize_t bw = write(STDERR_FILENO, banner, (size_t)bn); (void)bw; }
+       a logfile instead.  The log is opened only if it is a regular file we
+       own that group and others cannot write (sprout_open_service_log);
+       otherwise stderr goes to /dev/null.  Override the path with
+       SPROUT_ANALYSIS_SERVICE_LOG, or set it to "off" or "/dev/null" to use /dev/null.  The
+       variable is read before fork(): getenv is not async-signal-safe and the
+       runtime has helper threads, so this child keeps to open, fstat, fcntl,
+       dup2, close, write, setpgid and _exit.  dup2 clears FD_CLOEXEC on fd 2 by design,
+       so the exec'd daemon inherits the log (or /dev/null) as its stderr; the
+       daemon's post-exec fprintf(stderr,...) crash messages — including the
+       no-newline `sprout_tag: null pointer` abort — reach the log on their
+       own, since stderr is unbuffered.  The banner is written with raw
+       write(2), as the stack-overflow handler does: no dependence on stdio
+       state. */
+    int log_fd = -1;
+    if (strcmp(log_target, "off") != 0 && strcmp(log_target, "/dev/null") != 0) {
+      log_fd = sprout_open_service_log(log_target);
+      if (log_fd < 0) {
+        /* fd 2 is still the parent's stderr here.  Say the log is unused, as one line, built
+           from separate write calls (no snprintf in the child). */
+        static const char refused_a[] = "sprout: analysis service log not used (not a private regular file): ";
+        ssize_t rw = write(STDERR_FILENO, refused_a, sizeof(refused_a) - 1);
+        rw = write(STDERR_FILENO, log_target, strlen(log_target));
+        rw = write(STDERR_FILENO, "\n", 1);
+        (void)rw;
+      }
     }
-    close(request_pipe[0]);
-    close(request_pipe[1]);
-    close(response_pipe[0]);
-    close(response_pipe[1]);
+    /* Opened at the lowest free fd, which is 2 when the parent had stderr closed. */
+    log_fd = sprout_fd_above_stdio(log_fd);
+    if (log_fd >= 0) {
+      char banner[96] = "\n=== sprout analysis-service daemon started (pid ";
+      size_t bn = strlen(banner);
+      char digits[24];
+      int nd = 0;
+      for (unsigned long v = (unsigned long)getpid(); ; v /= 10) {
+        digits[nd++] = (char)('0' + v % 10);
+        if (v < 10) break;
+      }
+      while (nd > 0) banner[bn++] = digits[--nd];
+      memcpy(banner + bn, ") ===\n", 6);
+      bn += 6;
+      ssize_t bw = write(log_fd, banner, bn);
+      (void)bw;
+    } else {
+      log_fd = sprout_fd_above_stdio(cloexec_open("/dev/null", O_WRONLY, 0));
+    }
+    if (log_fd >= 0) {
+      dup2(log_fd, STDERR_FILENO);   /* cloexec-gate: fork child */
+      close(log_fd);
+    }
+    close(req_r);
+    close(req_w);
+    close(resp_r);
+    close(resp_w);
     execl("/bin/sh", "sh", "-lc", cmd, (char*)NULL);
     _exit(127);
   }

@@ -125,6 +125,13 @@ clang "$ROOT/tests/c_runtime/cloexec_fds.c" "$ROOT/runtime/sprout_scheduler.c" "
 "$TMP_DIR/cloexec_fds" > "$TMP_DIR/cloexec_fds.out"
 test "$(cat "$TMP_DIR/cloexec_fds.out")" = "cloexec-fds"
 
+echo "==> c runtime: the analysis service log opens only a regular file we own that others cannot write"
+mkdir "$TMP_DIR/service_log"
+clang "$ROOT/tests/c_runtime/analysis_service_log.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
+  "${CLANG_EXTRA[@]}" -O0 -g ${SAN[@]+"${SAN[@]}"} -o "$TMP_DIR/analysis_service_log"
+"$TMP_DIR/analysis_service_log" "$TMP_DIR/service_log" > "$TMP_DIR/analysis_service_log.out"
+test "$(cat "$TMP_DIR/analysis_service_log.out")" = "analysis-service-log"
+
 echo "==> c runtime: sprout_fail is declared noreturn (analyzer-signal guard)"
 # Both sites must carry it: the definition, and the declaration in
 # sprout_scheduler.h that the poll and scheduler TUs compile against.

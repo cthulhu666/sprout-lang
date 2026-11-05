@@ -51,7 +51,10 @@ class of workaround this arc exists to remove.
   has one visible consequence: the follow/no-follow tests build their fixture with `ln(1)` through
   `proc_run`, because no in-language call can make a symlink.
 - N2. **Permissions, ownership, timestamps as a writable surface.** `Entry` reports mode-derived
-  *kind* and mtime; there is no `chmod`, `chown` or `utimes`. No consumer.
+  *kind* and mtime; there is no `chmod`, `chown` or `utimes`. No consumer. The one exception is
+  the create mode: `fs_make_dir(path, mode)` sets the permission bits when it makes a directory
+  (`make_dir` passes 0777, `make_temp_dir` passes 0700), narrowed by the umask. A directory's
+  mode cannot be changed afterwards.
 - N3. **Windows path semantics.** Drive letters, UNC paths and `\` separators are out of scope;
   `stdlib.fs.path` is POSIX. The Windows CI job builds the compiler, it does not run a Sprout
   program against a Windows filesystem. Recorded so that a later Windows port is understood as a
@@ -161,7 +164,7 @@ performance-motivated (rule 6).
 | `fs_stat_path(path, follow) -> Result FsError Entry` | `stat` / `lstat` | no inode metadata primitive exists |
 | `fs_read_bytes(path) -> Result FsError Bytes` | `open`/`read`/`close` | `read_file` validates UTF-8 and cannot return raw bytes |
 | `fs_write_bytes(path, Bytes) -> Result FsError Unit` | `open`/`write`/`close` | `write_file` takes `String`, which is always valid UTF-8 with no NUL |
-| `fs_make_dir(path) -> Result FsError Unit` | `mkdir` | — |
+| `fs_make_dir(path, mode) -> Result FsError Unit` | `mkdir` | `mode` is the create mode, set at creation; there is no `chmod` |
 | `fs_remove(path) -> Result FsError Unit` | `remove(3)` (`unlink`/`rmdir`) | — |
 | `fs_rename(from, to) -> Result FsError Unit` | `rename` | — |
 
@@ -187,7 +190,20 @@ carry as builtins are **written in Sprout instead**, which is the substance of G
   several filesystems, so a correct C version would need the `lstat` fallback anyway.
 
 `fs_make_dir` takes no `recursive` flag — that flag is what `make_dir_all` replaces, and dropping it
-also avoids passing a `Bool` across the extern boundary.
+also avoids passing a `Bool` across the extern boundary. It does take the create `mode` (an `Int`),
+because a private directory must be created private: a `chmod` afterwards would leave a window in
+which it is wider. Sprout has no octal literals, so the callers pass `511` (0777) and `448` (0700).
+
+`make_temp_dir(prefix) -> Result FsError String` is written in Sprout over it. The directory is
+`<base>/<prefix><12 random bytes in base64url>`, where `<base>` is `TMPDIR`, or `/tmp` when that is
+unset or empty. It is created with mode 0700 (at most that, after the umask). `mkdir` fails on a
+name that exists, so a clash retries with a fresh name, up to eight times, and then returns the
+last `FsAlreadyExists`. A `prefix` containing `/` is `FsInvalidPath`; an empty prefix is allowed.
+The caller removes the directory with `remove_dir_all`.
+
+Windows open items: an owner-only ACL for the 0700 case (Python 3.13's `tempfile.mkdtemp` is the
+precedent), the temp base (`GetTempPath2`), and the exclusive-create semantics
+(`ERROR_ALREADY_EXISTS`).
 
 ### 4.2 Types
 

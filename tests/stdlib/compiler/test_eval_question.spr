@@ -1,9 +1,10 @@
 module main
 
-import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
 import stdlib.compiler.analysis_service_driver as service
 import stdlib.json as json
 import stdlib.string as string
+import stdlib.fs as fs
 import stdlib.terminal as terminal
 import testsupport.envvar as envvar
 import testsupport.toolchain (clang_available)
@@ -55,6 +56,110 @@ fn run_cases(test: TestState, state: service.StartupState) -> Unit !{IO} =
     assert_true(test, "declarations after the expression are rejected",
       string.contains(trailing, "\"ok\":false"))
 
+# The scratch dir is made on the first eval and removed by `shutdown_state`. Starts from a fresh
+# state and leaves a live scratch dir for the cases that follow.
+fn scratch_cases(test: TestState, state: service.StartupState) -> Unit !{IO} =
+  do
+    before <- service.scratch_dir_of(state)
+    assert_true(test, "no scratch dir exists before the first eval", before == "")
+    first <- eval_text("", "1 + 1", state)
+    assert_true(test, "an eval works", first == "{\"ok\":true,\"value\":[\"2\"]}")
+    dir <- service.scratch_dir_of(state)
+    assert_true(test, "the first eval makes a scratch dir", dir != "" && fs.is_dir(dir))
+    assert_true(test, "the scratch dir holds the eval files", fs.is_file(dir ++ "/eval.ll"))
+    service.shutdown_state(state)
+    assert_false(test, "shutdown_state removes the scratch dir", fs.exists(dir))
+    after <- service.scratch_dir_of(state)
+    assert_true(test, "shutdown_state resets the scratch dir", after == "")
+    again <- eval_text("", "2 + 2", state)
+    assert_true(test, "an eval after shutdown_state makes a fresh scratch dir",
+      again == "{\"ok\":true,\"value\":[\"4\"]}")
+
+# A scratch dir removed behind the service's back is made again, and the runtime objects with it.
+fn vanished_scratch_cases(test: TestState, state: service.StartupState) -> Unit !{IO} =
+  do
+    first <- eval_text("", "1 + 1", state)
+    assert_true(test, "an eval works before the dir vanishes", first == "{\"ok\":true,\"value\":[\"2\"]}")
+    old_dir <- service.scratch_dir_of(state)
+    assert_true(test, "the scratch dir exists", old_dir != "" && fs.is_dir(old_dir))
+    match fs.remove_dir_all(old_dir) with
+    | Ok _ -> ()
+    | Err e -> assert_true(test, "remove the scratch dir (" ++ fs.fs_error_message(e) ++ ")", false)
+    again <- eval_text("", "2 + 2", state)
+    assert_true(test, "an eval after the dir vanished succeeds", again == "{\"ok\":true,\"value\":[\"4\"]}")
+    new_dir <- service.scratch_dir_of(state)
+    assert_true(test, "a new scratch dir was made", new_dir != "" && new_dir != old_dir && fs.is_dir(new_dir))
+
+# A dir put at the scratch path that the service did not make is not reused, and is left alone.
+fn foreign_scratch_cases(test: TestState, state: service.StartupState) -> Unit !{IO} =
+  do
+    first <- eval_text("", "1 + 1", state)
+    assert_true(test, "an eval works before the dir is replaced", first == "{\"ok\":true,\"value\":[\"2\"]}")
+    old_dir <- service.scratch_dir_of(state)
+    let stale_obj = old_dir ++ "/objs/sprout_runtime.o"
+    assert_true(test, "remove the scratch dir", is_ok(fs.remove_dir_all(old_dir)))
+    assert_true(test, "put another dir at the path", is_ok(fs.make_dir_all(old_dir ++ "/objs")))
+    assert_true(test, "put a file that is not object code in it", is_ok(fs.write_text(stale_obj, "not object code\n")))
+    again <- eval_text("", "2 + 2", state)
+    assert_true(test, "an eval with another dir at the path succeeds", again == "{\"ok\":true,\"value\":[\"4\"]}")
+    new_dir <- service.scratch_dir_of(state)
+    assert_true(test, "a new scratch dir was made", new_dir != "" && new_dir != old_dir && fs.is_dir(new_dir))
+    assert_true(test, "the other dir is left alone", fs.is_file(stale_obj))
+    assert_true(test, "remove the other dir", is_ok(fs.remove_dir_all(old_dir)))
+
+# A dir whose owner file holds other content is not reused, and is left alone.
+fn wrong_owner_cases(test: TestState, state: service.StartupState) -> Unit !{IO} =
+  do
+    first <- eval_text("", "1 + 1", state)
+    assert_true(test, "an eval works before the owner file changes", first == "{\"ok\":true,\"value\":[\"2\"]}")
+    old_dir <- service.scratch_dir_of(state)
+    assert_true(test, "overwrite the owner file", is_ok(fs.write_text(old_dir ++ "/owner", "someone else")))
+    again <- eval_text("", "2 + 2", state)
+    assert_true(test, "an eval with another owner file succeeds", again == "{\"ok\":true,\"value\":[\"4\"]}")
+    new_dir <- service.scratch_dir_of(state)
+    assert_true(test, "a new scratch dir was made", new_dir != "" && new_dir != old_dir && fs.is_dir(new_dir))
+    assert_true(test, "the dir with another owner file is left alone", fs.is_dir(old_dir))
+    assert_true(test, "remove the dir with another owner file", is_ok(fs.remove_dir_all(old_dir)))
+    # A missing owner file is the same.
+    assert_true(test, "remove the owner file", is_ok(fs.remove(new_dir ++ "/owner")))
+    third <- eval_text("", "3 + 3", state)
+    assert_true(test, "an eval with no owner file succeeds", third == "{\"ok\":true,\"value\":[\"6\"]}")
+    third_dir <- service.scratch_dir_of(state)
+    assert_true(test, "another scratch dir was made", third_dir != "" && third_dir != new_dir)
+    assert_true(test, "the dir with no owner file is left alone", fs.is_dir(new_dir))
+    assert_true(test, "remove the dir with no owner file", is_ok(fs.remove_dir_all(new_dir)))
+
+# `shutdown_state` removes only a dir the service made.
+fn shutdown_foreign_cases(test: TestState, state: service.StartupState) -> Unit !{IO} =
+  do
+    dir <- service.scratch_dir_of(state)
+    assert_true(test, "overwrite the owner file before shutdown", is_ok(fs.write_text(dir ++ "/owner", "someone else")))
+    service.shutdown_state(state)
+    assert_true(test, "shutdown_state leaves a dir it did not make", fs.is_dir(dir))
+    assert_true(test, "remove the dir it did not make", is_ok(fs.remove_dir_all(dir)))
+    after <- service.scratch_dir_of(state)
+    assert_true(test, "shutdown_state resets the scratch dir after a dir it did not make", after == "")
+
+fn remove_in(dir: String, name: String) -> Unit !{IO} =
+  match fs.remove(dir ++ "/" ++ name) with
+  | Ok _ -> ()
+  | Err _ -> ()
+
+# When linking fails, the runtime objects are compiled again by the next eval.
+fn link_failure_cases(test: TestState, state: service.StartupState) -> Unit !{IO} =
+  do
+    first <- eval_text("", "1 + 1", state)
+    assert_true(test, "an eval works before the objects go", first == "{\"ok\":true,\"value\":[\"2\"]}")
+    dir <- service.scratch_dir_of(state)
+    let objs = dir ++ "/objs"
+    match fs.list_dir(objs) with
+    | Ok names -> list_each(\n -> remove_in(objs, n), names)
+    | Err e -> assert_true(test, "list the objects (" ++ fs.fs_error_message(e) ++ ")", false)
+    broken <- eval_text("", "2 + 2", state)
+    assert_true(test, "an eval with no objects fails to link", string.contains(broken, "\"ok\":false"))
+    healed <- eval_text("", "3 + 3", state)
+    assert_true(test, "the next eval compiles the objects again", healed == "{\"ok\":true,\"value\":[\"6\"]}")
+
 fn main() -> Unit !{IO} =
   do
     test <- new_state()
@@ -63,9 +168,19 @@ fn main() -> Unit !{IO} =
     | Nothing -> assert_true(test, "eval end to end (auto-skipped: no SPROUT_STDLIB_ROOT)", true)
     | Just root ->
         if have_clang then
+          # One state for every case: the runtime is compiled only when a case needs a new scratch dir.
           do
             state <- service.build_startup_state(root)
+            scratch_cases(test, state)
             run_cases(test, state)
+            vanished_scratch_cases(test, state)
+            foreign_scratch_cases(test, state)
+            wrong_owner_cases(test, state)
+            shutdown_foreign_cases(test, state)
+            link_failure_cases(test, state)
+            last_dir <- service.scratch_dir_of(state)
+            service.shutdown_state(state)
+            assert_false(test, "shutdown_state removes the new dir", fs.exists(last_dir))
         else
           do
             terminal.write("[test_eval_question] clang not in PATH — assertions auto-pass\n")

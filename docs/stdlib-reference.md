@@ -279,6 +279,11 @@ deprecated.
 - `read_bytes(p) -> Result FsError Bytes !{IO}` / `write_bytes(p, bytes)` — no
   UTF-8 validation in either direction. The reader for a file that is not text,
   and the only way to put an arbitrary byte sequence into one.
+- `make_temp_dir(prefix) -> Result FsError String !{IO}` — makes a new empty directory under
+  `TMPDIR` (or `/tmp`) named `prefix` plus 12 random bytes in base64url, and returns its path.
+  The mode is at most 0700 (owner only). A name clash retries with a fresh name, up to 8 times.
+  `prefix` must not contain `/` (`FsInvalidPath`). The caller removes the directory with
+  `remove_dir_all`.
 - `make_dir(p)` / `make_dir_all(p)` / `remove(p)` / `remove_dir_all(p)` /
   `rename(from, to)` — all `-> Result FsError Unit !{IO}`. `make_dir_all`
   succeeds when the tree already exists; `remove` on a non-empty directory is
