@@ -2407,12 +2407,6 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   writes that header today); coalesce adjacent FREE slots in the sweep walk, which needs a
   `slotmap_clear` or HDRCHECK's "no start bit inside a step" assert fires; or make regions
   single-class, as five of six comparable heaps do. Unmeasured; needs the entry above's instrument.
-- [ ] `P2` **The freelists are still wiped and rebuilt from *all* regions every sweep** — a
-  prerequisite for the nursery, since a minor collection that marks only young objects but rebuilds
-  the whole heap's freelist is not proportional to the young set. Making them generation-scoped
-  (stop wiping; remove/re-add only the swept regions' entries) is the natural next increment, and
-  the per-region touched-class bookkeeping it needs already exists
-  (`fl_region_commit`/`fl_region_rollback`).
 - [ ] `P1` **The galaxy game spends 7.7 ms of a 17.1 ms frame in GC, and 97% of its live set is
   one map.** Measured 2026-09-27, `docs/gc-generational-v0.md` §13.6: `game/app.sprout` in the
   uncharted-suns repo holds 77,653 live objects, of which `map=75,640`, collecting about every 17

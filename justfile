@@ -4173,7 +4173,8 @@ gc-adapt-check: bootstrap-from-seed
 # with SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1: every allocation collects, so a
 # store without its barrier is caught by the verifier within a few allocations. Each program must
 # print the exact stdout in its sidecar tests/gc_gen/<name>.out, and must have run minor
-# collections. Also run with the mode off, where the output must be the same. The two analysis
+# collections. Also run with SPROUT_FL_VERIFY=1 and with SPROUT_GC_LINEAGE=1 (same flags, same
+# output), and with the mode off, where the output must be the same. The two analysis
 # helpers are static and need a live analysis service to reach from Sprout, so a C case covers
 # them (tests/c_runtime/analysis_strings.c).
 [group('test')]
@@ -4211,6 +4212,20 @@ gc-gen-check: bootstrap-from-seed
     echo "  $name: ok ($minors minor, $majors major collections)"
     (( minors >= min_minors )) \
       || { echo "gc-gen-check: $name ran only $minors minor collections; the barrier was not exercised" >&2; failed=1; }
+    # The young-only sweep keeps the free lists between minors: FL_VERIFY compares them with a
+    # full walk after every collection, and lineage poisons dead OBJs instead of listing them.
+    for mode in SPROUT_FL_VERIFY=1 SPROUT_GC_LINEAGE=1; do
+      env "$mode" SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 \
+        "$TMPD/$name.bin" > "$TMPD/$name.mode.out" 2>"$TMPD/$name.mode.err"
+      rc=$?
+      if [ "$rc" != 0 ] || ! cmp -s "$want_file" "$TMPD/$name.mode.out"; then
+        echo "gc-gen-check: $name failed under MINOR=1 GENCHECK=1 STRESS=1 $mode (rc=$rc)" >&2
+        echo "  expected: $(cat "$want_file")" >&2
+        echo "  actual:   $(cat "$TMPD/$name.mode.out")" >&2
+        grep -A4 'GENCHECK\|FL_VERIFY' "$TMPD/$name.mode.err" | head -8 >&2
+        failed=1
+      fi
+    done
     SPROUT_GC_MINOR=0 "$TMPD/$name.bin" > "$TMPD/$name.off" 2>/dev/null
     cmp -s "$want_file" "$TMPD/$name.off" \
       || { echo "gc-gen-check: $name differs with SPROUT_GC_MINOR=0" >&2

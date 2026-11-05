@@ -63,8 +63,9 @@ ratio as exact.)
 
 **Non-goals**
 
-- **The sweep's own cost.** Filed as `BACKLOG.md` **"The freelists are still wiped and rebuilt from
-  *all* regions every sweep"** and **"The class freelists are exact-fit"**. After any trigger fix
+- **The sweep's own cost.** A young-only minor no longer rebuilds the freelists
+  ([gc-stage2-v0.md](gc-stage2-v0.md) §5.3); a full sweep still does. Filed as `BACKLOG.md`
+  **"The class freelists are exact-fit"**. After any trigger fix
   the heap is large again and the pinned run's 2.2 ms pause is nearly all sweep.
 - **Compacting or evacuating sparse regions**, which is the root-cause fix for §3's mechanism and
   is *structurally blocked*: [compiler-internals.md](compiler-internals.md) makes non-moving
