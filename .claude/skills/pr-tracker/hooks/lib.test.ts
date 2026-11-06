@@ -19,6 +19,7 @@ import {
   parsePrsArgs,
   parseRuns,
   prsFromRuns,
+  prsToFetch,
   resolveExpanded,
   runsForPr,
   scopePrs,
@@ -362,4 +363,25 @@ test('withAll appends the missing numbers in order; without filters them out', (
   expect(withAll([], [5])).toEqual([5])
   expect(without([1, 2, 3, 4], [2, 4, 9])).toEqual([1, 3])
   expect(without([1], [])).toEqual([1])
+})
+
+test('prsToFetch: all takes every PR, live skips merged ones, active takes only open ones with pending or no checks', () => {
+  const pr = (n: number, state: string, pending: number, total: number) => ({
+    ...blank(n),
+    state,
+    ci: { ok: total - pending, fail: 0, pending, total },
+  })
+  const data = {
+    '1': pr(1, 'MERGED', 0, 3),
+    '2': pr(2, 'CLOSED', 0, 3),
+    '3': pr(3, 'OPEN', 1, 3),
+    '4': pr(4, 'OPEN', 0, 3),
+    '5': pr(5, 'OPEN', 0, 0),
+    '6': { ...blank(6), error: 'gh failed' },
+  }
+  const prs = [1, 2, 3, 4, 5, 6, 7]
+  expect(prsToFetch(prs, data, 'all')).toEqual([1, 2, 3, 4, 5, 6, 7])
+  expect(prsToFetch(prs, data, 'live')).toEqual([2, 3, 4, 5, 6, 7])
+  expect(prsToFetch(prs, data, 'active')).toEqual([3, 5])
+  expect(prsToFetch([], data, 'all')).toEqual([])
 })

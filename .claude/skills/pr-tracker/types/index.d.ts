@@ -66,7 +66,7 @@ declare module 'claude-code' {
       runs: PrTrackerRun[]
       /** Issues per run id; `[]` for a clean review. A run with no items file has no key. */
       issues: Record<string, PrTrackerIssue[]>
-      /** Epoch ms of the last PR fetch; 0 before the first. */
+      /** Epoch ms of the last round that covered every non-merged PR; 0 before the first. */
       updatedAt: number
       /** PRs removed by hand; runs that name them do not add them back. */
       dismissed: number[]

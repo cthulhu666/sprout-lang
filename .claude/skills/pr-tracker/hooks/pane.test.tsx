@@ -1,5 +1,6 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
+import type { TestBody } from 'claude-code/testing'
 
 const PANE = {
   plugin: 'pr-tracker',
@@ -81,13 +82,20 @@ const world = () => ({
   gitRejects: 0,
   /** PR state `gh pr view` answers for 771-776; OPEN when absent. */
   states: {} as Record<number, string>,
+  /** statusCheckRollup `gh pr view` answers for 771-776; empty when absent. */
+  rollups: {} as Record<number, unknown[]>,
+  /** While set, `gh` calls wait for it. */
+  gate: null as Promise<void> | null,
 })
 
-const prJson = (n: number, branch: string, state = 'OPEN') =>
+const prJson = (n: number, branch: string, state = 'OPEN', rollup: unknown[] = []) =>
   JSON.stringify({
     number: n, title: 'older', state, headRefName: branch, headRefOid: 'abc',
-    isCrossRepository: false, headRepositoryOwner: { login: 'o' }, statusCheckRollup: [],
+    isCrossRepository: false, headRepositoryOwner: { login: 'o' }, statusCheckRollup: rollup,
   })
+
+const DONE = { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' }
+const RUNNING = { __typename: 'CheckRun', status: 'IN_PROGRESS', conclusion: '' }
 
 // `review_ledger.sh runs` prints the done rows only, padded to 11 columns.
 const doneRows = (text: string) =>
@@ -143,8 +151,9 @@ const wire = (on: On, runs = RUNS, stored: Record<string, unknown> = {}, cwd = '
       ? { deny: 'ENOENT' }
       : { value: { kind: 'file', size: 1, mtimeMs, isLink: false } }
   })
-  on('process.run', (_, e) => {
+  on('process.run', async (_, e) => {
     w.calls.push({ argv: e.argv, timeoutMs: e.init?.timeoutMs })
+    if (e.argv[0] === 'gh' && w.gate !== null) await w.gate
     const [a, b] = e.argv
     const out = (exitCode: number, stdout: string, stderr = '') => ({
       value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false },
@@ -158,7 +167,8 @@ const wire = (on: On, runs = RUNS, stored: Record<string, unknown> = {}, cwd = '
     if (a === 'git' && b === 'rev-parse' && e.argv.includes('--show-toplevel')) return ok('/repo\n')
     if (a === 'gh' && b === 'pr' && e.argv[3] === '782') return ok(PR_782)
     if (a === 'gh' && b === 'pr' && /^77[1-6]$/.test(e.argv[3] ?? '')) {
-      return ok(prJson(Number(e.argv[3]), `old-${e.argv[3]}`, w.states[Number(e.argv[3])]))
+      const n = Number(e.argv[3])
+      return ok(prJson(n, `old-${n}`, w.states[n], w.rollups[n]))
     }
     if (a === 'gh') return out(1, '', 'no pull requests found\n')
     if (a === 'bash' && b === '/repo/scripts/review_ledger.sh') {
@@ -616,5 +626,139 @@ test('a selection that scope hides falls back to the newest open PR', async ($, 
   await settle()
   expect(await ui.find({ type: 'Button', key: 'pr-900' })).toBeUndefined()
   expect((await ui.find({ type: 'Button', key: 'pr-782' }))?.text).toMatch(/^▾/)
+  await ui.unmount()
+})
+
+const ghCount = (w: ReturnType<typeof world>, n: number) =>
+  w.calls.filter(c => c.argv[0] === 'gh' && c.argv[3] === String(n)).length
+
+// One timer round: the 60 s tick, then the fire-and-forget work it starts.
+const tick = async (clock: { advance: (ms: number) => Promise<unknown> }) => {
+  await clock.advance(60_000)
+  await settle()
+}
+
+const start = async ($: Parameters<TestBody>[0], numbers: string) => {
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await $.command.run({ ...CMD, args: `add ${numbers}` })
+  await settle()
+}
+
+test('a merged PR is fetched once, then never again by timer rounds', async ($, on) => {
+  const w = world()
+  w.states[771] = 'MERGED'
+  const clock = wire(on, RUNS, {}, '/work', w)
+  await start($, '771')
+  expect(ghCount(w, 771)).toBe(1)
+  for (let i = 0; i < 10; i++) await tick(clock)
+  expect(ghCount(w, 771)).toBe(1)
+})
+
+test('a quiet open PR is skipped by the 60 s ticks and fetched by the 5-minute round', async ($, on) => {
+  const w = world()
+  w.rollups[772] = [DONE]
+  const clock = wire(on, RUNS, {}, '/work', w)
+  await start($, '772')
+  expect(ghCount(w, 772)).toBe(1)
+  for (let i = 0; i < 4; i++) await tick(clock)
+  expect(ghCount(w, 772)).toBe(1)
+  await tick(clock)
+  expect(ghCount(w, 772)).toBe(2)
+})
+
+test('an open PR with a pending check is fetched on every 60 s tick', async ($, on) => {
+  const w = world()
+  w.rollups[773] = [DONE, RUNNING]
+  const clock = wire(on, RUNS, {}, '/work', w)
+  await start($, '773')
+  expect(ghCount(w, 773)).toBe(1)
+  for (let i = 0; i < 3; i++) await tick(clock)
+  expect(ghCount(w, 773)).toBe(4)
+})
+
+test('the refresh button fetches a merged PR', async ($, on) => {
+  const w = world()
+  w.states[771] = 'MERGED'
+  wire(on, RUNS, {}, '/work', w)
+  await start($, '771')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'refresh' })
+  await settle()
+  expect(ghCount(w, 771)).toBe(2)
+  await ui.unmount()
+})
+
+test('a git push in Bash fetches an open PR and not a merged one', async ($, on) => {
+  const w = world()
+  w.states[771] = 'MERGED'
+  w.rollups[772] = [DONE]
+  const clock = wire(on, RUNS, {}, '/work', w)
+  on('tool.call', () => ({ result: {}, text: '' }))
+  await start($, '771 772')
+  expect([ghCount(w, 771), ghCount(w, 772)]).toEqual([1, 1])
+  await $.tool.call({ tool: 'Bash', command: 'git push' })
+  await clock.advance(1)
+  await settle()
+  expect([ghCount(w, 771), ghCount(w, 772)]).toEqual([1, 2])
+})
+
+test('a PR that turns merged in a round is frozen afterwards and stays on screen', async ($, on) => {
+  const w = world()
+  w.rollups[773] = [RUNNING]
+  const clock = wire(on, RUNS, {}, '/work', w)
+  await start($, '773')
+  w.states[773] = 'MERGED'
+  await tick(clock)
+  expect(ghCount(w, 773)).toBe(2)
+  for (let i = 0; i < 6; i++) await tick(clock)
+  expect(ghCount(w, 773)).toBe(2)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Button', key: 'pr-773' }))?.text).toContain('MERGED')
+  await ui.unmount()
+})
+
+test('a refresh press during an in-flight active round still runs an all round', async ($, on) => {
+  const w = world()
+  w.states[771] = 'MERGED'
+  w.rollups[773] = [RUNNING]
+  const clock = wire(on, RUNS, {}, '/work', w)
+  await start($, '771 773')
+  expect([ghCount(w, 771), ghCount(w, 773)]).toEqual([1, 1])
+
+  let release = () => {}
+  w.gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  await clock.advance(60_000)
+  await settle()
+  expect(ghCount(w, 773)).toBe(2)
+
+  // Narrower rounds queue both before and after the wider one.
+  await tick(clock)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'refresh' })
+  await settle()
+  await tick(clock)
+  w.gate = null
+  release()
+  await settle()
+  expect(ghCount(w, 771)).toBe(2)
+  await ui.unmount()
+})
+
+test('an active round leaves the footer stamp alone', async ($, on) => {
+  const w = world()
+  w.rollups[773] = [RUNNING]
+  const clock = wire(on, RUNS, {}, '/work', w)
+  await start($, '773')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const stamp = async () => (await ui.find({ type: 'Text', text: /^updated / }))?.text
+  const before = await stamp()
+  expect(before).toMatch(/^updated \d\d:\d\d:\d\d$/)
+  // The stamp shows seconds of the real clock, so wait one out.
+  await new Promise<void>(resolve => setTimeout(resolve, 1100))
+  await tick(clock)
+  expect(ghCount(w, 773)).toBe(2)
+  expect(await stamp()).toBe(before)
   await ui.unmount()
 })
