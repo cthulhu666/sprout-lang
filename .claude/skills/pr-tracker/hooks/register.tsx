@@ -18,6 +18,7 @@ import {
   parsePrsArgs,
   parseRuns,
   prsFromRuns,
+  prsToFetch,
   resolveExpanded,
   runsForPr,
   scopePrs,
@@ -28,7 +29,7 @@ import {
   withAll,
   without,
 } from './lib'
-import type { PrsScope, PrsView, Seg } from './lib'
+import type { PrRound, PrsScope, PrsView, Seg } from './lib'
 
 type Dollar = EngineInterface
 
@@ -36,6 +37,9 @@ const PANE = 'prs'
 const VIEW_KEY = 'view'
 const LONG_TIMEOUT_MS = 30_000
 const SHORT_TIMEOUT_MS = 10_000
+// A timer round every POLL_MS; every LIVE_EVERY-th covers all non-merged PRs, the rest only active ones.
+const POLL_MS = 60_000
+const LIVE_EVERY = 5
 const prsA = atom({ plugin: 'pr-tracker', key: 'prs' } as const, [])
 const dataA = atom({ plugin: 'pr-tracker', key: 'data' } as const, {})
 const runsA = atom({ plugin: 'pr-tracker', key: 'runs' } as const, [])
@@ -52,7 +56,8 @@ const scopeA = atom({ plugin: 'pr-tracker', key: 'scope' } as const, 'mine')
 // every hook that may run first calls `ensureTimers`, which starts them again.
 let timers: Timer[] | null = null
 let isRefreshing = false
-let isDirty = false
+let queuedRound: PrRound | null = null
+let tickCount = 0
 let ledgerFor: { cwd: string; ledger: Ledger | null } | null = null
 // Last seen mtimes of a run's issue files, to skip spawning `issues` when nothing changed.
 const seen = new Map<string, string>()
@@ -77,29 +82,52 @@ async function fetchPr(
   }
 }
 
-/** Refetches every tracked PR, in parallel. A call during a fetch queues one more round. */
-async function refreshPrs($: Dollar): Promise<void> {
+/** A wider round covers a narrower one, so a queued request keeps the widest. */
+const ROUND_WIDTH: Record<PrRound, number> = { active: 0, live: 1, all: 2 }
+
+const takeQueued = (): PrRound | null => {
+  const round = queuedRound
+  queuedRound = null
+  return round
+}
+
+/** One round: fetches the PRs `prsToFetch` picks, in parallel; the others keep their data. */
+async function fetchRound($: Dollar, round: PrRound): Promise<void> {
+  const cwd = await $.session.cwd()
+  const prs = await read($, prsA)
+  const due = prsToFetch(prs, await read($, dataA), round)
+  // An `active` round with nothing due changes nothing, not even the data atom.
+  if (due.length === 0 && round === 'active') return
+  const results = await Promise.all(due.map(n => fetchPr($, cwd, n)))
+  await update($, dataA, old => {
+    const next: Record<string, PrTrackerPr> = {}
+    for (const n of prs) {
+      const prev = old[String(n)]
+      if (prev !== undefined) next[String(n)] = prev
+    }
+    for (const r of results) {
+      const prev = old[String(r.n)]
+      next[String(r.n)] = r.pr ?? { ...storedPr(r.n, prev), error: r.error }
+    }
+    return next
+  })
+  // The stamp claims every PR it covers was fetched; an `active` round does not cover them all.
+  if (round !== 'active') await update($, updatedA, () => Date.now())
+}
+
+/** Fetches the PRs of a round. A call during a fetch queues one more round, the widest asked. */
+async function refreshPrs($: Dollar, round: PrRound): Promise<void> {
   if (isRefreshing) {
-    isDirty = true
+    if (queuedRound === null || ROUND_WIDTH[round] > ROUND_WIDTH[queuedRound]) queuedRound = round
     return
   }
   isRefreshing = true
   try {
-    do {
-      isDirty = false
-      const cwd = await $.session.cwd()
-      const prs = await read($, prsA)
-      const results = await Promise.all(prs.map(n => fetchPr($, cwd, n)))
-      await update($, dataA, old => {
-        const next: Record<string, PrTrackerPr> = {}
-        for (const r of results) {
-          const prev = old[String(r.n)]
-          next[String(r.n)] = r.pr ?? { ...storedPr(r.n, prev), error: r.error }
-        }
-        return next
-      })
-      await update($, updatedA, () => Date.now())
-    } while (isDirty)
+    let next: PrRound | null = round
+    while (next !== null) {
+      await fetchRound($, next)
+      next = takeQueued()
+    }
   } finally {
     isRefreshing = false
   }
@@ -178,7 +206,7 @@ async function syncRuns($: Dollar, isForced: boolean): Promise<void> {
 
   const since = await read($, sinceA)
   const fresh = runs.filter(r => Date.parse(r.when) >= since)
-  if (await addPrs($, prsFromRuns(fresh), false)) await refreshPrs($)
+  if (await addPrs($, prsFromRuns(fresh), false)) await refreshPrs($, 'live')
 
   await syncIssues($, ledger, isForced)
 }
@@ -228,7 +256,7 @@ async function syncIssues($: Dollar, { root, dirs }: Ledger, isForced: boolean):
 
 /** PR data first, since runs match PRs by branch; then the ledger and the issues. */
 async function refreshAll($: Dollar, isForced: boolean): Promise<void> {
-  await refreshPrs($)
+  await refreshPrs($, isForced ? 'all' : 'live')
   await syncRuns($, isForced)
 }
 
@@ -254,7 +282,10 @@ function ensureTimers($: Dollar): void {
   if (timers !== null) return
   timers = [
     $.clock.every(5_000, () => quiet(syncRuns($, false))),
-    $.clock.every(60_000, () => quiet(refreshPrs($))),
+    $.clock.every(POLL_MS, () => {
+      tickCount++
+      quiet(refreshPrs($, tickCount % LIVE_EVERY === 0 ? 'live' : 'active'))
+    }),
   ]
   quiet(
     update($, sinceA, t => (t === 0 ? Date.now() : t)).then(() => refreshAll($, false)),

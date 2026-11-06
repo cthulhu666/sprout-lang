@@ -348,6 +348,26 @@ export const mergedIn = (
   data: Readonly<Record<string, PrTrackerPr>>,
 ): number[] => shown.filter(n => data[String(n)]?.state === 'MERGED')
 
+/**
+ * Which PRs a fetch round covers: `all` every one; `live` all but merged; `active` only open PRs
+ * whose checks are pending or not yet posted. A PR with no stored data is in `all` and `live`.
+ */
+export type PrRound = 'all' | 'live' | 'active'
+
+/** The PRs of `prs` the `round` fetches, in list order. */
+export function prsToFetch(
+  prs: readonly number[],
+  data: Readonly<Record<string, PrTrackerPr>>,
+  round: PrRound,
+): number[] {
+  return prs.filter(n => {
+    const pr = data[String(n)]
+    if (round === 'all') return true
+    if (round === 'live') return pr?.state !== 'MERGED'
+    return pr !== undefined && pr.state === 'OPEN' && (pr.ci.pending > 0 || pr.ci.total === 0)
+  })
+}
+
 export type Layout = {
   /** The PRs drawn, in list order. */
   shown: number[]

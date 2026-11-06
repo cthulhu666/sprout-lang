@@ -12,8 +12,9 @@ Companion to `.claude/skills/sprout-review/`.
   session started, unless removed.
 - The default view draws only PRs this session created (`gh pr create`) or added by hand. The
   `all` button draws the full list; `mine` switches back. Each new session starts on `mine`.
-  Scope only filters the drawing: polling and auto-adding go on for every PR. A PR you opened
-  that the scope then hides stops being the chosen one; the newest open PR is expanded instead.
+  Scope only filters the drawing: auto-adding goes on for every PR, and polling for every PR but
+  merged ones (see Data). A PR you opened that the scope then hides stops being the chosen one;
+  the newest open PR is expanded instead.
 - The footer (updated time, `refresh`, view, scope, `clear merged`) wraps onto more lines on a
   narrow pane or band; the list gives up rows for them.
 - `clear merged (k)` appears when `k` drawn PRs are merged; it removes them, and later review
@@ -21,8 +22,12 @@ Companion to `.claude/skills/sprout-review/`.
 
 ## Data
 
-- `gh pr view` every 60 s, and after `git push` or `gh pr` in Bash. An open PR's header shows its
-  mergeability, and its base branch when that is not `master`.
+- `gh pr view`, in three kinds of round. A timer ticks every 60 s and fetches only open PRs whose
+  checks are pending or not yet posted; every 5th tick fetches every PR except merged ones. The
+  same wider round runs at session start, on `/prs add`, after `git push` or `gh pr` in Bash and
+  when a review adds a PR. The footer `refresh` button fetches every PR, merged ones too. A merged
+  PR keeps its last data until `refresh`. An open PR's header shows its mergeability, and its
+  base branch when that is not `master`.
 - The review ledger every 5 s, only through `scripts/review_ledger.sh` (`runs`, `dir`, `issues`),
   run from the repo root.
 
