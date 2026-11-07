@@ -3708,12 +3708,15 @@ static void sprout_gc_check_old_edges(void* payload, uint64_t h) {
  *   - after a colour-keeping sweep, a youngmap bit is set exactly on a live slot whose colour
  *     is clear, and the region's young and old counts equal the walk's;
  *   - after a colour-keeping sweep, every old object that is not remembered points at no young one;
+ *   - after a colour-keeping sweep, the live headers with bit 13 number exactly the remembered
+ *     set's entries (a stray bit 13 hides an object from the barrier and the edge check);
  *   - before a major (a colour-clearing sweep), the remembered set is empty and no live header
  *     carries bit 13;
  *   - g_gc_freelist_len equals the FREE slots a full walk finds on the lists' classes;
  *   - after a young-only sweep, no ordinary region is left with no live and no poisoned slot. */
 static void sprout_gc_check_sweep(int kept_color, int young_only) {
   long long free_slots = 0;
+  long long bit13 = 0;
   if (!kept_color && g_gen.remembered.len != 0)
     sprout_gc_check_count_fail("remembered set not empty before a major", NULL, (long long)g_gen.remembered.len, 0);
   for (size_t ri = 0; ri < g_region_count; ri++) {
@@ -3725,6 +3728,7 @@ static void sprout_gc_check_sweep(int kept_color, int young_only) {
         continue;
       }
       long long young = (h & SPROUT_GC_COLOR_BIT) ? 0 : 1;
+      bit13 += (h & SPROUT_GC_REMEMBERED_BIT) != 0;
       if (r->young_count != young) sprout_gc_check_count_fail("young count of a large region", r, r->young_count, young);
       if (r->old_count != 1 - young) sprout_gc_check_count_fail("old count of a large region", r, r->old_count, 1 - young);
       if (!young && !(h & SPROUT_GC_REMEMBERED_BIT)) sprout_gc_check_old_edges(r->base + 8, h);
@@ -3752,6 +3756,7 @@ static void sprout_gc_check_sweep(int kept_color, int young_only) {
         if (!bit && want) sprout_gc_check_hdr_fail("young bit clear on a young object", r, off, h);
         young += want;
         old += is_live && !want;
+        bit13 += is_live && (h & SPROUT_GC_REMEMBERED_BIT) != 0;
         if (is_live && !want && !(h & SPROUT_GC_REMEMBERED_BIT))
           sprout_gc_check_old_edges(r->base + off + 8, h);
       }
@@ -3764,6 +3769,8 @@ static void sprout_gc_check_sweep(int kept_color, int young_only) {
     if (young_only && live == 0 && poison == 0)
       sprout_gc_check_count_fail("a young-only minor left a region with no live slot", r, 0, 0);
   }
+  if (kept_color && bit13 != (long long)g_gen.remembered.len)
+    sprout_gc_check_count_fail("remembered bits differ from the remembered set", NULL, bit13, (long long)g_gen.remembered.len);
   if (g_gc_freelist_len != free_slots)
     sprout_gc_check_count_fail("free count", NULL, g_gc_freelist_len, free_slots);
 }
