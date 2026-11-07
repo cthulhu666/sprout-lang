@@ -40,6 +40,7 @@ fn main() -> Unit !{IO} =
     assert_false(state, "shadowed Bool type", type_scalar("$entry.Bool"))
     assert_false(state, "shadowed Int type", type_scalar("main.Int"))
     assert_true(state, "Int literal pattern", literal_scalar(ast.IntPattern(3, pos)))
+    assert_true(state, "Char literal pattern", literal_scalar(ast.CharPattern(97, pos)))
     assert_true(state, "Bool literal pattern", literal_scalar(ast.BoolPattern(true, pos)))
     assert_false(state, "String literal pattern", literal_scalar(ast.StringPattern("x", pos)))
     assert_false(state, "variable pattern", literal_scalar(ast.VarPattern("x", pos)))

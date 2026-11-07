@@ -1,0 +1,138 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.typed_ast as typed_ast
+
+# A `Just <literal>` arm keeps a Tier-1 Maybe read unboxed when the payload is a scalar: the match
+# tests the tag, then the payload, so no `Maybe` is built and the byte reads stay inline. With an
+# unknown payload kind the read still goes through the boxed call. A tuple column takes the same
+# arms as a plain match.
+#
+# Like the other IR-shape tests, the harness typechecks without the prelude, so each fixture
+# declares its own `Maybe`.
+
+let maybe_decl = "type Maybe a =\n  | Nothing\n  | Just a\n\n"
+
+fn read_decl(name: String, payload: String) -> String =
+  maybe_decl ++ "extern fn " ++ name ++ "(a: String, i: Int) -> Maybe " ++ payload ++ "\n\n"
+
+fn probe_src(name: String, payload: String, arms: String) -> String =
+  read_decl(name, payload)
+    ++ "fn probe(a: String, i: Int) -> Int =\n"
+    ++ "  match " ++ name ++ "(a, i) with\n"
+    ++ arms
+
+# A program-defined `Maybe` whose `Just` holds an `Int` rather than the type parameter, so the
+# payload kind is unknown.
+fn phantom_src(arms: String) -> String =
+  "type Maybe a =\n  | Nothing\n  | Just Int\n\n"
+    ++ "extern fn bytes_get(a: String, i: Int) -> Maybe Int\n\n"
+    ++ "fn probe(a: String, i: Int) -> Int =\n"
+    ++ "  match bytes_get(a, i) with\n"
+    ++ arms
+
+fn split_src() -> String =
+  read_decl("str_byte_at", "Int")
+    ++ "fn probe(a: String, i: Int) -> Int =\n"
+    ++ "  match (str_byte_at(a, i), str_byte_at(a, 0)) with\n"
+    ++ "  | (Just 45, _) -> 1\n"
+    ++ "  | _ -> 0\n"
+
+fn let_else_src() -> String =
+  read_decl("str_byte_at", "Int")
+    ++ "fn probe(a: String, i: Int) -> Int =\n"
+    ++ "  let Just 45 = str_byte_at(a, i) else 0\n"
+    ++ "  in 1\n"
+
+let lit_then_wild = "  | Just 45 -> 1\n  | _ -> 0\n"
+
+let nothing_first = "  | Nothing -> 0\n  | Just 45 -> 1\n  | _ -> 2\n"
+
+let literals_then_var = "  | Just 45 -> 1\n  | Just 46 -> 2\n  | Just b -> b\n  | Nothing -> 0\n"
+
+let char_arms = "  | Just 'a' -> 1\n  | _ -> 0\n"
+
+# Returns the emitted IR, or a string starting "ERR: ". Not a `Result`, so a fixture that fails to
+# translate fails loudly instead of reading as a clean absence.
+fn translate_or_msg(src: String) -> String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> "ERR: lex"
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> "ERR: parse"
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> "ERR: check: " ++ msg
+            | typed_ast.TypedOk typed_prog env ->
+                match ast_to_ir.translate_program(lowering.lower_program(typed_prog, env)) with
+                | Err msg -> "ERR: ast_to_ir: " ++ msg
+                | Ok pair ->
+                    match pair with
+                    | (ir_prog, idx_map) ->
+                        ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map))
+
+fn translated(out: String) -> Bool =
+  !str_starts_with(out, "ERR: ")
+
+fn has(out: String, needle: String) -> Bool =
+  str_find(out, needle) != -1
+
+# Inline byte read: a byte load, and neither the boxed call nor the C unboxed body.
+fn inline_read(out: String, name: String) -> Bool =
+  translated(out) && has(out, "load i8")
+    && !has(out, "call i64 @" ++ name ++ "(")
+    && !has(out, "call i128 @" ++ name ++ "_unboxed(")
+
+fn check_inline(state: TestState, label: String, name: String, arms: String) -> Unit !{IO} =
+  do
+    out <- translate_or_msg(probe_src(name, "Int", arms))
+    assert_true(state, label ++ " (" ++ name ++ "): inline read, no boxed call", inline_read(out, name))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # (a) A literal arm over each byte read: the inline read, with no `Maybe` built.
+    check_inline(state, "literal then wildcard", "str_byte_at", lit_then_wild)
+    check_inline(state, "literal then wildcard", "bytes_get", lit_then_wild)
+
+    # (b) Arm order: a `Nothing` arm first, several literals before a variable arm.
+    check_inline(state, "Nothing first", "str_byte_at", nothing_first)
+    check_inline(state, "literals then var", "bytes_get", literals_then_var)
+
+    # (c) A Char literal over `str_char_at`: the unboxed call, no boxed one.
+    ch <- translate_or_msg(probe_src("str_char_at", "Char", char_arms))
+    assert_true(state, "Char literal (str_char_at): unboxed call, no boxed call",
+                translated(ch) && has(ch, "call i128 @str_char_at_unboxed(")
+                  && !has(ch, "call i64 @str_char_at("))
+
+    # (d) An unknown payload kind keeps the boxed call, as before.
+    ph <- translate_or_msg(phantom_src(lit_then_wild))
+    assert_true(state, "unknown payload kind: literal arm keeps the boxed call",
+                translated(ph) && has(ph, "call i64 @bytes_get(") && !has(ph, "load i8"))
+
+    # (e) A literal inside a tuple column takes the same path: both elements are read inline.
+    spl <- translate_or_msg(split_src())
+    assert_true(state, "tuple column: literal arm reads inline, no boxed call", inline_read(spl, "str_byte_at"))
+
+    # (f) `let Just 45 = str_byte_at(..) else ..` is a match with a wildcard arm.
+    le <- translate_or_msg(let_else_src())
+    assert_true(state, "let..else with a literal: inline read, no boxed call", inline_read(le, "str_byte_at"))
+
+    # (g) A Bool literal is not a scalar literal here: `Just true` keeps the boxed call.
+    bl <- translate_or_msg(maybe_decl ++ "extern fn vector_get(v: Vector Bool, i: Int) -> Maybe Bool\n\n"
+                           ++ "fn probe(v: Vector Bool, i: Int) -> Int =\n"
+                           ++ "  match vector_get(v, i) with\n"
+                           ++ "  | Just true -> 1\n  | _ -> 0\n")
+    assert_true(state, "Bool literal: boxed call, no unboxed call",
+                translated(bl) && has(bl, "call i64 @vector_get(")
+                  && !has(bl, "call i128 @vector_get_unboxed("))
+
+    summary(state)

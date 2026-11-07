@@ -157,8 +157,8 @@ from classifying which SSA values are heap:
 use-after-free. `IRTScalar` therefore carries a `type_kind.ScalarWhy`, exported without `(..)`: its
 constructors are private to `stdlib/compiler/type_kind.sprout`, which is the only place that can
 build one. A type-derived tag comes from `scalar_of_type` / `scalar_of_type_expr`; a field-code tag
-from `scalar_of_field_code`; a literal-tested tuple element from `scalar_of_literal_pattern`. The
-other structural cases (`tuple_slot`, `ctor_tag`) are exported constants, so their
+from `scalar_of_field_code`; an element tested against an Int, Char or Bool literal from
+`scalar_of_literal_pattern`. The other structural cases (`tuple_slot`, `ctor_tag`) are exported constants, so their
 premise is checked by the caller, not by `type_kind`. To add a reason, add a constructor and its constant or function in
 `type_kind` and state the invariant that makes the value non-heap in the comment above it. Tests
 that hand-build IR use `testsupport.ir_fixtures.scalar`, which mints through `scalar_of_type_expr`;
@@ -340,6 +340,13 @@ tuple CPR) return `i128` too, since `IRCallUnboxed2` calls both kinds.
 `IRTUnknown`, `Result` included: a `do` bind's short path rebuilds `Err(val)` with an allocation,
 and an `Err String` payload must stay rooted across it. `@f_argw`'s `$val` parameter takes the
 same kind from the scrutinee's type.
+
+**Arm shapes.** A `match` over a Tier-1 extern takes the unboxed path when every arm is `Nothing`,
+`Just <var>`, `Just _` or `_` (`is_simple_maybe_arm`); a `Just <Int or Char literal>` arm
+(`just_literal`) is also accepted when the payload kind is scalar, and lowers to a tag test block
+followed by a payload test block; a tuple column takes the same arms (`bind_unboxed_field`).
+Tier-2 workers and `@f_argw` do not take a literal arm
+([inline-byte-reads-v0.md §4.3](inline-byte-reads-v0.md#43-the-payload-kind)).
 
 **`bytes_get` and `str_byte_at` lower inline, not to a call.** Under a scalar payload kind,
 `emit_unboxed_producer` builds the C body's checks as blocks (`ast_to_ir.emit_inline_byte_read`),

@@ -58,7 +58,8 @@ Non-goals, each a follow-up:
 - its body is `match p_k with <arms>`, with nothing around the `match`;
 - every arm passes `is_simple_width2_arm`, the rule result workers use, and at least one arm is a
   constructor, so `p_k` is a width-2 ADT (`Maybe`, `Result`, or a user type whose constructors
-  carry at most one field);
+  carry at most one field); a `Just <literal>` arm fails the rule, unlike in a Tier-1 extern
+  `match` ([inline-byte-reads-v0.md §4.3](inline-byte-reads-v0.md#43-the-payload-kind));
 - `p_k` occurs in no arm body, so it is used only as the scrutinee and never escapes.
 
 **The worker.** `@f_argw` takes `f`'s parameters with `p_k` replaced by two: `(p_k$tag,
