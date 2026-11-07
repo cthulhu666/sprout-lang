@@ -203,6 +203,19 @@ fn main() -> Unit !{IO} =
     # Empty constraints must still round-trip (the monomorphic/unconstrained default).
     assert_eq(state, "empty constraints roundtrip", roundtrip(mono_const("Int")), Just(mono_const("Int")))
 
+    # --- Non-ASCII atoms ---
+    # An atom is any run of bytes that is not whitespace or a paren, so a multi-byte
+    # name survives the byte scan whole.
+    assert_eq(state, "non-ASCII tconst roundtrip", roundtrip(mono_const("Żółw─T")), Just(mono_const("Żółw─T")))
+    assert_eq(state, "non-ASCII tvar roundtrip",
+              roundtrip(scheme_just_tvar("é")), Just(scheme_just_tvar("é")))
+    assert_eq(state, "non-ASCII atom with surrounding whitespace decodes",
+              iface_codec.decode_scheme(" \n(Scheme () () (TConst  é─ ) (EffectPure) ()) \t"),
+              Just(mono_const("é─")))
+    assert_eq(state, "non-ASCII trailing garbage rejected",
+              iface_codec.decode_scheme("(Scheme () () (TConst Int) (EffectPure) ()) é"),
+              Nothing)
+
     # --- Malformed input rejection ---
     assert_eq(state, "decode empty rejected", iface_codec.decode_scheme(""), Nothing)
     assert_eq(state, "decode garbage rejected", iface_codec.decode_scheme("not a scheme"), Nothing)

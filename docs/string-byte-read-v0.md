@@ -10,7 +10,7 @@
 Sprout code cannot read one byte of a `String`. It has three workarounds, and each costs:
 
 - **Copy into `Bytes`, then scan.** `bytes_from_utf8(s)` allocates and copies all of `s`; the scan
-  then reads through `bytes_get`. `compiler/source.sprout` does it five times, once to decode only
+  then reads through `bytes_get`. `compiler/source.sprout` did it five times, once to decode only
   the first codepoint (`decode_codepoint_at(bytes_from_utf8(s), 0)`).
 - **Probe with a one-byte prefix compare.** `str_starts_with_at_byte(s, i, "7")` asks "is byte `i`
   a `7`" through a string compare. 85 such probes: 66 in `json.sprout`, 11 in the prelude, 4 each
@@ -164,7 +164,8 @@ are within reach.
 Callers that probed or copied: `json`, `uuid`, the prelude's `parse_int`/`parse_double`,
 `compiler/source.sprout`. The first three now read with `str_byte_at`
 ([results-2026-11-07-byte-probes.md](../bench/results-2026-11-07-byte-probes.md)).
-`compiler/source.sprout` still copies (`BACKLOG.md`); it runs under separate units.
+`compiler/source.sprout`, `bundler` and `iface_codec` read the String directly too; no copy
+remains.
 
 For `str_len`, `str_char_at`, `str_slice`, `str_find`, `split_words` and `str_split_lines` it
 removes the copy, not the rule: a Sprout loop must still match a C loop. The byte buffer's
