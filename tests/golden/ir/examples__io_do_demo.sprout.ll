@@ -146,6 +146,12 @@ declare i64 @env_get_bytes(i64)
 @.cfkinds.15 = private unnamed_addr constant [2 x i8] c"_\00"
 @.cname.16 = private unnamed_addr constant [29 x i8] c"stdlib.bytes.Utf8DecodeError\00"
 @.cfkinds.16 = private unnamed_addr constant [2 x i8] c"s\00"
+@.cname.17 = private unnamed_addr constant [26 x i8] c"stdlib.unicode.utf8.Valid\00"
+@.cfkinds.17 = private unnamed_addr constant [3 x i8] c"ii\00"
+@.cname.18 = private unnamed_addr constant [28 x i8] c"stdlib.unicode.utf8.Invalid\00"
+@.cfkinds.18 = private unnamed_addr constant [2 x i8] c"i\00"
+@.cname.19 = private unnamed_addr constant [28 x i8] c"stdlib.unicode.utf8.Partial\00"
+@.cfkinds.19 = private unnamed_addr constant [1 x i8] c"\00"
 @"sprout_tag$Nothing" = constant i64 0
 @"sprout_tag$Just" = constant i64 1
 @"sprout_tag$TemplateLit" = constant i64 2
@@ -163,6 +169,9 @@ declare i64 @env_get_bytes(i64)
 @"sprout_tag$Continue" = constant i64 14
 @"sprout_tag$Break" = constant i64 15
 @"sprout_tag$stdlib$bytes$Utf8DecodeError" = constant i64 16
+@"sprout_tag$stdlib$unicode$utf8$Valid" = constant i64 17
+@"sprout_tag$stdlib$unicode$utf8$Invalid" = constant i64 18
+@"sprout_tag$stdlib$unicode$utf8$Partial" = constant i64 19
 @list_builder_empty = global i64 zeroinitializer
 @pow10_clamp = private constant i64 400
 @max_int = private constant i64 9223372036854775807
@@ -1291,6 +1300,15 @@ entry:
   %cname_ptr_16 = getelementptr inbounds [29 x i8], ptr @.cname.16, i64 0, i64 0
   %cfkinds_ptr_16 = getelementptr inbounds [2 x i8], ptr @.cfkinds.16, i64 0, i64 0
   %creg_16 = call i64 @sprout_register_ctor(i64 16, ptr %cname_ptr_16, i64 1, ptr %cfkinds_ptr_16)
+  %cname_ptr_17 = getelementptr inbounds [26 x i8], ptr @.cname.17, i64 0, i64 0
+  %cfkinds_ptr_17 = getelementptr inbounds [3 x i8], ptr @.cfkinds.17, i64 0, i64 0
+  %creg_17 = call i64 @sprout_register_ctor(i64 17, ptr %cname_ptr_17, i64 2, ptr %cfkinds_ptr_17)
+  %cname_ptr_18 = getelementptr inbounds [28 x i8], ptr @.cname.18, i64 0, i64 0
+  %cfkinds_ptr_18 = getelementptr inbounds [2 x i8], ptr @.cfkinds.18, i64 0, i64 0
+  %creg_18 = call i64 @sprout_register_ctor(i64 18, ptr %cname_ptr_18, i64 1, ptr %cfkinds_ptr_18)
+  %cname_ptr_19 = getelementptr inbounds [28 x i8], ptr @.cname.19, i64 0, i64 0
+  %cfkinds_ptr_19 = getelementptr inbounds [1 x i8], ptr @.cfkinds.19, i64 0, i64 0
+  %creg_19 = call i64 @sprout_register_ctor(i64 19, ptr %cname_ptr_19, i64 0, ptr %cfkinds_ptr_19)
   call void @__sprout_init_globals()
   call i64 @__sprout_user_main()
   ret i32 0

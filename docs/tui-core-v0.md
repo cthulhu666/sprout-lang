@@ -89,6 +89,12 @@ incomplete CSI, a truncated UTF-8 sequence — is not decoded. It is returned as
 the caller prepends the next read to it. The function is total, deterministic and has no notion of
 time, which is what makes it unit-testable against byte fixtures.
 
+Terminal bytes are not a `String`, so malformed UTF-8 is possible. `utf8.decode_at` validates
+(Unicode Table 3-7) and each invalid sequence becomes one `KChar` of U+FFFD, replaced by maximal
+subpart (Unicode §3.9, as WHATWG): `C3 41` is U+FFFD then `A`, an overlong `F0 80 80 80` is four
+U+FFFD. An invalid prefix is replaced at once and never held; only a valid prefix is returned as the
+remainder.
+
 Resolution happens one level up, in M3's pump: when `term_read_avail(max, ms)` returns `TermIdle`
 with a pending remainder of exactly `ESC`, that ESC was the Escape key. This is why M0's timeout
 parameter is load-bearing rather than decorative, and it confines the timing hack to a single
@@ -233,13 +239,13 @@ No builtin is added, so `runtime/APPROVED_BUILTINS` is unchanged.
 ## 8. Tests
 
 No terminal and no fixture process. `geometry`, `style`, `event` and `keys` are pure, so those are
-`run_suite`/`check_eq`; `screen` mutates a `MutMatrix` and so uses the `TestState` form. **162
+`run_suite`/`check_eq`; `screen` mutates a `MutMatrix` and so uses the `TestState` form. **183
 assertions, all passing.**
 
 - `test_tui_geometry.spr` — 37: intersect/clamp/split, empty and degenerate regions.
 - `test_tui_style.spr` — 19: `style_to_ansi` byte-exactness for each `Color` arm and attribute combination.
-- `test_tui_keys.spr` — 80, the bulk. Byte fixtures per sequence family: plain ASCII, ctrl chords,
-  UTF-8 assembly, `ESC [ A`–`D`, modified arrows (`ESC [ 1;5C`), `ESC O P` (F1, SS3 form), `ESC [ 15~`
+- `test_tui_keys.spr` — 101, the bulk. Byte fixtures per sequence family: plain ASCII, ctrl chords,
+  UTF-8 assembly and malformed-UTF-8 replacement, `ESC [ A`–`D`, modified arrows (`ESC [ 1;5C`), `ESC O P` (F1, SS3 form), `ESC [ 15~`
   (F5, CSI-tilde form), SGR mouse (`ESC [ < 0;12;5M`), bracketed paste, and — the point of §3.2 —
   every proper prefix of each of those returning `([], <the whole input>)`.
 - `test_tui_screen.spr` — 26: a diff over a known mutation emits exactly the changed run; an

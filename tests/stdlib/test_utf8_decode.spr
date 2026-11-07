@@ -1,0 +1,76 @@
+import stdlib.test (TestCase, check_eq, run_suite)
+import stdlib.bytes as bytes
+import stdlib.unicode.utf8 as utf8
+import testsupport.byte_fixture (bs)
+
+# `utf8.decode_at`: validating decode for bytes that did not come from a
+# String. Well-formedness is Unicode Table 3-7; `Invalid k` is the maximal
+# subpart (Unicode §3.9): the bytes before the first one that breaks the
+# pattern, at least one.
+
+fn dec(vals: List Int) -> utf8.Decoded =
+  let b = bs(vals)
+  in
+  utf8.decode_at(b, 0, bytes.length(b))
+
+fn main() -> Unit !{IO} =
+  run_suite("unicode.utf8.decode_at", [
+    # --- well-formed ---
+    check_eq("ASCII", dec([65]), utf8.Valid(65, 1)),
+    check_eq("NUL is valid", dec([0]), utf8.Valid(0, 1)),
+    check_eq("two bytes, U+0080 (C2 80)", dec([194, 128]), utf8.Valid(128, 2)),
+    check_eq("two bytes, e-acute", dec([195, 169]), utf8.Valid(233, 2)),
+    check_eq("two bytes, U+07FF (DF BF)", dec([223, 191]), utf8.Valid(2047, 2)),
+    check_eq("three bytes, U+0800 (E0 A0 80)", dec([224, 160, 128]), utf8.Valid(2048, 3)),
+    check_eq("three bytes, U+D7FF (ED 9F BF)", dec([237, 159, 191]), utf8.Valid(55295, 3)),
+    check_eq("three bytes, U+E000 (EE 80 80)", dec([238, 128, 128]), utf8.Valid(57344, 3)),
+    check_eq("three bytes, U+FFFF (EF BF BF)", dec([239, 191, 191]), utf8.Valid(65535, 3)),
+    check_eq("four bytes, U+10000 (F0 90 80 80)", dec([240, 144, 128, 128]),
+             utf8.Valid(65536, 4)),
+    check_eq("four bytes, U+10FFFF (F4 8F BF BF)", dec([244, 143, 191, 191]),
+             utf8.Valid(1114111, 4)),
+    check_eq("only the first sequence is decoded", dec([195, 169, 65]), utf8.Valid(233, 2)),
+
+    # --- invalid lead bytes: one byte, at once ---
+    check_eq("stray continuation 80", dec([128]), utf8.Invalid(1)),
+    check_eq("stray continuation BF", dec([191]), utf8.Invalid(1)),
+    check_eq("overlong lead C0", dec([192]), utf8.Invalid(1)),
+    check_eq("overlong lead C1", dec([193]), utf8.Invalid(1)),
+    check_eq("F5 is out of range", dec([245]), utf8.Invalid(1)),
+    check_eq("F8 is out of range", dec([248, 128, 128, 128]), utf8.Invalid(1)),
+    check_eq("FF is out of range", dec([255]), utf8.Invalid(1)),
+
+    # --- the second byte decides: E0, ED, F0, F4 have narrowed ranges ---
+    check_eq("E0 80 is overlong", dec([224, 128, 128]), utf8.Invalid(1)),
+    check_eq("E0 9F is overlong", dec([224, 159, 191]), utf8.Invalid(1)),
+    check_eq("ED A0 is a surrogate", dec([237, 160, 128]), utf8.Invalid(1)),
+    check_eq("F0 8F is overlong", dec([240, 143, 191, 191]), utf8.Invalid(1)),
+    check_eq("F4 90 is above U+10FFFF", dec([244, 144, 128, 128]), utf8.Invalid(1)),
+    check_eq("C3 41: bad continuation", dec([195, 65]), utf8.Invalid(1)),
+    check_eq("E2 41: bad second byte", dec([226, 65]), utf8.Invalid(1)),
+
+    # --- maximal subpart: bytes before the first bad one ---
+    check_eq("E2 82 41 consumes two", dec([226, 130, 65]), utf8.Invalid(2)),
+    check_eq("F0 90 80 41 consumes three", dec([240, 144, 128, 65]), utf8.Invalid(3)),
+    check_eq("F1 80 41 consumes two", dec([241, 128, 65]), utf8.Invalid(2)),
+
+    # --- a valid prefix at the end of the buffer needs more bytes ---
+    check_eq("empty buffer", dec([]), utf8.Partial),
+    check_eq("C3 alone", dec([195]), utf8.Partial),
+    check_eq("E2 alone", dec([226]), utf8.Partial),
+    check_eq("E2 82", dec([226, 130]), utf8.Partial),
+    check_eq("F0 alone", dec([240]), utf8.Partial),
+    check_eq("F0 90", dec([240, 144]), utf8.Partial),
+    check_eq("F4 8F BF", dec([244, 143, 191]), utf8.Partial),
+    # An invalid prefix never waits.
+    check_eq("ED A0 is invalid, not partial", dec([237, 160]), utf8.Invalid(1)),
+    check_eq("E0 80 is invalid, not partial", dec([224, 128]), utf8.Invalid(1)),
+    check_eq("F8 is invalid, not partial", dec([248]), utf8.Invalid(1)),
+
+    # --- offsets and the explicit length ---
+    check_eq("decodes at an offset",
+             utf8.decode_at(bs([65, 195, 169]), 1, 3), utf8.Valid(233, 2)),
+    check_eq("the length argument bounds the read",
+             utf8.decode_at(bs([195, 169]), 0, 1), utf8.Partial),
+    check_eq("an offset at the end is Partial", utf8.decode_at(bs([65]), 1, 1), utf8.Partial)
+  ])

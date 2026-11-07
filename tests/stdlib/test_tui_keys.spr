@@ -1,8 +1,11 @@
 import stdlib.test (TestCase, check_eq, run_suite)
 import stdlib.bytes as bytes
+import stdlib.string as string
 import stdlib.tui.event as ev
 import stdlib.tui.geometry as g
 import stdlib.tui.keys as keys
+import stdlib.unicode.utf8 as utf8
+import testsupport.byte_fixture (bs)
 
 # The escape-sequence decoder: `Bytes -> (List Event, Bytes)`, total and with
 # no notion of time. Design: docs/tui-core-v0.md §3.2.
@@ -12,9 +15,6 @@ import stdlib.tui.keys as keys
 # it returns "escape" and leaks `;5C` back as three fake keypresses. Nothing
 # could test that, because a C function reading fd 0 is not reachable from a
 # golden-stdout fixture. As a pure function it is just a byte fixture.
-
-fn bs(vals: List Int) -> Bytes =
-  fold(\ (acc, v) -> bytes.append(acc, bytes.singleton(v)), bytes.empty(), vals)
 
 # ESC followed by ASCII, which is every sequence in this file.
 fn e(rest: String) -> Bytes = bytes.append(bytes.singleton(27), bytes.from_string(rest))
@@ -33,6 +33,24 @@ fn byte_list(b: Bytes, i: Int, n: Int, acc: List Int) -> List Int =
     match bytes.get(b, i) with
     | Just v -> byte_list(b, i + 1, n, Cons(v, acc))
     | Nothing -> list_reverse(acc)
+
+fn kc(c: Char) -> ev.Event = ev.KeyPress(ev.KChar(c), ev.mods_none)
+
+fn repl(n: Int) -> List ev.Event =
+  if n <= 0 then Nil else Cons(kc(utf8.replacement_char()), repl(n - 1))
+
+fn repl_text(n: Int) -> String =
+  string.repeat(string.string_from_char(utf8.replacement_char()), n)
+
+# What the widgets do with a decoded key: render the Char as a String. A Char
+# `string_from_char` rejects traps here.
+fn plain_text(evs: List ev.Event) -> String =
+  string_concat_many(list_map(\e -> text_of(e), evs))
+
+fn text_of(e: ev.Event) -> String =
+  match e with
+  | ev.KeyPress (ev.KChar c) _ -> string.string_from_char(c)
+  | _ -> ""
 
 fn key(k: ev.Key) -> List ev.Event = [ev.KeyPress(k, ev.mods_none)]
 
@@ -81,6 +99,41 @@ fn main() -> Unit !{IO} =
     check_eq("a letter after a multi-byte character", events(bytes.from_string("éa")),
              [ev.KeyPress(ev.KChar('é'), ev.mods_none),
               ev.KeyPress(ev.KChar('a'), ev.mods_none)]),
+
+    # --- malformed UTF-8: each invalid sequence is one U+FFFD (maximal subpart) ---
+    check_eq("a stray continuation byte is one U+FFFD then the next key",
+             events(bs([128, 65])), [kc(utf8.replacement_char()), kc('A')]),
+    check_eq("a surrogate (ED A0 80) is three U+FFFD",
+             events(bs([237, 160, 128])), repl(3)),
+    check_eq("a bad lead byte (F8) with continuations is four U+FFFD",
+             events(bs([248, 128, 128, 128])), repl(4)),
+    check_eq("an overlong NUL (C0 80) is two U+FFFD", events(bs([192, 128])), repl(2)),
+    check_eq("an overlong NUL (F0 80 80 80) is four U+FFFD",
+             events(bs([240, 128, 128, 128])), repl(4)),
+    check_eq("a bad continuation (C3 41) does not swallow the next byte",
+             events(bs([195, 65])), [kc(utf8.replacement_char()), kc('A')]),
+    check_eq("an overlong A (C1 81) is two U+FFFD", events(bs([193, 129])), repl(2)),
+    check_eq("a bad third byte (E2 82 41) is one U+FFFD then A",
+             events(bs([226, 130, 65])), [kc(utf8.replacement_char()), kc('A')]),
+    check_eq("an out-of-range lead (F5) alone is one U+FFFD", events(bs([245])), repl(1)),
+    check_eq("an invalid lead alone is replaced at once", events(bs([248])), repl(1)),
+    check_eq("an invalid lead alone leaves no remainder", leftover(bs([248])), none),
+    check_eq("an invalid second byte is replaced without waiting (E0 80)",
+             events(bs([224, 128])), repl(2)),
+    check_eq("a truncated valid prefix (E2 82) is held", events(bs([226, 130])), no_events),
+    check_eq("a truncated valid prefix (E2 82) is returned whole",
+             leftover(bs([226, 130])), [226, 130]),
+    check_eq("a truncated F0 90 is held", leftover(bs([240, 144])), [240, 144]),
+    check_eq("U+D7FF (ED 9F BF) is valid", events(bs([237, 159, 191])),
+             [kc(char_from_codepoint(55295))]),
+    check_eq("U+10FFFF (F4 8F BF BF) is valid", events(bs([244, 143, 191, 191])),
+             [kc(char_from_codepoint(1114111))]),
+    check_eq("F4 90 80 80 is out of range: four U+FFFD",
+             events(bs([244, 144, 128, 128])), repl(4)),
+    check_eq("e-acute still decodes", events(bs([195, 169])), key(ev.KChar('é'))),
+    check_eq("decoded replacement Chars render as Strings",
+             plain_text(events(bs([128, 65, 237, 160, 128, 240, 128, 128, 128, 195, 65]))),
+             string_concat_many([repl_text(1), "A", repl_text(3), repl_text(4), repl_text(1), "A"])),
 
     # --- CSI arrows: the four the C decoder gets right ---
     check_eq("up", events(e("[A")), key(ev.KUp)),
