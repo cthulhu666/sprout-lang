@@ -4,6 +4,7 @@ import stdlib.string as string
 export type JsonError (..) =
   | JsonDecode String
   | JsonNonFinite Double
+  | JsonDuplicateKey String
 
 export type Json (..) =
   | JsonNull
@@ -112,9 +113,7 @@ fn p_number(s: String, i: Int) -> Maybe (Json, Int) =
       tok = str_slice_bytes(s, i, j - i)
   in if str_len(tok) <= 0 then Nothing
      else if (str_find(tok, ".") >= 0) || (str_find(tok, "e") >= 0) || (str_find(tok, "E") >= 0)
-          then match parse_double(tok) with
-               | Nothing -> Nothing
-               | Just x -> if is_finite(x) then Just((JsonFloat(x), j)) else Nothing
+          then p_float(tok, j)
           else match parse_int(tok) with
                | Just n -> Just((JsonInt(n), j))
                # RFC 8259 bounds no digit run, so a token wider than Int is
@@ -123,21 +122,22 @@ fn p_number(s: String, i: Int) -> Maybe (Json, Int) =
                # is, and the same choice JavaScript's JSON.parse makes. A
                # structurally bad token still fails here, since parse_double
                # rejects everything parse_int does bar the width.
-               # Both arms take a finite result only: past ~309 digits, or with
-               # an exponent such as 1e999, there is no Double for the value, and
-               # a JsonFloat(inf) would parse and then be refused by the
-               # writer's non-finite check — a document that reads has to be
-               # writable. Underflow (1e-999) is finite and reads as 0.0. Before
-               # the fallback existed this was a parse error, and for that width
-               # it stays one.
                # Written out rather than via `and_then`: that carries a
                # `Monad m` constraint, and Monad's superclass chain drags an
                # Applicative and a Functor dictionary into every consumer of
                # this module for a two-arm decision.
-               | Nothing ->
-                   match parse_double(tok) with
-                   | Nothing -> Nothing
-                   | Just x -> if is_finite(x) then Just((JsonFloat(x), j)) else Nothing
+               | Nothing -> p_float(tok, j)
+
+# A JsonFloat only when parse_double yields a finite Double, on both the '.'/'e' arm and the
+# integer fallback. A number it reads as non-finite fails the document: that is a literal past
+# ~309 digits or with an exponent such as 1e999, and also one within a few ULP of DBL_MAX, which
+# parse_double misreads as +inf (BACKLOG, `parse_double` 5-ULP entry). A JsonFloat(inf) would
+# parse and then be refused by the writer's non-finite check — a document that reads has to be
+# writable. Underflow (1e-999) is finite and reads as 0.0.
+fn p_float(tok: String, j: Int) -> Maybe (Json, Int) =
+  match parse_double(tok) with
+  | Nothing -> Nothing
+  | Just x -> if is_finite(x) then Just((JsonFloat(x), j)) else Nothing
 
 # --- string (with escapes, incl. \uXXXX and surrogate pairs) --------------------------------
 # The value of the hex digit at byte `i`, or -1 if that byte is not a hex digit. A non-ASCII byte
@@ -257,28 +257,35 @@ fn p_array(s: String, len: Int, depth: Int, i: Int) -> Maybe (Json, Int) =
 
 # --- object ---------------------------------------------------------------------------------
 # `seen` holds the DECODED keys of this object, so a repeated key fails the document and
-# `{"a":1,"a":2}` counts as a repeat. RFC 8259 §4 says names SHOULD be unique and that a
-# reader's behaviour on a repeat is unpredictable; RFC 7493 §2.3 makes it MUST NOT. Rejecting is
-# the one rule on which every other reader agrees about any document it accepts. A Set keeps the
-# check O(log n) per key. The set is per object: sibling and nested objects start empty.
+# `{"a":1,"a":2}` is caught however the second "a" is spelled (`"\u0061"` too). RFC 8259 §4 says
+# names SHOULD be unique and that a reader's behaviour on a repeat is unpredictable; RFC 7493
+# §2.3 makes it MUST NOT. Rejecting is the one rule on which every other reader agrees about any
+# document it accepts. The set is per object: sibling and nested objects start empty.
 fn p_object_members(s: String, len: Int, depth: Int, i: Int, acc: List (String, Json), seen: Set) -> Maybe (Json, Int) =
   if str_starts_with_at_byte(s, i, "\"") then
     match p_string(s, len, i) with
     | Nothing -> Nothing
     | Just (key, j) ->
         let k = skip_ws(s, j)
-        in if set_member(key, seen) then Nothing
-           else if str_starts_with_at_byte(s, k, ":") then
+            Just seen2 = note_key(key, seen) else Nothing
+        in if str_starts_with_at_byte(s, k, ":") then
              match p_value(s, len, depth, k + 1) with
              | Nothing -> Nothing
              | Just (v, m) ->
                  let n = skip_ws(s, m)
                  in if str_starts_with_at_byte(s, n, "}")
                     then Just((JsonObject(json_object_from_reversed(Cons((key, v), acc), JsonObjectNil)), n + 1))
-                    else if str_starts_with_at_byte(s, n, ",") then p_object_members(s, len, depth, skip_ws(s, n + 1), Cons((key, v), acc), set_insert(key, seen))
+                    else if str_starts_with_at_byte(s, n, ",") then p_object_members(s, len, depth, skip_ws(s, n + 1), Cons((key, v), acc), seen2)
                     else Nothing
            else Nothing
   else Nothing
+
+# `seen` with `key` added, or Nothing when `key` was already in it. One tree walk: the insert is
+# the lookup, and a repeat leaves the size unchanged (`set_size` is O(1)). Shared by the parser
+# and the writer so the two agree on what a repeat is.
+fn note_key(key: String, seen: Set) -> Maybe Set =
+  let seen2 = set_insert(key, seen)
+  in if set_size(seen2) == set_size(seen) then Nothing else Just(seen2)
 
 fn p_object(s: String, len: Int, depth: Int, i: Int) -> Maybe (Json, Int) =
   let j = skip_ws(s, i + 1)
@@ -335,32 +342,36 @@ fn is_finite(x: Double) -> Bool =
   let inf = 1.0 / 0.0
   in (x == x) && (x < inf) && (x > 0.0 - inf)
 
-# The first non-finite Double in document order, or Nothing when every number is writable.
-# O(size of tree).
-fn first_non_finite(value: Json) -> Maybe Double =
+# The first problem that stops `value` being written, in document order, or Nothing when it is
+# writable: a non-finite Double (JsonNonFinite), or a key already seen in the SAME object
+# (JsonDuplicateKey; the key is checked before its value). O(size of tree) plus an O(log n) set
+# step per key.
+fn first_unwritable(value: Json) -> Maybe JsonError =
   match value with
-  | JsonFloat x -> if is_finite(x) then Nothing else Just(x)
-  | JsonArray arr -> first_non_finite_array(arr)
-  | JsonObject obj -> first_non_finite_object(obj)
+  | JsonFloat x -> if is_finite(x) then Nothing else Just(JsonNonFinite(x))
+  | JsonArray arr -> first_unwritable_array(arr)
+  | JsonObject obj -> first_unwritable_object(obj, set_empty())
   | _ -> Nothing
 
-fn first_non_finite_array(arr: JsonArray) -> Maybe Double =
+fn first_unwritable_array(arr: JsonArray) -> Maybe JsonError =
   match arr with
   | JsonArrayNil -> Nothing
   | JsonArrayCons head tail ->
-      match first_non_finite(head) with
-      | Just x -> Just(x)
-      | Nothing -> first_non_finite_array(tail)
+      match first_unwritable(head) with
+      | Just err -> Just(err)
+      | Nothing -> first_unwritable_array(tail)
 
-fn first_non_finite_object(obj: JsonObject) -> Maybe Double =
+fn first_unwritable_object(obj: JsonObject, seen: Set) -> Maybe JsonError =
   match obj with
   | JsonObjectNil -> Nothing
-  | JsonObjectCons _ v rest ->
-      match first_non_finite(v) with
-      | Just x -> Just(x)
-      | Nothing -> first_non_finite_object(rest)
+  | JsonObjectCons key v rest ->
+      let Just seen2 = note_key(key, seen) else Just(JsonDuplicateKey(key))
+      in match first_unwritable(v) with
+         | Just err -> Just(err)
+         | Nothing -> first_unwritable_object(rest, seen2)
 
-# O(size of JSON tree), in two passes: one to reject non-finite Doubles, one to build the string.
+# O(size of JSON tree), in two passes: one to reject what cannot be written, one to build the
+# string.
 #
 # Refusing rather than coercing is the deliberate choice. JSON cannot express NaN or the
 # infinities, so a writer has to invent something, and every silent option changes the value's
@@ -369,21 +380,25 @@ fn first_non_finite_object(obj: JsonObject) -> Maybe Double =
 # prevent, so it would be odd to reintroduce it here. Go, .NET, Swift and Ruby's `JSON.generate`
 # all refuse instead; Sprout can say so in the return type.
 #
+# A repeated key in one object is refused for the same reason `parse` refuses it: a document the
+# writer emits has to read back, and a repeat is not one `parse` accepts.
+#
 # `json_stringify` is reached only through here, so the writer may assume every Double it sees
-# is finite.
+# is finite and every object's keys are distinct.
 export fn stringify(value: Json) -> Result JsonError String =
-  match first_non_finite(value) with
-  | Just x -> Err(JsonNonFinite(x))
+  match first_unwritable(value) with
+  | Just err -> Err(err)
   | Nothing -> Ok(json_stringify(value))
 
 # A readable rendering of any JsonError, so a caller can report one without matching variant by
 # variant. Which variants exist is this module's business: `parse` only ever produces JsonDecode
-# and `stringify` only ever produces JsonNonFinite, but neither promises that, and a caller that
-# enumerates them has to be revisited every time the set grows.
+# and `stringify` only ever produces JsonNonFinite or JsonDuplicateKey, but neither promises
+# that, and a caller that enumerates them has to be revisited every time the set grows.
 export fn json_error_message(err: JsonError) -> String =
   match err with
   | JsonDecode msg -> msg
   | JsonNonFinite x -> "non-finite number: " ++ double_to_string(x)
+  | JsonDuplicateKey key -> "repeated object key: " ++ key
 
 # `items` is newest-first, so consing each onto the result restores source order in one
 # tail-recursive pass. Recursing once per element overflowed the stack on a 1 MiB array.
