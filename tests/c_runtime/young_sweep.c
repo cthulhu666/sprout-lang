@@ -49,24 +49,6 @@ static void setup_old(long long n) {
   check(is_old(head) && is_old(g_tail), "the chain is old");
 }
 
-static long long chain_length(void) {
-  long long n = 0, cur = (long long)(uintptr_t)g_chain;
-  while (cur != 0 && sprout_heap_lookup((void*)(uintptr_t)cur) != NULL) { n++; cur = ref_read(cur); }
-  return n;
-}
-
-static void garbage_refs(long long m) {
-  for (long long i = 0; i < m; i++) ref_new(i);
-}
-
-/* A CSTR of `len` bytes, filled so HDRCHECK's strlen agrees with the header. */
-static long long make_str(size_t len) {
-  SproutStr s = sprout_str_alloc(len, "young_sweep: out of memory");
-  memset(s.hdr_p, 'a', len);
-  s.hdr_p[len] = '\0';
-  return sprout_ptr_word(s.hdr_p);
-}
-
 /* Strings of mixed classes, and a vector pushed past its inline area (a FREE tail split off). */
 static void churn(int round) {
   for (int i = 0; i < 600; i++) make_str(1 + ((size_t)i * 7 + (size_t)round) % 200);
@@ -154,7 +136,7 @@ static int walked_young(void) {
   check(g_gen.n_minor == 2, "the third collection is a minor");
   check(d <= M + 64, "a minor that reuses listed slots walks only the young slots");
   check_free_lists("after the second minor");
-  check(chain_length() == N, "the old chain is intact");
+  check(chain_length(g_chain) == N, "the old chain is intact");
   return g_failed;
 }
 
@@ -172,7 +154,7 @@ static int free_count(void) {
     check_free_lists("after a minor");
   }
   check(g_gen.n_minor == 15 && g_gen.n_major == 1, "fifteen minors follow the major");
-  check(chain_length() == 5000 + 150, "the chain, with its survivors, is intact");
+  check(chain_length(g_chain) == 5000 + 150, "the chain, with its survivors, is intact");
   return g_failed;
 }
 
@@ -202,7 +184,7 @@ static int region_release(void) {
     if (!g_regions[ri].is_large)
       check(g_regions[ri].live_count > 0 || g_regions[ri].poison_count > 0, "no ordinary region is left empty");
   check_free_lists("after the release");
-  check(chain_length() == 100, "the old chain is intact");
+  check(chain_length(g_chain) == 100, "the old chain is intact");
   garbage_refs(200000);
   collect();
   check(g_region_count == 1, "a second round releases them again");
@@ -231,7 +213,7 @@ static int large_young(void) {
   g_keep = NULL;
   sprout_gc_collect_with_reason("atexit");
   check(g_region_count == regions - 3, "a major frees the old large object");
-  check(chain_length() == 5000, "the old chain is intact");
+  check(chain_length(g_chain) == 5000, "the old chain is intact");
   return g_failed;
 }
 
@@ -252,7 +234,7 @@ static int lineage(void) {
     check_free_lists("after a minor under lineage");
   }
   check(g_gen.n_minor == 4, "four minors ran");
-  check(chain_length() == 3000, "the old chain is intact");
+  check(chain_length(g_chain) == 3000, "the old chain is intact");
   return g_failed;
 }
 

@@ -4215,28 +4215,17 @@ gc-gen-check: bootstrap-from-seed
       || { echo "gc-gen-check: $name ran only $minors minor collections; the barrier was not exercised" >&2; failed=1; }
     # The young-only sweep keeps the free lists between minors: FL_VERIFY compares them with a
     # full walk after every collection, and lineage poisons dead OBJs instead of listing them.
-    for mode in SPROUT_FL_VERIFY=1 SPROUT_GC_LINEAGE=1; do
-      env "$mode" SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 \
+    # Promotion age and the nursery rule (docs/gc-stage2-v0.md §5): young survivors, the
+    # remembered rule and premise 3 only exist at K > 1, so the default runs above never reach them.
+    for mode in SPROUT_FL_VERIFY=1 SPROUT_GC_LINEAGE=1 \
+                "SPROUT_GC_PROMOTE_AGE=2 SPROUT_GC_NURSERY=1" "SPROUT_GC_PROMOTE_AGE=3 SPROUT_GC_NURSERY=1" \
+                "SPROUT_GC_PROMOTE_AGE=2 SPROUT_GC_NURSERY=1 SPROUT_FL_VERIFY=1"; do
+      # shellcheck disable=SC2086
+      env $mode SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 \
         "$TMPD/$name.bin" > "$TMPD/$name.mode.out" 2>"$TMPD/$name.mode.err"
       rc=$?
       if [ "$rc" != 0 ] || ! cmp -s "$want_file" "$TMPD/$name.mode.out"; then
         echo "gc-gen-check: $name failed under MINOR=1 GENCHECK=1 STRESS=1 $mode (rc=$rc)" >&2
-        echo "  expected: $(cat "$want_file")" >&2
-        echo "  actual:   $(cat "$TMPD/$name.mode.out")" >&2
-        grep -A4 'GENCHECK\|FL_VERIFY' "$TMPD/$name.mode.err" | head -8 >&2
-        failed=1
-      fi
-    done
-    # Promotion age and the nursery rule (docs/gc-stage2-v0.md §5): young survivors, the
-    # remembered rule and premise 3 only exist at K > 1, so the default runs above never reach them.
-    for kmode in "SPROUT_GC_PROMOTE_AGE=2 SPROUT_GC_NURSERY=1" "SPROUT_GC_PROMOTE_AGE=3 SPROUT_GC_NURSERY=1" \
-                 "SPROUT_GC_PROMOTE_AGE=2 SPROUT_GC_NURSERY=1 SPROUT_FL_VERIFY=1"; do
-      # shellcheck disable=SC2086
-      env $kmode SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 \
-        "$TMPD/$name.bin" > "$TMPD/$name.mode.out" 2>"$TMPD/$name.mode.err"
-      rc=$?
-      if [ "$rc" != 0 ] || ! cmp -s "$want_file" "$TMPD/$name.mode.out"; then
-        echo "gc-gen-check: $name failed under MINOR=1 GENCHECK=1 STRESS=1 $kmode (rc=$rc)" >&2
         echo "  expected: $(cat "$want_file")" >&2
         echo "  actual:   $(cat "$TMPD/$name.mode.out")" >&2
         grep -A4 'GENCHECK\|FL_VERIFY' "$TMPD/$name.mode.err" | head -8 >&2

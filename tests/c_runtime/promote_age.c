@@ -62,23 +62,6 @@ static void extend_chain(long long n) {
   }
 }
 
-static void garbage_refs(long long m) {
-  for (long long i = 0; i < m; i++) ref_new(i);
-}
-
-static long long chain_length(void) {
-  long long n = 0, cur = (long long)(uintptr_t)g_chain;
-  while (cur != 0 && sprout_heap_lookup((void*)(uintptr_t)cur) != NULL) { n++; cur = ref_read(cur); }
-  return n;
-}
-
-static long long make_str(size_t len) {
-  SproutStr s = sprout_str_alloc(len, "promote_age: out of memory");
-  memset(s.hdr_p, 'a', len);
-  s.hdr_p[len] = '\0';
-  return sprout_ptr_word(s.hdr_p);
-}
-
 static int young_bit_set(long long w) {
   SproutRegion* r = region_find((void*)(uintptr_t)w);
   if (r->is_large) return r->young_count == 1;
@@ -203,7 +186,7 @@ static int major_rule(void) {
   check(g_gen.n_minor == 1, "the second collection is a minor");
   check(g_gen.colorless == 1, "the heap count triggers a major");
   collect();
-  check(chain_length() == 7000, "the chain is intact");
+  check(chain_length(g_chain) == 7000, "the chain is intact");
   return g_failed;
 }
 
@@ -334,15 +317,18 @@ static int bad_unremembered_edge(void) {
   return 1;
 }
 
-/* Bit 13 left on a header while the next collection is a major. */
+/* Bit 13 on a live header while the next collection is a major.  The colour-clearing sweep
+ * clears it itself, so the case runs the check on a planted header, as bad_major_set does. */
 static int bad_major_bit13(void) {
   register_roots();
   long long p = ref_new(0);
   g_keep = (void*)(uintptr_t)p;
   collect();
+  collect();                               /* a major is next */
+  check(g_gen.colorless == 1, "a major is next");
   uint64_t h = sprout_hdr_of((void*)(uintptr_t)p) | SPROUT_GC_REMEMBERED_BIT;
   memcpy((char*)(uintptr_t)p - 8, &h, 8);
-  collect();                               /* a major is next: the check aborts */
+  sprout_gc_check_sweep(0, 0);             /* what the collector runs after the sweep */
   fprintf(stderr, "bad_major_bit13: no abort\n");
   return 1;
 }
