@@ -26,4 +26,24 @@ static inline int is_old(long long word) {
   return (sprout_hdr_of((void*)(uintptr_t)word) & SPROUT_GC_COLOR_BIT) != 0;
 }
 
+/* Links of the Ref chain that starts at `head` and is still a live heap object. */
+static inline long long chain_length(void* head) {
+  long long n = 0, cur = (long long)(uintptr_t)head;
+  while (cur != 0 && sprout_heap_lookup((void*)(uintptr_t)cur) != NULL) { n++; cur = ref_read(cur); }
+  return n;
+}
+
+/* m Refs nothing roots. */
+static inline void garbage_refs(long long m) {
+  for (long long i = 0; i < m; i++) ref_new(i);
+}
+
+/* A CSTR of `len` bytes, filled so HDRCHECK's strlen agrees with the header. */
+static inline long long make_str(size_t len) {
+  SproutStr s = sprout_str_alloc(len, "runtime_case: out of memory");
+  memset(s.hdr_p, 'a', len);
+  s.hdr_p[len] = '\0';
+  return sprout_ptr_word(s.hdr_p);
+}
+
 #endif
