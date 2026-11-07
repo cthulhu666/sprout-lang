@@ -161,9 +161,10 @@ are within reach.
 
 ## 7. What this unlocks
 
-Callers that probe or copy today: `json`, `uuid`, the prelude's `parse_int`/`parse_double`,
-`compiler/source.sprout`. Their moves are ordinary stdlib edits. `compiler/source.sprout` and the
-prelude's parsers inside the compiler run under separate units.
+Callers that probed or copied: `json`, `uuid`, the prelude's `parse_int`/`parse_double`,
+`compiler/source.sprout`. The first three now read with `str_byte_at`
+([results-2026-11-07-byte-probes.md](../bench/results-2026-11-07-byte-probes.md)).
+`compiler/source.sprout` still copies (`BACKLOG.md`); it runs under separate units.
 
 For `str_len`, `str_char_at`, `str_slice`, `str_find`, `split_words` and `str_split_lines` it
 removes the copy, not the rule: a Sprout loop must still match a C loop. The byte buffer's

@@ -1925,32 +1925,13 @@ fn argv_collect_bytes(i: Int, acc: List Bytes) -> List Bytes !{IO} =
 # it used to wrap, and bigint-v0 Stage 1 §5.1 closed that.
 #
 # THE SCANS BELOW WALK A BYTE CURSOR. `str_char_at` is codepoint-indexed and O(i) per call,
-# so a loop over it is O(n^2); `str_starts_with_at_byte` reads in place at a byte offset in O(1)
-# and cannot abort. Digits, signs, '.' and 'e'/'E' are all ASCII, so a byte test is exact, and
-# any non-ASCII byte is a non-digit, as it was when this read Chars.
+# so a loop over it is O(n^2); `str_byte_at` reads byte `i` in O(1), answers Nothing outside the
+# String, and cannot abort. Digits, signs, '.' and 'e'/'E' are all ASCII, so a byte test is exact,
+# and any non-ASCII byte is a non-digit, as it was when this read Chars.
 #
-# The scans find the end of the input in O(1) too (`at_end`), rather than taking a length up
-# front: `str_len` walks the whole String and aborts on invalid UTF-8, while a scan that stops at
-# the first non-digit never reads further, as it never did.
-#
-# The value of the ASCII digit at byte `i`, or -1 for any other byte (or `i` at or past the end).
-fn digit_at(s: String, i: Int) -> Int =
-  if str_starts_with_at_byte(s, i, "0") then 0
-  else if str_starts_with_at_byte(s, i, "1") then 1
-  else if str_starts_with_at_byte(s, i, "2") then 2
-  else if str_starts_with_at_byte(s, i, "3") then 3
-  else if str_starts_with_at_byte(s, i, "4") then 4
-  else if str_starts_with_at_byte(s, i, "5") then 5
-  else if str_starts_with_at_byte(s, i, "6") then 6
-  else if str_starts_with_at_byte(s, i, "7") then 7
-  else if str_starts_with_at_byte(s, i, "8") then 8
-  else if str_starts_with_at_byte(s, i, "9") then 9
-  else 0 - 1
-
-# Whether byte `i` is the end of `s`, for a cursor that has not passed it. The empty prefix
-# matches at every offset up to the byte length and at none past it, so it fails at `i + 1`
-# only when `i` is the length.
-fn at_end(s: String, i: Int) -> Bool = !str_starts_with_at_byte(s, i + 1, "")
+# The scans take no length up front: `str_len` walks the whole String and aborts on invalid
+# UTF-8, while `Nothing` from `str_byte_at` marks the end, and a scan that stops at the first
+# non-digit never reads further.
 
 # INT_MIN / 10, truncated toward zero: -922337203685477580. `accum_digits`
 # checks a prospective `acc * 10` against this BEFORE multiplying, so the
@@ -1970,11 +1951,13 @@ fn min_int_div10() -> Int = min_int() / 10
 # the accumulated magnitude IS INT_MIN (see positive_from_neg_magnitude) since
 # 2^63 itself has no positive Int representation.
 fn accum_digits(s: String, i: Int, acc: Int, seen: Bool) -> Maybe Int =
-  let d = digit_at(s, i)
-  in if d < 0 then (if seen && at_end(s, i) then Just(acc) else Nothing)
-     else if acc < min_int_div10() then Nothing
-     else if (acc == min_int_div10()) && (d > 8) then Nothing
-     else accum_digits(s, i + 1, (acc * 10) - d, true)
+  match str_byte_at(s, i) with
+  | Nothing -> if seen then Just(acc) else Nothing
+  | Just b ->
+      if b < 48 || b > 57 then Nothing
+      else if acc < min_int_div10() then Nothing
+      else if (acc == min_int_div10()) && (b - 48 > 8) then Nothing
+      else accum_digits(s, i + 1, (acc * 10) - (b - 48), true)
 
 # Turn a negative-accumulated magnitude (see accum_digits) into its positive
 # value. Nothing iff the magnitude is exactly INT_MIN: 2^63 has no positive
@@ -1987,8 +1970,9 @@ fn positive_from_neg_magnitude(m: Maybe Int) -> Maybe Int =
 # O(n) in the input length. Total: an over-range digit run (more than [-2^63, 2^63-1] can hold)
 # answers Nothing rather than wrapping or panicking (bigint-v0 Stage 1 §5.1).
 export fn parse_int(s: String) -> Maybe Int =
-  if str_starts_with_at_byte(s, 0, "-") then accum_digits(s, 1, 0, false)
-  else positive_from_neg_magnitude(accum_digits(s, 0, 0, false))
+  match str_byte_at(s, 0) with
+  | Just 45 -> accum_digits(s, 1, 0, false)  # '-'
+  | _ -> positive_from_neg_magnitude(accum_digits(s, 0, 0, false))
 
 # 10^k for k >= 0, and the clamp every caller applies first.
 #
@@ -2076,11 +2060,15 @@ fn sig_fits(sig: Int, d: Int) -> Bool =
 # costs nothing; a digit that no longer fits is dropped and counted, for the caller to repay as
 # a power of ten. Nothing on any non-digit.
 fn scan_sig(s: String, i: Int, sig: Int, dropped: Int) -> Maybe (Int, Int) =
-  let d = digit_at(s, i)
-  in if d < 0 then (if at_end(s, i) then Just((sig, dropped)) else Nothing)
-     else if (sig == 0) && (d == 0) then scan_sig(s, i + 1, sig, dropped)
-     else if sig_fits(sig, d) then scan_sig(s, i + 1, (sig * 10) - d, dropped)
-     else scan_sig(s, i + 1, sig, dropped + 1)
+  match str_byte_at(s, i) with
+  | Nothing -> Just((sig, dropped))
+  | Just b ->
+      if b < 48 || b > 57 then Nothing
+      else
+        let d = b - 48
+        in if (sig == 0) && (d == 0) then scan_sig(s, i + 1, sig, dropped)
+           else if sig_fits(sig, d) then scan_sig(s, i + 1, (sig * 10) - d, dropped)
+           else scan_sig(s, i + 1, sig, dropped + 1)
 
 # Non-negative mantissa "int[.frac]" -> (significand, exponent). `int` or `frac`
 # may be empty (".5", "5."); a lone "." is rejected. The exponent repays the
@@ -2128,8 +2116,9 @@ fn scale_significand(sig: Int, k: Int) -> Double =
 
 # Whether `s` from byte `i` is a non-empty run of nothing but digits.
 fn digits_only(s: String, i: Int, seen: Bool) -> Bool =
-  if digit_at(s, i) < 0 then seen && at_end(s, i)
-  else digits_only(s, i + 1, true)
+  match str_byte_at(s, i) with
+  | Nothing -> seen
+  | Just b -> if b < 48 || b > 57 then false else digits_only(s, i + 1, true)
 
 # An exponent's digits, with the optional sign it is allowed to carry: `-` or an explicit `+`
 # (RFC 8259's `exp` production and IEEE 754 both permit the `+`, and `%g` writers emit it —
@@ -2271,8 +2260,9 @@ extern fn str_compare(a: String, b: String) -> Int
 #
 # The TWO EXCEPTIONS are `str_starts_with_at_byte` and `str_byte_at`, below. The prelude's own
 # `parse_int` and `parse_double` need a linear scan over their input, `str_char_at` is O(i) per
-# call, and the prelude cannot import stdlib.string. They scan with `str_starts_with_at_byte`
-# today; `str_byte_at` is for moving them, and `str_len` and `str_slice`, onto byte reads
+# call, and the prelude cannot import stdlib.string. They scan with `str_byte_at`;
+# `str_starts_with_at_byte` serves `str_starts_with` and multi-byte prefixes elsewhere.
+# `str_byte_at` is also for moving `str_len` and `str_slice` onto byte reads
 # (docs/string-byte-read-v0.md §7). A symbol is declared once (`just check-extern-signatures`), so stdlib.string
 # does not declare them; its callers there and in stdlib.json use the global names.
 # `str_starts_with_at_byte` is on the `no_prelude` floor, since its signature mentions only

@@ -192,8 +192,8 @@ byte-indexed surface and the splitters live in `stdlib.string` and need
 wrapper, because several sit in per-token and per-byte parse loops. The two
 exceptions are `str_starts_with_at_byte` and `str_byte_at`, which only the prelude
 declares because the prelude cannot import: `parse_int` and `parse_double` scan with
-the first, and their move to the second, with `str_len` and `str_slice`'s, is open
-(`BACKLOG.md`). They are reachable without the import:
+the second, and `str_starts_with` is built on the first. Moving `str_len` and `str_slice` onto
+`str_byte_at` is open (`BACKLOG.md`). They are reachable without the import:
 
 - `str_byte_len(s: String) -> Int` (O(1), from the CSTR header)
 - `str_slice_bytes(s: String, byte_start: Int, byte_len: Int) -> String`
@@ -280,7 +280,7 @@ Effect notes:
   pressure that the current `!{IO}` and singleton `!{e}` model cannot express
   cleanly.
 
-String/runtime helpers are host-implemented primitives. In the current experimental text slice, `str_len`, `str_slice`, `str_char_at`, and `str_find` use Unicode code-point semantics rather than UTF-8 byte offsets. Application code should use `stdlib.string`; direct `str_*`/`split_words` usage is reserved for `stdlib.*` modules. The same applies to raw `regex_*` helpers, which are internal to `stdlib.regex`. Note that the byte-offset builtins are not globally reachable, with two exceptions — `str_byte_len`, `str_slice_bytes`, `str_split_lines` and `split_words` are declared in `stdlib.string`, so reaching one requires importing that module rather than merely ignoring a convention. The exceptions are `str_starts_with_at_byte` and `str_byte_at`, which the prelude declares (and `stdlib.string` does not) for its own scans: its number parsers use the first today.
+String/runtime helpers are host-implemented primitives. In the current experimental text slice, `str_len`, `str_slice`, `str_char_at`, and `str_find` use Unicode code-point semantics rather than UTF-8 byte offsets. Application code should use `stdlib.string`; direct `str_*`/`split_words` usage is reserved for `stdlib.*` modules. The same applies to raw `regex_*` helpers, which are internal to `stdlib.regex`. Note that the byte-offset builtins are not globally reachable, with two exceptions — `str_byte_len`, `str_slice_bytes`, `str_split_lines` and `split_words` are declared in `stdlib.string`, so reaching one requires importing that module rather than merely ignoring a convention. The exceptions are `str_starts_with_at_byte` and `str_byte_at`, which the prelude declares (and `stdlib.string` does not) for its own scans: its number parsers read with `str_byte_at`.
 
 Low-level runtime notes:
 
