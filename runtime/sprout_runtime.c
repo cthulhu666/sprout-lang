@@ -2740,14 +2740,11 @@ static int sprout_gc_gen_choose_minor(const char* reason) {
 
 /* Called after the mark, before the sweep: records this collection in g_gen and returns
  * whether the NEXT one is a major.  The post-sweep heap count is known exactly: a minor frees
- * no old object and a sweep colors every survivor, so it is the old objects (`last_live`) plus
- * the young ones just marked; a major keeps only the marked.  Major next when the heap has
- * more than doubled since the last major, and every SPROUT_GC_MAJOR_EVERY minors (the doubling
- * rule alone never fires when the live set shrinks).
- *
- * With SPROUT_GC_PROMOTE_AGE > 1 a minor re-marks young survivors that the previous count
- * already holds, so the minor's count is the old objects after the previous sweep
- * (`old_count`) plus the marked.  At K = 1 every survivor is old and the two are equal. */
+ * no old object, so it is the old objects after the previous sweep (`old_count`) plus the
+ * objects just marked; a major keeps only the marked.  At SPROUT_GC_PROMOTE_AGE = 1 every
+ * survivor is old, so `old_count` equals the previous `last_live`.  Major next when the heap
+ * has more than doubled since the last major, and every SPROUT_GC_MAJOR_EVERY minors (the
+ * doubling rule alone never fires when the live set shrinks). */
 static int sprout_gc_gen_record(int minor) {
   if (minor) {
     g_gen.last_live = g_gen.old_count + g_gc_marked_count;
