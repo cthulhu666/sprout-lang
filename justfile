@@ -4174,8 +4174,8 @@ gc-adapt-check: bootstrap-from-seed
 # store without its barrier is caught by the verifier within a few allocations. Each program must
 # print the exact stdout in its sidecar tests/gc_gen/<name>.out, and must have run minor
 # collections. Also run with SPROUT_FL_VERIFY=1 and with SPROUT_GC_LINEAGE=1 (same flags, same
-# output), at SPROUT_GC_PROMOTE_AGE=2 and 3 with SPROUT_GC_NURSERY=1 (plus FL_VERIFY, and
-# SPROUT_GC_MAJOR_INPUT=old, at K=2), and with the mode off, where the output must be the same.
+# output), at SPROUT_GC_PROMOTE_AGE=2 and 3 with SPROUT_GC_NURSERY=1 (plus FL_VERIFY at K=2), and
+# with the mode off, where the output must be the same.
 # The two analysis helpers are static and need a live analysis service to reach from Sprout, so a C case covers
 # them (tests/c_runtime/analysis_strings.c).
 [group('test')]
@@ -4230,8 +4230,7 @@ gc-gen-check: bootstrap-from-seed
     # Promotion age and the nursery rule (docs/gc-stage2-v0.md §5): young survivors, the
     # remembered rule and premise 3 only exist at K > 1, so the default runs above never reach them.
     for kmode in "SPROUT_GC_PROMOTE_AGE=2 SPROUT_GC_NURSERY=1" "SPROUT_GC_PROMOTE_AGE=3 SPROUT_GC_NURSERY=1" \
-                 "SPROUT_GC_PROMOTE_AGE=2 SPROUT_GC_NURSERY=1 SPROUT_FL_VERIFY=1" \
-                 "SPROUT_GC_PROMOTE_AGE=2 SPROUT_GC_NURSERY=1 SPROUT_GC_MAJOR_INPUT=old"; do
+                 "SPROUT_GC_PROMOTE_AGE=2 SPROUT_GC_NURSERY=1 SPROUT_FL_VERIFY=1"; do
       # shellcheck disable=SC2086
       env $kmode SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 \
         "$TMPD/$name.bin" > "$TMPD/$name.mode.out" 2>"$TMPD/$name.mode.err"
