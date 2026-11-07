@@ -9,7 +9,8 @@ module stdlib.unicode.utf8
 # module is for.
 #
 # Strings are valid UTF-8 by construction (the runtime validates on every
-# String-producing boundary), so decoding assumes well-formed input.
+# String-producing boundary), so decoding assumes well-formed input. `decode_at`
+# is the exception: it validates, for bytes that did not come from a String.
 
 import stdlib.bytes as bytes
 
@@ -35,7 +36,9 @@ export fn seq_length(b0: Int) -> Int =
 
 # The codepoint encoded at byte offset `i`. The caller must have checked that
 # `i + seq_length(byte at i)` is within the buffer; a truncated sequence reads
-# missing bytes as zero and yields a wrong answer rather than failing.
+# missing bytes as zero and yields a wrong answer rather than failing. Input
+# must be well-formed; for bytes that did not come from a String use
+# `decode_at`.
 export fn codepoint_at(b: Bytes, i: Int) -> Int = cp_of(bytes.get_or(b, i, 0), b, i)
 
 fn cp_of(b0: Int, b: Bytes, i: Int) -> Int =
@@ -43,6 +46,58 @@ fn cp_of(b0: Int, b: Bytes, i: Int) -> Int =
   else if b0 < 224 then cp2(b0, bytes.get_or(b, i + 1, 0))
   else if b0 < 240 then cp3(b0, bytes.get_or(b, i + 1, 0), bytes.get_or(b, i + 2, 0))
   else cp4(b0, bytes.get_or(b, i + 1, 0), bytes.get_or(b, i + 2, 0), bytes.get_or(b, i + 3, 0))
+
+# One step of validating decode, for untrusted bytes.
+#   Valid cp len  a well-formed sequence of `len` bytes encoding `cp`.
+#   Invalid k     malformed; `k` (>= 1) bytes are one unit to replace with U+FFFD.
+#   Partial       every byte present so far is a valid prefix, but the buffer ends.
+# `k` is the maximal subpart (Unicode §3.9, as WHATWG): the bytes up to, not
+# including, the first one that breaks Table 3-7. So `C3 41` is Invalid 1 then
+# the `A`, and an overlong `F0 80 80 80` is four `Invalid 1`. An invalid prefix
+# is reported at once, never as Partial, so `F8` alone does not wait for input.
+export type Decoded (..) deriving (Eq, ToString) =
+  | Valid Int Int
+  | Invalid Int
+  | Partial
+
+# U+FFFD, what each Invalid unit is replaced with.
+export fn replacement_char() -> Char = char_from_codepoint(65533)
+
+# `n` is the buffer length. `i >= n` is Partial: there is nothing to decode yet.
+export fn decode_at(b: Bytes, i: Int, n: Int) -> Decoded =
+  if i >= n then Partial
+  else decode_lead(b, i, n, bytes.get_or(b, i, 0))
+
+fn decode_lead(b: Bytes, i: Int, n: Int, b0: Int) -> Decoded =
+  if b0 < 128 then Valid(b0, 1)
+  else if b0 < 194 then Invalid(1)
+  else if b0 < 224 then check_from(b, i, n, b0, 2, 1, 128, 191)
+  else if b0 < 240 then check_from(b, i, n, b0, 3, 1, second_lo3(b0), second_hi3(b0))
+  else if b0 < 245 then check_from(b, i, n, b0, 4, 1, second_lo4(b0), second_hi4(b0))
+  else Invalid(1)
+
+# Table 3-7: E0 excludes overlongs, ED excludes surrogates.
+fn second_lo3(b0: Int) -> Int = if b0 == 224 then 160 else 128
+
+fn second_hi3(b0: Int) -> Int = if b0 == 237 then 159 else 191
+
+# F0 excludes overlongs, F4 excludes everything above U+10FFFF.
+fn second_lo4(b0: Int) -> Int = if b0 == 240 then 144 else 128
+
+fn second_hi4(b0: Int) -> Int = if b0 == 244 then 143 else 191
+
+# Checks byte `k` of the sequence against [lo, hi]; later bytes are 80..BF.
+# `b0` is the lead byte, already read by the caller.
+fn check_from(b: Bytes, i: Int, n: Int, b0: Int, len: Int, k: Int, lo: Int,
+              hi: Int) -> Decoded =
+  if k >= len then Valid(cp_of(b0, b, i), len)
+  else if i + k >= n then Partial
+  else check_byte(b, i, n, b0, len, k, lo, hi, bytes.get_or(b, i + k, 0))
+
+fn check_byte(b: Bytes, i: Int, n: Int, b0: Int, len: Int, k: Int, lo: Int, hi: Int,
+              v: Int) -> Decoded =
+  if v < lo || v > hi then Invalid(k)
+  else check_from(b, i, n, b0, len, k + 1, 128, 191)
 
 # Returns a List, not a Vec: every consumer walks it head-first, and the
 # grapheme state machine is a recursion over exactly that shape.

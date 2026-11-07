@@ -1,0 +1,9 @@
+module testsupport.byte_fixture
+
+import stdlib.bytes as bytes
+
+# Byte-level test input: `Bytes` from a list of byte values, for fixtures that are not valid
+# UTF-8 and so cannot be written as a String literal.
+
+export fn bs(vals: List Int) -> Bytes =
+  fold(\ (acc, v) -> bytes.append(acc, bytes.singleton(v)), bytes.empty(), vals)

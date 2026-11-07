@@ -133,10 +133,16 @@ declare i64 @split_words(i64)
 @.cfkinds.15 = private unnamed_addr constant [2 x i8] c"_\00"
 @.cname.16 = private unnamed_addr constant [29 x i8] c"stdlib.bytes.Utf8DecodeError\00"
 @.cfkinds.16 = private unnamed_addr constant [2 x i8] c"s\00"
-@.cname.17 = private unnamed_addr constant [23 x i8] c"examples.tree_set.Leaf\00"
-@.cfkinds.17 = private unnamed_addr constant [1 x i8] c"\00"
-@.cname.18 = private unnamed_addr constant [23 x i8] c"examples.tree_set.Node\00"
-@.cfkinds.18 = private unnamed_addr constant [4 x i8] c"pip\00"
+@.cname.17 = private unnamed_addr constant [26 x i8] c"stdlib.unicode.utf8.Valid\00"
+@.cfkinds.17 = private unnamed_addr constant [3 x i8] c"ii\00"
+@.cname.18 = private unnamed_addr constant [28 x i8] c"stdlib.unicode.utf8.Invalid\00"
+@.cfkinds.18 = private unnamed_addr constant [2 x i8] c"i\00"
+@.cname.19 = private unnamed_addr constant [28 x i8] c"stdlib.unicode.utf8.Partial\00"
+@.cfkinds.19 = private unnamed_addr constant [1 x i8] c"\00"
+@.cname.20 = private unnamed_addr constant [23 x i8] c"examples.tree_set.Leaf\00"
+@.cfkinds.20 = private unnamed_addr constant [1 x i8] c"\00"
+@.cname.21 = private unnamed_addr constant [23 x i8] c"examples.tree_set.Node\00"
+@.cfkinds.21 = private unnamed_addr constant [4 x i8] c"pip\00"
 @"sprout_tag$Nothing" = constant i64 0
 @"sprout_tag$Just" = constant i64 1
 @"sprout_tag$TemplateLit" = constant i64 2
@@ -154,8 +160,11 @@ declare i64 @split_words(i64)
 @"sprout_tag$Continue" = constant i64 14
 @"sprout_tag$Break" = constant i64 15
 @"sprout_tag$stdlib$bytes$Utf8DecodeError" = constant i64 16
-@"sprout_tag$examples$tree_set$Leaf" = constant i64 17
-@"sprout_tag$examples$tree_set$Node" = constant i64 18
+@"sprout_tag$stdlib$unicode$utf8$Valid" = constant i64 17
+@"sprout_tag$stdlib$unicode$utf8$Invalid" = constant i64 18
+@"sprout_tag$stdlib$unicode$utf8$Partial" = constant i64 19
+@"sprout_tag$examples$tree_set$Leaf" = constant i64 20
+@"sprout_tag$examples$tree_set$Node" = constant i64 21
 @list_builder_empty = global i64 zeroinitializer
 @pow10_clamp = private constant i64 400
 @max_int = private constant i64 9223372036854775807
@@ -516,19 +525,19 @@ entry:
   %t$0 = call i64 @sprout_tag(i64 %p$t)
   br label %arm_0_1
 arm_0_1:
-  %t$3 = add i64 0, 17
+  %t$3 = add i64 0, 20
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_alloc_obj(i64 17, i64 0)
+  %t$5 = call i64 @sprout_alloc_obj(i64 20, i64 0)
   %t$30 = alloca i64
   store i64 %t$5, ptr %t$30
   %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
-  %t$6 = call i64 @sprout_alloc_obj(i64 17, i64 0)
+  %t$6 = call i64 @sprout_alloc_obj(i64 20, i64 0)
   %t$32 = alloca i64
   store i64 %t$6, ptr %t$32
   %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
-  %t$7 = call i64 @sprout_alloc_obj(i64 18, i64 3)
+  %t$7 = call i64 @sprout_alloc_obj(i64 21, i64 3)
   %t$7$ptr = inttoptr i64 %t$7 to ptr
   %t$7$f0 = getelementptr i64, ptr %t$7$ptr, i64 0
   store i64 %t$5, ptr %t$7$f0
@@ -539,7 +548,7 @@ body_0_1:
   %t$34 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %join_1
 arm_1_1:
-  %t$8 = add i64 0, 18
+  %t$8 = add i64 0, 21
   %t$9 = icmp eq i64 %t$0, %t$8
   br i1 %t$9, label %body_1_1, label %arm_2_1
 body_1_1:
@@ -633,13 +642,13 @@ tco_loop:
   %t$0 = call i64 @sprout_tag(i64 %p$t)
   br label %arm_0_1
 arm_0_1:
-  %t$3 = add i64 0, 17
+  %t$3 = add i64 0, 20
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
   br label %join_1
 arm_1_1:
-  %t$5 = add i64 0, 18
+  %t$5 = add i64 0, 21
   %t$6 = icmp eq i64 %t$0, %t$5
   br i1 %t$6, label %body_1_1, label %arm_2_1
 body_1_1:
@@ -709,7 +718,7 @@ entry:
   call void @llvm.memset.p0.i64(ptr %t$27, i8 0, i64 16, i1 false)
   %t$28 = call i64 @sprout_gc_push_scan_root(ptr %t$27, i64 16)
   %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_examples.tree_set.add_0, i64 8) to i64
-  %t$1 = call i64 @sprout_alloc_obj(i64 17, i64 0)
+  %t$1 = call i64 @sprout_alloc_obj(i64 20, i64 0)
   %t$2 = load i64, ptr @examples.tree_set.scores
   %t$29 = alloca i64
   store i64 %t$1, ptr %t$29
@@ -1165,12 +1174,21 @@ entry:
   %cname_ptr_16 = getelementptr inbounds [29 x i8], ptr @.cname.16, i64 0, i64 0
   %cfkinds_ptr_16 = getelementptr inbounds [2 x i8], ptr @.cfkinds.16, i64 0, i64 0
   %creg_16 = call i64 @sprout_register_ctor(i64 16, ptr %cname_ptr_16, i64 1, ptr %cfkinds_ptr_16)
-  %cname_ptr_17 = getelementptr inbounds [23 x i8], ptr @.cname.17, i64 0, i64 0
-  %cfkinds_ptr_17 = getelementptr inbounds [1 x i8], ptr @.cfkinds.17, i64 0, i64 0
-  %creg_17 = call i64 @sprout_register_ctor(i64 17, ptr %cname_ptr_17, i64 0, ptr %cfkinds_ptr_17)
-  %cname_ptr_18 = getelementptr inbounds [23 x i8], ptr @.cname.18, i64 0, i64 0
-  %cfkinds_ptr_18 = getelementptr inbounds [4 x i8], ptr @.cfkinds.18, i64 0, i64 0
-  %creg_18 = call i64 @sprout_register_ctor(i64 18, ptr %cname_ptr_18, i64 3, ptr %cfkinds_ptr_18)
+  %cname_ptr_17 = getelementptr inbounds [26 x i8], ptr @.cname.17, i64 0, i64 0
+  %cfkinds_ptr_17 = getelementptr inbounds [3 x i8], ptr @.cfkinds.17, i64 0, i64 0
+  %creg_17 = call i64 @sprout_register_ctor(i64 17, ptr %cname_ptr_17, i64 2, ptr %cfkinds_ptr_17)
+  %cname_ptr_18 = getelementptr inbounds [28 x i8], ptr @.cname.18, i64 0, i64 0
+  %cfkinds_ptr_18 = getelementptr inbounds [2 x i8], ptr @.cfkinds.18, i64 0, i64 0
+  %creg_18 = call i64 @sprout_register_ctor(i64 18, ptr %cname_ptr_18, i64 1, ptr %cfkinds_ptr_18)
+  %cname_ptr_19 = getelementptr inbounds [28 x i8], ptr @.cname.19, i64 0, i64 0
+  %cfkinds_ptr_19 = getelementptr inbounds [1 x i8], ptr @.cfkinds.19, i64 0, i64 0
+  %creg_19 = call i64 @sprout_register_ctor(i64 19, ptr %cname_ptr_19, i64 0, ptr %cfkinds_ptr_19)
+  %cname_ptr_20 = getelementptr inbounds [23 x i8], ptr @.cname.20, i64 0, i64 0
+  %cfkinds_ptr_20 = getelementptr inbounds [1 x i8], ptr @.cfkinds.20, i64 0, i64 0
+  %creg_20 = call i64 @sprout_register_ctor(i64 20, ptr %cname_ptr_20, i64 0, ptr %cfkinds_ptr_20)
+  %cname_ptr_21 = getelementptr inbounds [23 x i8], ptr @.cname.21, i64 0, i64 0
+  %cfkinds_ptr_21 = getelementptr inbounds [4 x i8], ptr @.cfkinds.21, i64 0, i64 0
+  %creg_21 = call i64 @sprout_register_ctor(i64 21, ptr %cname_ptr_21, i64 3, ptr %cfkinds_ptr_21)
   call void @__sprout_init_globals()
   call i64 @__sprout_user_main()
   ret i32 0

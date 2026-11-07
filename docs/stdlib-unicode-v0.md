@@ -171,7 +171,7 @@ and passed. `graphemes` is kept as a documented-lossy convenience over the codep
 |---|---|
 | `stdlib/unicode/tables.sprout` | **generated** — the five encoded property tables |
 | `stdlib/unicode/lookup.sprout` | base-62 encoding + the binary search; imported by the generator too |
-| `stdlib/unicode/utf8.sprout` | `codepoints : String -> List Int`, `from_codepoints : List Int -> String` |
+| `stdlib/unicode/utf8.sprout` | `codepoints : String -> List Int`, `from_codepoints : List Int -> String`, `decode_at : (Bytes, Int, Int) -> Decoded` (validating, for bytes that are not a `String`) |
 | `stdlib/unicode/width.sprout` | `codepoint_width : Int -> Int`, `string_width : String -> Int` |
 | `stdlib/unicode/grapheme.sprout` | `cluster_sizes : List Int -> List Int`, `clusters : List Int -> List (List Int)`, `graphemes : String -> List String`, `gcb : Int -> String` |
 | `tools/gen_unicode_tables.sprout` | the generator |
@@ -211,6 +211,8 @@ with the seed untouched, and `just ir-golden-diff` reports no differences.
   and each of the five tables is sorted, non-empty, disjoint and in range. Verified to discriminate
   by swapping one entry's `lo`/`hi` in `tables.sprout`, which turned the scan red and named the
   offending index.
+- `tests/stdlib/test_utf8_decode.spr` — 42 cases for `utf8.decode_at`: the boundaries of Table 3-7
+  (E0, ED, F0, F4 second bytes), maximal-subpart lengths, and valid prefixes returning `Partial`.
 
 ## 10. Follow-ups
 
