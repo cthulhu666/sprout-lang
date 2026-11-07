@@ -118,8 +118,7 @@ fn refuses(value: json.Json) -> Bool =
   match json.stringify(value) with
   | Ok _ -> false
   | Err (json.JsonNonFinite _) -> true
-  | Err (json.JsonDecode _) -> false
-  | Err (json.JsonDuplicateKey _) -> false
+  | _ -> false
 
 fn accepts(value: json.Json) -> Bool =
   match json.stringify(value) with
@@ -132,8 +131,7 @@ fn refused_value_is_nan(value: json.Json) -> Bool =
   match json.stringify(value) with
   | Ok _ -> false
   | Err (json.JsonNonFinite x) -> !(x == x)
-  | Err (json.JsonDecode _) -> false
-  | Err (json.JsonDuplicateKey _) -> false
+  | _ -> false
 
 fn int_on_float_is_nothing(input: String) -> Bool =
   match json.parse(input) with
