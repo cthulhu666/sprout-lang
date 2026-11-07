@@ -14,6 +14,9 @@ import stdlib.sort (sort)
 import stdlib.string as string
 import stdlib.process as process
 import stdlib.terminal as terminal
+import stdlib.bytes as bytes
+import stdlib.task as task
+import stdlib.chan as chan
 import stdlib.fs as fs
 import stdlib.fs.path as fspath
 import stdlib.env as env
@@ -570,9 +573,10 @@ fn op_type_of_in_source(src: String, expr: String, state: StartupState) -> json.
 #   4. Write the IR to `<scratch>/eval.ll`.
 #   5. Link IR against every runtime object (whole runtime/*.c) with clang, into
 #      `<scratch>/eval_bin`.
-#   6. Execute the binary, capture stdout, return as a JSON array of lines.
+#   6. Execute the binary, capture stdout, return as a JSON array of lines. If stdin ends first,
+#      the binary is killed and the request gets an error (`run_child`).
 #
-# `<scratch>` is the service's private temp dir (`ensure_scratch_dir`), made on the first
+# `<scratch>` is the service's private temp dir (`ensure_scratch`), made on the first
 # eval or instances request and removed by `shutdown_state`.
 # On macOS the -framework flags are added automatically (platform detected via
 # `uname`); SPROUT_DARWIN_FRAMEWORKS=1 forces them on regardless of platform.
@@ -592,51 +596,83 @@ fn runtime_dir(stdlib_root: String) -> String =
 # ---------------------------------------------------------------------------
 # StartupState — stdlib_root, scratch dir with its compiled runtime objects, and persistent module cache
 
-export type StartupState = StartupState String (Ref Bool) bundler.LoadEnv(Ref (Dict SessionState)) (Ref Int) (Ref (String, String))
-  # stdlib_root, runtime objects compiled into the scratch dir, cache, sessions, next_session_id,
-  # scratch dir and the token in its `owner` file (both "" = not yet made)
+# The object files compiled from the runtime sources, and a fingerprint of those sources when they
+# were compiled (`runtime_fingerprint`).
+type RuntimeObjects = (paths: List String, fingerprint: String)
+
+# The scratch dir's path, the token in its `owner` file, and the runtime objects compiled into it
+# (`Nothing` until then). The objects live in a ref of their own so that a new scratch dir starts
+# with none.
+type Scratch = (dir: String, token: String, objects: Ref (Maybe RuntimeObjects))
+
+# How the request loop and the child processes reach each other. A `Nothing` channel means there is
+# no loop (a test calls `dispatch_line` directly), so a child just runs. `stopped` is true once
+# stdin has ended: no child process starts after that. `front` and `back` are a queue of the
+# requests the loop read while it waited for a child: take from `front`, add to the head of `back`
+# (newest first), and turn `back` into `front` when `front` runs out.
+type Intake = (channel: Maybe (chan.Chan Event), stopped: Bool, front: List Request, back: List Request)
+
+export type StartupState = StartupState String bundler.LoadEnv (Ref (Dict SessionState)) (Ref Int) (Ref (Maybe Scratch)) (Ref Intake)
+  # stdlib_root, cache, sessions, next_session_id, scratch dir (`Nothing` = not yet made), intake
 
 fn state_stdlib_root(state: StartupState) -> String =
   match state with
   | StartupState root _ _ _ _ _ -> root
 
-fn state_compiled_ref(state: StartupState) -> Ref Bool =
-  match state with
-  | StartupState _ ref _ _ _ _ -> ref
-
 fn state_cache(state: StartupState) -> bundler.LoadEnv =
   match state with
-  | StartupState _ _ cache _ _ _ -> cache
+  | StartupState _ cache _ _ _ _ -> cache
 
 fn state_sessions(state: StartupState) -> Ref (Dict SessionState) =
   match state with
-  | StartupState _ _ _ sessions _ _ -> sessions
+  | StartupState _ _ sessions _ _ _ -> sessions
 
 fn state_next_id(state: StartupState) -> Ref Int =
   match state with
-  | StartupState _ _ _ _ next_id _ -> next_id
+  | StartupState _ _ _ next_id _ _ -> next_id
 
-fn state_scratch_ref(state: StartupState) -> Ref (String, String) =
+fn state_scratch_ref(state: StartupState) -> Ref (Maybe Scratch) =
   match state with
-  | StartupState _ _ _ _ _ scratch -> scratch
+  | StartupState _ _ _ _ scratch _ -> scratch
+
+fn state_intake_ref(state: StartupState) -> Ref Intake =
+  match state with
+  | StartupState _ _ _ _ _ intake -> intake
+
+# An intake with no request loop: a child process just runs. For a caller that has no state, such as
+# a test that drives `compile_runtime_and_link_eval`.
+export fn new_intake() -> Ref Intake !{IO} =
+  ref_new(Intake(channel = Nothing, stopped = false, front = Nil, back = Nil))
 
 # Create the persistent service state. Runtime object compilation is deferred to
 # first eval so the service starts (and answers diagnostics/type-of/hover) even
 # when clang is not on PATH.
 export fn build_startup_state(stdlib_root: String) -> StartupState !{IO} =
   do
-    compiled_ref <- ref_new(false)
     load_env <- bundler.new_load_env()
     sessions <- ref_new(dict_empty())
     next_id <- ref_new(1)
-    scratch_ref <- ref_new(("", ""))
-    StartupState(stdlib_root, compiled_ref, load_env, sessions, next_id, scratch_ref)
+    scratch_ref <- ref_new(Nothing)
+    intake_ref <- new_intake()
+    StartupState(stdlib_root, load_env, sessions, next_id, scratch_ref, intake_ref)
 
 # The scratch dir's path, "" while none has been made.
 export fn scratch_dir_of(state: StartupState) -> String !{IO} =
-  do
-    (dir, _) <- ref_read(state_scratch_ref(state))
-    dir
+  match ref_read(state_scratch_ref(state)) with
+  | Just scratch -> scratch.dir
+  | Nothing -> ""
+
+# The runtime objects compiled into the scratch dir; `Nothing` before the first compile, after a
+# link that found one missing, and while there is no scratch dir.
+export fn runtime_objects_of(state: StartupState) -> Maybe (List String) !{IO} =
+  match ref_read(state_scratch_ref(state)) with
+  | Just scratch -> recorded_paths(scratch.objects)
+  | Nothing -> Nothing
+
+fn recorded_paths(objs_ref: Ref (Maybe RuntimeObjects)) -> Maybe (List String) !{IO} =
+  match ref_read(objs_ref) with
+  | Just objects -> Just(objects.paths)
+  | Nothing -> Nothing
 
 # The file in the scratch dir that holds the token this service wrote there.
 fn owner_file(dir: String) -> String =
@@ -653,10 +689,14 @@ fn owns_scratch_dir(dir: String, token: String) -> Bool !{IO} =
 # diagnostics and type-of never touches the filesystem. The cached dir is checked on each call:
 # if it is gone, or is not the one this service made, a new one is made and the other is left
 # alone. A failure is that request's error.
+fn ensure_scratch(state: StartupState) -> Result String Scratch !{IO} =
+  match ref_read(state_scratch_ref(state)) with
+  | Just scratch ->
+      if owns_scratch_dir(scratch.dir, scratch.token) then Ok(scratch) else make_scratch_dir(state)
+  | Nothing -> make_scratch_dir(state)
+
 fn ensure_scratch_dir(state: StartupState) -> Result String String !{IO} =
-  do
-    (dir, token) <- ref_read(state_scratch_ref(state))
-    if dir != "" && owns_scratch_dir(dir, token) then Ok(dir) else make_scratch_dir(state)
+  result_map(\scratch -> scratch.dir, ensure_scratch(state))
 
 # Writes the token into the new dir; on failure the dir is removed again.
 fn write_owner_file(dir: String, token: String) -> Result String Unit !{IO} =
@@ -665,48 +705,140 @@ fn write_owner_file(dir: String, token: String) -> Result String Unit !{IO} =
   | Err msg ->
       do
         let _ = fs.remove_dir_all(dir)
-        Err("could not make the scratch dir: " ++ msg)
+        Err(msg)
 
-# A new dir holds no runtime objects, so the compiled flag is cleared with it.
-fn make_scratch_dir(state: StartupState) -> Result String String !{IO} =
-  let dir = try fs_failure("could not make the scratch dir", fs.make_temp_dir("sprout-analysis-"))
-      raw = try result_map_error(\_ -> "could not make the scratch dir: no random bytes available",
-                                 crypto.random_bytes(16))
+# The steps of `make_scratch_dir`, each failing with its bare reason.
+fn new_scratch_dir(state: StartupState) -> Result String Scratch !{IO} =
+  let dir = try result_map_error(\e -> fs.fs_error_message(e), fs.make_temp_dir("sprout-analysis-"))
+      raw = try result_map_error(\_ -> "no random bytes available", crypto.random_bytes(16))
       token = crypto.base64url_encode(raw)
       _ = try write_owner_file(dir, token)
   in do
-       ref_write(state_scratch_ref(state), (dir, token))
-       ref_write(state_compiled_ref(state), false)
-       Ok(dir)
+       objs <- ref_new(Nothing)
+       let scratch = Scratch(dir = dir, token = token, objects = objs)
+       ref_write(state_scratch_ref(state), Just(scratch))
+       Ok(scratch)
+
+# A new dir holds no runtime objects, so its `Scratch` records none.
+fn make_scratch_dir(state: StartupState) -> Result String Scratch !{IO} =
+  result_map_error(\msg -> "could not make the scratch dir: " ++ msg, new_scratch_dir(state))
+
+# `remove_dir_all` can fail because a child that was killed a moment ago (a linker that was
+# running when stdin ended) still creates a file in the dir after the listing. It is dead
+# shortly after, so one more try after a short wait is enough.
+fn remove_scratch_dir(dir: String) -> Unit !{IO} =
+  match fs.remove_dir_all(dir) with
+  | Ok _ -> ()
+  | Err _ ->
+      do
+        task.task_sleep(50)
+        match fs.remove_dir_all(dir) with
+        | Ok _ -> ()
+        | Err e -> eprint("analysis service: could not remove " ++ dir ++ ": " ++ fs.fs_error_message(e))
 
 # Remove the scratch dir if this service made one, and forget it and the runtime objects inside
 # it. A dir at that path that is not ours is left alone. Called when the request stream ends; a
 # crash leaves the dir behind.
 export fn shutdown_state(state: StartupState) -> Unit !{IO} =
-  do
-    (dir, token) <- ref_read(state_scratch_ref(state))
-    ref_write(state_scratch_ref(state), ("", ""))
-    ref_write(state_compiled_ref(state), false)
-    if dir != "" && owns_scratch_dir(dir, token) then
-      match fs.remove_dir_all(dir) with
-      | Ok _ -> ()
-      | Err e -> eprint("analysis service: could not remove " ++ dir ++ ": " ++ fs.fs_error_message(e))
-    else ()
+  match ref_read(state_scratch_ref(state)) with
+  | Nothing -> ()
+  | Just scratch ->
+      do
+        ref_write(state_scratch_ref(state), Nothing)
+        if owns_scratch_dir(scratch.dir, scratch.token) then remove_scratch_dir(scratch.dir) else ()
 
-# Set the flag on the first successful compile so subsequent evals skip the clang -c step.
-# A failed compile leaves the objects dir behind, so the flag, not the dir, says it is done.
-fn mark_compiled(compiled_ref: Ref Bool) -> Result String Unit !{IO} =
+# Children run in a group of their own, so that a kill when stdin ends also reaches what they
+# started (clang starts the linker). No timeout.
+fn child_config() -> process.ProcConfig =
+  process.default_proc_config() with (group = process.NewGroup)
+
+fn child_result(prefix: String, outcome: Result process.ProcError process.ProcResult) -> Result String process.ProcResult =
+  result_map_error(\e -> prefix ++ ": " ++ process.proc_error_message(e), outcome)
+
+# The child's task. A task that was spawned but not started when the scope was cancelled still
+# runs; it must not start the child. One that was cancelled after the child ended sends nothing,
+# so its send cannot park (the channel has a spare slot as well, see `event_slots`).
+fn child_task(events: chan.Chan Event, argv: List String) -> Unit !{IO} =
+  if task.task_cancelled() then ()
+  else
+    do
+      let outcome = process.proc_run_with(child_config(), argv, Nothing)
+      if task.task_cancelled() then () else chan.chan_send(events, ChildDone(outcome))
+
+fn queue_request(intake: Ref Intake, request: Request) -> Unit !{IO} =
   do
-    ref_write(compiled_ref, true)
-    Ok(())
+    current <- ref_read(intake)
+    ref_write(intake, current with (back = Cons(request, current.back)))
+
+fn mark_stopped(intake: Ref Intake) -> Unit !{IO} =
+  do
+    current <- ref_read(intake)
+    ref_write(intake, current with (stopped = true))
+
+fn input_stopped(intake: Ref Intake) -> Bool !{IO} =
+  do
+    current <- ref_read(intake)
+    current.stopped
+
+# The oldest request read while a child ran, removed from the queue.
+fn take_queued(intake: Ref Intake) -> Maybe Request !{IO} =
+  do
+    current <- ref_read(intake)
+    match current.front with
+    | Cons request rest ->
+        do
+          ref_write(intake, current with (front = rest))
+          Just(request)
+    | Nil ->
+        match list_reverse(current.back) with
+        | Cons request rest ->
+            do
+              ref_write(intake, current with (front = rest, back = Nil))
+              Just(request)
+        | Nil -> Nothing
+
+# While the child runs, this task (the one that opened the child's scope, so the one that may
+# cancel it) reads the channel. A request goes to the queue. The end of stdin kills the child:
+# the cancel drops the task parked in `proc_run`, which kills the process.
+fn await_child(scope: task.Scope, intake: Ref Intake, events: chan.Chan Event,
+               prefix: String) -> Result String process.ProcResult !{IO} =
+  match chan.chan_recv(events) with
+  | chan.Closed -> Err(prefix ++ ": input closed")
+  | chan.Got (ChildDone outcome) -> child_result(prefix, outcome)
+  | chan.Got (Input request) ->
+      do
+        queue_request(intake, request)
+        await_child(scope, intake, events, prefix)
+  | chan.Got InputEnded ->
+      do
+        mark_stopped(intake)
+        task.scope_cancel(scope)
+        Err(prefix ++ ": input closed")
+
+fn watch_child(scope: task.Scope, intake: Ref Intake, events: chan.Chan Event,
+               prefix: String, argv: List String) -> Result String process.ProcResult !{IO} =
+  do
+    task.task_spawn(scope, \_ -> child_task(events, argv))
+    await_child(scope, intake, events, prefix)
+
+# The one place a child process starts. `Err` carries `prefix` and the reason. Once stdin has
+# ended no child starts, and one that is running is killed, so the answer is an error. Inside
+# the request loop the child runs in a task of its own, while this task goes on reading
+# the channel; without a loop (`dispatch_line` called directly) it just runs.
+fn run_child(intake: Ref Intake, prefix: String, argv: List String) -> Result String process.ProcResult !{IO} =
+  do
+    current <- ref_read(intake)
+    match current.channel with
+    | Nothing -> child_result(prefix, process.proc_run_with(child_config(), argv, Nothing))
+    | Just events ->
+        if current.stopped then Err(prefix ++ ": input closed")
+        else task.with_scope(\scope -> watch_child(scope, intake, events, prefix, argv))
 
 # Runs `argv`: `Ok` on exit 0, else `Err` with `prefix` and the reason (the error, or the stderr).
-fn run_checked(prefix: String, argv: List String) -> Result String Unit !{IO} =
-  match process.proc_run(argv) with
-  | Err e -> Err(prefix ++ ": " ++ process.proc_error_message(e))
-  | Ok result ->
-      if process.proc_ok(result) then Ok(())
-      else Err(prefix ++ ": " ++ process.proc_stderr_or(result, "<stderr was not valid UTF-8>"))
+fn run_checked(intake: Ref Intake, prefix: String, argv: List String) -> Result String Unit !{IO} =
+  let result = try run_child(intake, prefix, argv)
+  in if process.proc_ok(result) then Ok(())
+     else Err(prefix ++ ": " ++ process.proc_stderr_or(result, "<stderr was not valid UTF-8>"))
 
 fn fs_failure(prefix: String, r: Result fs.FsError a) -> Result String a =
   result_map_error(\e -> prefix ++ ": " ++ fs.fs_error_message(e), r)
@@ -722,50 +854,98 @@ fn sorted_names_ending(dir: String, suffix: String) -> Result fs.FsError (List S
 fn object_name(c_name: String) -> String =
   string.drop_last(c_name, 2) ++ ".o"
 
-fn compile_runtime_sources(rt_dir: String, objs_dir: String, c_names: List String) -> Result String Unit !{IO} =
+fn compile_runtime_sources(intake: Ref Intake, rt_dir: String, objs_dir: String, c_names: List String) -> Result String Unit !{IO} =
   match c_names with
   | Nil -> Ok(())
   | Cons name rest ->
-      let _ = try run_checked("runtime compile failed",
+      let _ = try run_checked(intake, "runtime compile failed",
                 ["clang", "-c", fspath.join(rt_dir, name), "-O2", "-o", fspath.join(objs_dir, object_name(name))])
-      in compile_runtime_sources(rt_dir, objs_dir, rest)
+      in compile_runtime_sources(intake, rt_dir, objs_dir, rest)
 
-# Compile every runtime .c in `rt_dir` into its own object under `objs_dir`. There is no `cd`:
-# `rt_dir` may be relative, and then resolves against the service's working directory.
-fn compile_runtime_objs(rt_dir: String, objs_dir: String, compiled_ref: Ref Bool) -> Result String Unit !{IO} =
+# The runtime sources as hashable pieces: each file's name and size, then its bytes.
+fn source_pieces(rt_dir: String, names: List String, acc: List Builder) -> Result fs.FsError (List Builder) !{IO} =
+  match names with
+  | Nil -> Ok(list_reverse(acc))
+  | Cons name rest ->
+      let data = try fs.read_bytes(fspath.join(rt_dir, name))
+          head = bytes.from_string(name ++ " " ++ int_to_string(bytes.length(data)) ++ "\n")
+      in source_pieces(rt_dir, rest, Cons(bytes.builder_bytes(data), Cons(bytes.builder_bytes(head), acc)))
+
+# A hash of the `.c` files `c_names` and every `.h` in `rt_dir`, names and contents. It tells
+# whether the runtime sources are still the ones the objects were compiled from.
+fn runtime_fingerprint(rt_dir: String, c_names: List String) -> Result String String !{IO} =
+  let h_names = try fs_failure("runtime sources", sorted_names_ending(rt_dir, ".h"))
+      pieces = try fs_failure("runtime sources", source_pieces(rt_dir, sort_strings(list_append(c_names, h_names)), Nil))
+  in Ok(crypto.base64url_encode(crypto.sha256(bytes.builder_build(bytes.builder_concat(pieces)))))
+
+# Compile every runtime .c in `rt_dir` into its own object under `objs_dir`, and record the objects
+# in `objs_ref` once all of them are built. There is no `cd`: `rt_dir` may be relative, and then
+# resolves against the service's working directory.
+fn compile_runtime_objs(intake: Ref Intake, rt_dir: String, objs_dir: String,
+                        objs_ref: Ref (Maybe RuntimeObjects)) -> Result String RuntimeObjects !{IO} =
   let c_names = try fs_failure("runtime compile failed", sorted_names_ending(rt_dir, ".c"))
+      fingerprint = try runtime_fingerprint(rt_dir, c_names)
       _ = try fs_failure("runtime compile failed", fs.make_dir_all(objs_dir))
-      _ = try compile_runtime_sources(rt_dir, objs_dir, c_names)
-  in mark_compiled(compiled_ref)
+      _ = try compile_runtime_sources(intake, rt_dir, objs_dir, c_names)
+      objects = RuntimeObjects(paths = list_map(\n -> fspath.join(objs_dir, object_name(n)), c_names),
+                               fingerprint = fingerprint)
+  in do
+       ref_write(objs_ref, Just(objects))
+       Ok(objects)
 
-fn ensure_runtime_objs(rt_dir: String, objs_dir: String, compiled_ref: Ref Bool) -> Result String Unit !{IO} =
-  do
-    compiled <- ref_read(compiled_ref)
-    if compiled then Ok(()) else compile_runtime_objs(rt_dir, objs_dir, compiled_ref)
+# The recorded objects, or the result of compiling them now.
+fn ensure_runtime_objs(intake: Ref Intake, rt_dir: String, objs_dir: String,
+                       objs_ref: Ref (Maybe RuntimeObjects)) -> Result String RuntimeObjects !{IO} =
+  match ref_read(objs_ref) with
+  | Just objects -> Ok(objects)
+  | Nothing -> compile_runtime_objs(intake, rt_dir, objs_dir, objs_ref)
 
-# Link the eval IR against every runtime object in `objs_dir`.
-fn link_eval(ir_path: String, objs_dir: String, bin_path: String, use_darwin: Bool) -> Result String Unit !{IO} =
-  let o_names = try fs_failure("clang link failed", sorted_names_ending(objs_dir, ".o"))
+fn all_exist(paths: List String) -> Bool !{IO} =
+  match paths with
+  | Nil -> true
+  | Cons path rest -> fs.exists(path) && all_exist(rest)
+
+# Are the objects no longer what the runtime sources would give: one is gone (removed or aged out
+# of the temp dir), or the sources changed since they were compiled? If the sources cannot be read
+# the answer is yes.
+fn objects_stale(rt_dir: String, objects: RuntimeObjects) -> Bool !{IO} =
+  if !all_exist(objects.paths) then true
+  else
+    match current_fingerprint(rt_dir) with
+    | Ok now -> now != objects.fingerprint
+    | Err _ -> true
+
+fn current_fingerprint(rt_dir: String) -> Result String String !{IO} =
+  let c_names = try fs_failure("runtime sources", sorted_names_ending(rt_dir, ".c"))
+  in runtime_fingerprint(rt_dir, c_names)
+
+# Link the eval IR against the runtime objects. The IR is compiled to an object in its own file
+# first: `clang` called on the `.ll` and the objects together would write a temp file to TMPDIR,
+# and one killed during the link leaves it there.
+fn link_eval(intake: Ref Intake, ir_path: String, objs: List String, bin_path: String, use_darwin: Bool) -> Result String Unit !{IO} =
+  let eval_obj = ir_path ++ ".o"
       frameworks = if use_darwin then ["-framework", "Security", "-framework", "CoreFoundation"] else []
-  in run_checked("clang link failed",
-       concat_all([["clang", ir_path], list_map(\n -> fspath.join(objs_dir, n), o_names),
-                   ["-O2"], frameworks, ["-o", bin_path]]))
+      _ = try run_checked(intake, "clang compile failed", ["clang", "-c", ir_path, "-O2", "-o", eval_obj])
+  in run_checked(intake, "clang link failed",
+       concat_all([["clang", eval_obj], objs, frameworks, ["-o", bin_path]]))
 
-# Compile the full runtime into `objs_dir` (once: `compiled_ref` says it is done) and
+# Compile the full runtime into `objs_dir` (once: `objs_ref` holds the objects after that) and
 # link `ir_path` against every runtime object into `bin_path`.  Exported so a
 # regression test can drive the real link path: linking only sprout_runtime.o
 # leaves scheduler_park_on_fd (defined in sprout_scheduler.c) undefined.
 export fn compile_runtime_and_link_eval(
-    rt_dir: String, ir_path: String, bin_path: String, objs_dir: String,
-    compiled_ref: Ref Bool, use_darwin: Bool) -> Result String Unit !{IO} =
-  let _ = try ensure_runtime_objs(rt_dir, objs_dir, compiled_ref)
-  in match link_eval(ir_path, objs_dir, bin_path, use_darwin) with
+    intake: Ref Intake, rt_dir: String, ir_path: String, bin_path: String, objs_dir: String,
+    objs_ref: Ref (Maybe RuntimeObjects), use_darwin: Bool) -> Result String Unit !{IO} =
+  let objects = try ensure_runtime_objs(intake, rt_dir, objs_dir, objs_ref)
+  in match link_eval(intake, ir_path, objects.paths, bin_path, use_darwin) with
      | Ok _ -> Ok(())
      | Err msg ->
-         # The objects may be the cause (removed or aged out of the temp dir), so the next call
-         # compiles them again.
+         # A failed link blames the objects only when they are stale. Otherwise the IR is the cause,
+         # and the same objects serve the next eval, so a program that does not link costs no
+         # recompile. The sources are hashed here and not per eval.
          do
-           ref_write(compiled_ref, false)
+           stale <- objects_stale(rt_dir, objects)
+           if stale then ref_write(objs_ref, Nothing) else ()
            Err(msg)
 
 fn eval_main_for(type_str: String) -> Maybe compiler.EvalMain =
@@ -795,10 +975,11 @@ fn collect_eval_output(run_result: process.ProcResult) -> json.Json !{IO} =
     # now a non-text result is REPORTED as output instead of being fatal.
     ok_response(vec_strings_to_json_array(eval_output_lines(string.trim_right(process.proc_stdout_or(run_result, "<eval output was not valid UTF-8>")))))
 
-fn run_eval_binary(bin_path: String) -> json.Json !{IO} =
-  match process.proc_run([bin_path]) with
+# The eval may never end; `run_child` kills it when stdin ends.
+fn run_eval_binary(intake: Ref Intake, bin_path: String) -> json.Json !{IO} =
+  match run_child(intake, "eval_expr_in_source: could not run the eval binary", [bin_path]) with
   | Ok run_result -> collect_eval_output(run_result)
-  | Err e -> error_response("eval_expr_in_source: could not run the eval binary: " ++ process.proc_error_message(e))
+  | Err msg -> error_response(msg)
 
 # SPROUT_DARWIN_FRAMEWORKS changes the link line, and so what eval can do, so an invalid value is
 # an error for the request rather than something to ignore.
@@ -806,8 +987,8 @@ fn env_forces_frameworks() -> Result String Bool !{IO} =
   result_map_error(\_ -> "SPROUT_DARWIN_FRAMEWORKS is not valid UTF-8",
                    result_map(is_just, env.get("SPROUT_DARWIN_FRAMEWORKS")))
 
-fn uname_is_darwin() -> Bool !{IO} =
-  match process.proc_run(["uname"]) with
+fn uname_is_darwin(intake: Ref Intake) -> Bool !{IO} =
+  match run_child(intake, "uname", ["uname"]) with
   | Ok r ->
       # `uname` output is ASCII; a child that somehow emitted non-UTF-8 is simply not Darwin.
       string.trim(process.proc_stdout_or(r, "")) == "Darwin"
@@ -817,9 +998,9 @@ fn uname_is_darwin() -> Bool !{IO} =
 # frameworks (the runtime's TLS/net code needs them).  Detect the platform at
 # runtime via `uname` so a fresh macOS checkout works with no env var, mirroring
 # the justfile's `os() == "macos"` gate; SPROUT_DARWIN_FRAMEWORKS forces it on.
-fn use_darwin_frameworks() -> Result String Bool !{IO} =
+fn use_darwin_frameworks(intake: Ref Intake) -> Result String Bool !{IO} =
   match env_forces_frameworks() with
-  | Ok false -> Ok(uname_is_darwin())
+  | Ok false -> Ok(uname_is_darwin(intake))
   | forced -> forced
 
 fn diag_msg(d: compiler.Diagnostic) -> String =
@@ -830,19 +1011,19 @@ fn diag_msg(d: compiler.Diagnostic) -> String =
 fn link_and_run_eval(ir_result: compiler.IrFullResult, state: StartupState) -> json.Json !{IO} =
   let compiler.IrFullOk ir_text = ir_result
         else compiler.IrFullFail diags -> first_diag_response(diags, "eval_expr_in_source: codegen failed")
-      Ok scratch_dir = ensure_scratch_dir(state)
+      Ok scratch = ensure_scratch(state)
         else Err msg -> error_response("eval_expr_in_source: " ++ msg)
-      ir_path = fspath.join(scratch_dir, "eval.ll")
-      bin_path = fspath.join(scratch_dir, "eval_bin")
+      ir_path = fspath.join(scratch.dir, "eval.ll")
+      bin_path = fspath.join(scratch.dir, "eval_bin")
       Ok _ = fs.write_text(ir_path, ir_text)
         else Err msg -> error_response("eval_expr_in_source: write_file: eval.ll: " ++ msg)
-      Ok use_darwin = use_darwin_frameworks()
+      Ok use_darwin = use_darwin_frameworks(state_intake_ref(state))
         else Err msg -> error_response("eval_expr_in_source: " ++ msg)
       Ok _ = compile_runtime_and_link_eval(
-               runtime_dir(state_stdlib_root(state)), ir_path, bin_path,
-               fspath.join(scratch_dir, "objs"), state_compiled_ref(state), use_darwin)
+               state_intake_ref(state), runtime_dir(state_stdlib_root(state)), ir_path, bin_path,
+               fspath.join(scratch.dir, "objs"), scratch.objects, use_darwin)
         else Err msg -> error_response("eval_expr_in_source: " ++ msg)
-  in run_eval_binary(bin_path)
+  in run_eval_binary(state_intake_ref(state), bin_path)
 
 fn compile_and_run_eval(src: String, expr: String, how: compiler.EvalMain, state: StartupState) -> json.Json !{IO} =
   do
@@ -1044,26 +1225,157 @@ fn response_text(response: json.Json) -> String =
 # ---------------------------------------------------------------------------
 # Service loop
 
-fn service_loop(state: StartupState) -> Unit !{IO} =
-  match terminal.term_read_line() with
-  | Ok Nothing -> shutdown_state(state)
-  | Ok (Just line) ->
-      if string.is_empty(line) then service_loop(state)
-      else
-        do
-          response <- dispatch_line(line, state)
-          terminal.write(response_text(response) ++ "\n")
-          service_loop(state)
-  # A request line that is not valid UTF-8 is a malformed request like invalid JSON: it is
-  # answered with an error and the next line is read, so a client reading one reply per request
-  # stays in step.
-  | Err _ ->
-      do
-        terminal.write(response_text(error_response("invalid request: not valid UTF-8")) ++ "\n")
-        service_loop(state)
+# One request line from stdin. `BadLine` is a line that is not valid UTF-8 or holds a NUL byte,
+# which a String cannot hold: it is answered with an error, like invalid JSON, so a client that
+# reads one reply per request stays in step.
+export type Request (..) =
+  | Line String
+  | BadLine
 
+let newline: Bytes = bytes.singleton(10)
+
+# Trailing CRs go, so `\r\n` ends a line like `\n`.
+fn strip_cr(line: Bytes) -> Bytes =
+  if bytes.get_or(line, bytes.length(line) - 1, 0) == 13 then strip_cr(bytes.drop_last(line, 1))
+  else line
+
+# The request in one line's bytes; `Nothing` for a blank line, which is skipped.
+fn line_request(line: Bytes) -> Maybe Request =
+  if bytes.length(text) == 0 then Nothing
+  else
+    match bytes.to_string(text) with
+    | Ok s -> Just(Line(s))
+    | Err _ -> Just(BadLine)
+  where text = strip_cr(line)
+
+fn add_request(request: Maybe Request, acc: List Request) -> List Request =
+  match request with
+  | Just r -> Cons(r, acc)
+  | Nothing -> acc
+
+# `start` is where the line being cut begins; the newline search resumes at `scan`.
+fn cut_lines(all: Bytes, start: Int, scan: Int, acc: List Request) -> (List Request, Bytes) =
+  match bytes.find_from(all, newline, scan) with
+  | Nothing -> (list_reverse(acc), bytes.drop(all, start))
+  | Just i ->
+      cut_lines(all, i + 1, i + 1, add_request(line_request(bytes.slice_between(all, start, i)), acc))
+
+# The chunks held back, newest first, joined in one pass. Joining on every read would copy the
+# whole line again each time, which is quadratic in the length of a line.
+fn join_chunks(held: List Bytes) -> Bytes =
+  bytes.builder_build(bytes.builder_concat(list_map(bytes.builder_bytes, list_reverse(held))))
+
+fn hold_rest(rest: Bytes) -> List Bytes =
+  if bytes.length(rest) == 0 then Nil else [rest]
+
+# The requests that `chunk` completes, in order, and the bytes after the last newline, which wait
+# for the next chunk. `held` is what earlier calls kept: chunks without a newline, newest first.
+# A chunk without a newline is only added to it; the first newline joins them all once, and the
+# search for newlines starts at the chunk, since `held` has none. A line has no length limit, as
+# with `getline`.
+export fn split_requests(held: List Bytes, chunk: Bytes) -> (List Request, List Bytes) =
+  match bytes.find_from(chunk, newline, 0) with
+  | Nothing -> (Nil, Cons(chunk, held))
+  | Just _ ->
+      let all = join_chunks(Cons(chunk, held))
+          (requests, rest) = cut_lines(all, 0, bytes.length(all) - bytes.length(chunk), Nil)
+      in (requests, hold_rest(rest))
+
+# The request left in `held` when stdin ends without a final newline.
+export fn final_requests(held: List Bytes) -> List Request =
+  add_request(line_request(join_chunks(held)), Nil)
+
+# What the loop reads from the channel: a request or the end of stdin from the reader task, or the
+# outcome of a child process from its task.
+type Event =
+  | Input Request
+  | InputEnded
+  | ChildDone (Result process.ProcError process.ProcResult)
+
+# One slot is enough for the one send that can come after the loop has stopped receiving: the
+# outcome of a child that ended just as stdin did. The reader sends nothing after `InputEnded`, so
+# the slot is free, and the child's join cannot wait on that send. The rest is the reader's backlog.
+let event_slots: Int = 8
+
+# The longest one stdin read waits. It only bounds one park: `read_stdin` reads again at once.
+let stdin_wait_ms: Int = 60000
+
+fn send_requests(events: chan.Chan Event, requests: List Request) -> Unit !{IO} =
+  list_each(\r -> chan.chan_send(events, Input(r)), requests)
+
+fn end_input(events: chan.Chan Event, held: List Bytes) -> Unit !{IO} =
+  do
+    send_requests(events, final_requests(held))
+    chan.chan_send(events, InputEnded)
+
+fn read_chunk(events: chan.Chan Event, held: List Bytes, chunk: Bytes) -> Unit !{IO} =
+  let (requests, rest) = split_requests(held, chunk)
+  in do
+       send_requests(events, requests)
+       read_stdin(events, rest)
+
+# The only task that reads stdin (`read_avail` allows one reader). It cuts the bytes into
+# requests and ends with `InputEnded`; a read that fails ends input like EOF does.
+fn read_stdin(events: chan.Chan Event, held: List Bytes) -> Unit !{IO} =
+  match terminal.read_avail(4096, stdin_wait_ms) with
+  | terminal.TermBytes chunk -> read_chunk(events, held, chunk)
+  | terminal.TermIdle -> read_stdin(events, held)
+  | terminal.TermResized -> read_stdin(events, held)
+  | terminal.TermEof -> end_input(events, held)
+  | terminal.TermFailed _ -> end_input(events, held)
+
+fn write_reply(text: String) -> Unit !{IO} =
+  terminal.write(text ++ "\n")
+
+# Answers one request on this task. The compiler runs here and not in a forked task: a forked task
+# has a small stack and root pool, and a large source needs the main task's.
+fn answer(state: StartupState, request: Request) -> Unit !{IO} =
+  match request with
+  | Line text ->
+      do
+        response <- dispatch_line(text, state)
+        write_reply(response_text(response))
+  | BadLine -> write_reply(response_text(error_response("invalid request: not valid UTF-8")))
+
+# Answers requests in the order they were read until stdin has ended and none is left. A request
+# `run_child` read while it waited for a child is in the queue and goes first.
+fn serve(state: StartupState, events: chan.Chan Event) -> Unit !{IO} =
+  match take_queued(state_intake_ref(state)) with
+  | Just request ->
+      do
+        answer(state, request)
+        serve(state, events)
+  | Nothing ->
+      if input_stopped(state_intake_ref(state)) then ()
+      else
+        match chan.chan_recv(events) with
+        | chan.Closed -> mark_stopped(state_intake_ref(state))
+        | chan.Got (Input request) ->
+            do
+              answer(state, request)
+              serve(state, events)
+        | chan.Got InputEnded ->
+            do
+              mark_stopped(state_intake_ref(state))
+              serve(state, events)
+        | chan.Got (ChildDone _) -> serve(state, events)
+
+fn serve_in_scope(scope: task.Scope, state: StartupState) -> Unit !{IO} =
+  match chan.chan_new(scope, event_slots) with
+  | Err e -> eprint("analysis service: " ++ chan.chan_error_message(e))
+  | Ok events ->
+      do
+        ref_write(state_intake_ref(state), Intake(channel = Just(events), stopped = false, front = Nil, back = Nil))
+        task.task_spawn(scope, \_ -> read_stdin(events, Nil))
+        serve(state, events)
+
+# Serves requests until stdin ends. Every request that was read is answered. Once stdin has ended
+# no child process starts and a running one is killed, so a request that needs one (an eval) is
+# answered with an error. The REPL starts this service in its own process group, so a Ctrl-C at
+# the terminal does not reach it: the end of stdin is the only sign that the REPL is gone. The
+# scratch dir is removed after the join, when no task is left that could make it again.
 export fn run_service(stdlib_root: String) -> Unit !{IO} =
   do
     state <- build_startup_state(stdlib_root)
-    service_loop(state)
-
+    task.with_scope(\s -> serve_in_scope(s, state))
+    shutdown_state(state)

@@ -5930,9 +5930,9 @@ static int sprout_ensure_analysis_service(char** error_out) {
     return 0;
   }
   if (pid == 0) {
-    /* Own process group: job-control signals sent to the parent's foreground group (Ctrl-C,
-       Ctrl-Z) do not reach the daemon. It exits on its own when stdin reaches EOF, which
-       happens when the parent goes. */
+    /* Own process group: Ctrl-C and Ctrl-Z at the terminal reach the parent's group, not the
+       daemon. It stops when its stdin reaches EOF, which happens when the parent goes; that also
+       stops an eval it is running. */
     setpgid(0, 0);
     /* A pipe end that landed on fd 0, 1 or 2 (the parent had that descriptor closed) would be
        overwritten by the dup2 calls below, or closed with them. Move every end above 2 first. */
@@ -5943,35 +5943,22 @@ static int sprout_ensure_analysis_service(char** error_out) {
     if (req_r < 0 || req_w < 0 || resp_r < 0 || resp_w < 0) _exit(127);
     dup2(req_r, STDIN_FILENO);   /* cloexec-gate: fork child */
     dup2(resp_w, STDOUT_FILENO);   /* cloexec-gate: fork child */
-    /* The daemon's stdout carries the JSON protocol, so stderr is a free
-       diagnostic channel.  Historically it was sent to /dev/null, which
-       silently discarded every panic, `sprout_tag: null pointer` abort, and
-       stack-overflow backtrace — leaving a crashed daemon indistinguishable
-       from a hang (the client just sees "empty response").  Capture stderr to
-       a logfile instead.  The log is opened only if it is a regular file we
-       own that group and others cannot write (sprout_open_service_log);
-       otherwise stderr goes to /dev/null.  Override the path with
-       SPROUT_ANALYSIS_SERVICE_LOG, or set it to "off" or "/dev/null" to use /dev/null.  The
-       variable is read before fork(): getenv is not async-signal-safe and the
-       runtime has helper threads, so this child keeps to open, fstat, fcntl,
-       dup2, close, write, setpgid and _exit.  dup2 clears FD_CLOEXEC on fd 2 by design,
-       so the exec'd daemon inherits the log (or /dev/null) as its stderr; the
-       daemon's post-exec fprintf(stderr,...) crash messages — including the
-       no-newline `sprout_tag: null pointer` abort — reach the log on their
-       own, since stderr is unbuffered.  The banner is written with raw
-       write(2), as the stack-overflow handler does: no dependence on stdio
-       state. */
+    /* The daemon's stdout carries the JSON protocol, so stderr is a free diagnostic channel. It
+       used to go to /dev/null, which hid every panic and crash message and made a crashed daemon
+       look like a hang (the client only sees an empty response). It goes to a log instead.
+       "off" or "/dev/null" in SPROUT_ANALYSIS_SERVICE_LOG sends it to /dev/null, as does a log
+       that sprout_open_service_log refuses. The runtime has helper threads, so this child makes
+       only async-signal-safe calls. dup2 clears FD_CLOEXEC on fd 2 by design: the exec'd daemon
+       inherits the log as its stderr. The banner is written with raw write(2), as the
+       stack-overflow handler does: no dependence on stdio state. */
     int log_fd = -1;
     if (strcmp(log_target, "off") != 0 && strcmp(log_target, "/dev/null") != 0) {
       log_fd = sprout_open_service_log(log_target);
       if (log_fd < 0) {
-        /* fd 2 is still the parent's stderr here.  Say the log is unused, as one line, built
-           from separate write calls (no snprintf in the child). */
-        static const char refused_a[] = "sprout: analysis service log not used (not a private regular file): ";
-        ssize_t rw = write(STDERR_FILENO, refused_a, sizeof(refused_a) - 1);
-        rw = write(STDERR_FILENO, log_target, strlen(log_target));
-        rw = write(STDERR_FILENO, "\n", 1);
-        (void)rw;
+        /* fd 2 is still the parent's stderr here. Say the log is unused, as one line. */
+        sov_write("sprout: analysis service log not used (not a private regular file): ");
+        sov_write(log_target);
+        sov_write("\n");
       }
     }
     /* Opened at the lowest free fd, which is 2 when the parent had stderr closed. */

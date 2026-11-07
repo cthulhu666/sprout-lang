@@ -27,6 +27,17 @@ fn eval_text(src: String, expr: String, state: service.StartupState) -> String !
     | Ok text -> text
     | Err _ -> ""
 
+# `expr` in the buffer `src` evaluates to the one line `value`.
+fn assert_evals_in(test: TestState, label: String, src: String, expr: String, value: String,
+                   state: service.StartupState) -> Unit !{IO} =
+  do
+    got <- eval_text(src, expr, state)
+    assert_true(test, label, got == "{\"ok\":true,\"value\":[\"" ++ value ++ "\"]}")
+
+fn assert_evals(test: TestState, label: String, expr: String, value: String,
+                state: service.StartupState) -> Unit !{IO} =
+  assert_evals_in(test, label, "", expr, value, state)
+
 # A type with one owner, and a way to show it that consumes it.
 fn linear_source() -> String =
   "type linear File = File Int\n"
@@ -37,16 +48,11 @@ fn linear_source() -> String =
 
 fn run_cases(test: TestState, state: service.StartupState) -> Unit !{IO} =
   do
-    reserved <- eval_text("let __repl_source_value = 1\n", "__repl_source_value + 1", state)
-    assert_true(test, "the buffer may bind the name eval used to reserve",
-      reserved == "{\"ok\":true,\"value\":[\"2\"]}")
-
-    linear <- eval_text(linear_source(), "File(7)", state)
-    assert_true(test, "a linear value is evaluated, not refused as a module binding",
-      linear == "{\"ok\":true,\"value\":[\"File 7\"]}")
-
-    action <- eval_text("", "print(\"hi\")", state)
-    assert_true(test, "a Unit !{IO} expression is run", action == "{\"ok\":true,\"value\":[\"hi\"]}")
+    assert_evals_in(test, "the buffer may bind the name eval used to reserve",
+      "let __repl_source_value = 1\n", "__repl_source_value + 1", "2", state)
+    assert_evals_in(test, "a linear value is evaluated, not refused as a module binding",
+      linear_source(), "File(7)", "File 7", state)
+    assert_evals(test, "a Unit !{IO} expression is run", "print(\"hi\")", "hi", state)
 
     has_main <- eval_text("fn main() -> Unit !{IO} = print(\"x\")\n", "1", state)
     assert_true(test, "a buffer that declares main is refused by name",
@@ -62,8 +68,7 @@ fn scratch_cases(test: TestState, state: service.StartupState) -> Unit !{IO} =
   do
     before <- service.scratch_dir_of(state)
     assert_true(test, "no scratch dir exists before the first eval", before == "")
-    first <- eval_text("", "1 + 1", state)
-    assert_true(test, "an eval works", first == "{\"ok\":true,\"value\":[\"2\"]}")
+    assert_evals(test, "an eval works", "1 + 1", "2", state)
     dir <- service.scratch_dir_of(state)
     assert_true(test, "the first eval makes a scratch dir", dir != "" && fs.is_dir(dir))
     assert_true(test, "the scratch dir holds the eval files", fs.is_file(dir ++ "/eval.ll"))
@@ -71,37 +76,33 @@ fn scratch_cases(test: TestState, state: service.StartupState) -> Unit !{IO} =
     assert_false(test, "shutdown_state removes the scratch dir", fs.exists(dir))
     after <- service.scratch_dir_of(state)
     assert_true(test, "shutdown_state resets the scratch dir", after == "")
-    again <- eval_text("", "2 + 2", state)
-    assert_true(test, "an eval after shutdown_state makes a fresh scratch dir",
-      again == "{\"ok\":true,\"value\":[\"4\"]}")
+    let objects = service.runtime_objects_of(state)
+    assert_true(test, "shutdown_state forgets the runtime objects", is_nothing(objects))
+    assert_evals(test, "an eval after shutdown_state makes a fresh scratch dir", "2 + 2", "4", state)
 
 # A scratch dir removed behind the service's back is made again, and the runtime objects with it.
 fn vanished_scratch_cases(test: TestState, state: service.StartupState) -> Unit !{IO} =
   do
-    first <- eval_text("", "1 + 1", state)
-    assert_true(test, "an eval works before the dir vanishes", first == "{\"ok\":true,\"value\":[\"2\"]}")
+    assert_evals(test, "an eval works before the dir vanishes", "1 + 1", "2", state)
     old_dir <- service.scratch_dir_of(state)
     assert_true(test, "the scratch dir exists", old_dir != "" && fs.is_dir(old_dir))
     match fs.remove_dir_all(old_dir) with
     | Ok _ -> ()
     | Err e -> assert_true(test, "remove the scratch dir (" ++ fs.fs_error_message(e) ++ ")", false)
-    again <- eval_text("", "2 + 2", state)
-    assert_true(test, "an eval after the dir vanished succeeds", again == "{\"ok\":true,\"value\":[\"4\"]}")
+    assert_evals(test, "an eval after the dir vanished succeeds", "2 + 2", "4", state)
     new_dir <- service.scratch_dir_of(state)
     assert_true(test, "a new scratch dir was made", new_dir != "" && new_dir != old_dir && fs.is_dir(new_dir))
 
 # A dir put at the scratch path that the service did not make is not reused, and is left alone.
 fn foreign_scratch_cases(test: TestState, state: service.StartupState) -> Unit !{IO} =
   do
-    first <- eval_text("", "1 + 1", state)
-    assert_true(test, "an eval works before the dir is replaced", first == "{\"ok\":true,\"value\":[\"2\"]}")
+    assert_evals(test, "an eval works before the dir is replaced", "1 + 1", "2", state)
     old_dir <- service.scratch_dir_of(state)
     let stale_obj = old_dir ++ "/objs/sprout_runtime.o"
     assert_true(test, "remove the scratch dir", is_ok(fs.remove_dir_all(old_dir)))
     assert_true(test, "put another dir at the path", is_ok(fs.make_dir_all(old_dir ++ "/objs")))
     assert_true(test, "put a file that is not object code in it", is_ok(fs.write_text(stale_obj, "not object code\n")))
-    again <- eval_text("", "2 + 2", state)
-    assert_true(test, "an eval with another dir at the path succeeds", again == "{\"ok\":true,\"value\":[\"4\"]}")
+    assert_evals(test, "an eval with another dir at the path succeeds", "2 + 2", "4", state)
     new_dir <- service.scratch_dir_of(state)
     assert_true(test, "a new scratch dir was made", new_dir != "" && new_dir != old_dir && fs.is_dir(new_dir))
     assert_true(test, "the other dir is left alone", fs.is_file(stale_obj))
@@ -110,20 +111,17 @@ fn foreign_scratch_cases(test: TestState, state: service.StartupState) -> Unit !
 # A dir whose owner file holds other content is not reused, and is left alone.
 fn wrong_owner_cases(test: TestState, state: service.StartupState) -> Unit !{IO} =
   do
-    first <- eval_text("", "1 + 1", state)
-    assert_true(test, "an eval works before the owner file changes", first == "{\"ok\":true,\"value\":[\"2\"]}")
+    assert_evals(test, "an eval works before the owner file changes", "1 + 1", "2", state)
     old_dir <- service.scratch_dir_of(state)
     assert_true(test, "overwrite the owner file", is_ok(fs.write_text(old_dir ++ "/owner", "someone else")))
-    again <- eval_text("", "2 + 2", state)
-    assert_true(test, "an eval with another owner file succeeds", again == "{\"ok\":true,\"value\":[\"4\"]}")
+    assert_evals(test, "an eval with another owner file succeeds", "2 + 2", "4", state)
     new_dir <- service.scratch_dir_of(state)
     assert_true(test, "a new scratch dir was made", new_dir != "" && new_dir != old_dir && fs.is_dir(new_dir))
     assert_true(test, "the dir with another owner file is left alone", fs.is_dir(old_dir))
     assert_true(test, "remove the dir with another owner file", is_ok(fs.remove_dir_all(old_dir)))
     # A missing owner file is the same.
     assert_true(test, "remove the owner file", is_ok(fs.remove(new_dir ++ "/owner")))
-    third <- eval_text("", "3 + 3", state)
-    assert_true(test, "an eval with no owner file succeeds", third == "{\"ok\":true,\"value\":[\"6\"]}")
+    assert_evals(test, "an eval with no owner file succeeds", "3 + 3", "6", state)
     third_dir <- service.scratch_dir_of(state)
     assert_true(test, "another scratch dir was made", third_dir != "" && third_dir != new_dir)
     assert_true(test, "the dir with no owner file is left alone", fs.is_dir(new_dir))
@@ -148,8 +146,7 @@ fn remove_in(dir: String, name: String) -> Unit !{IO} =
 # When linking fails, the runtime objects are compiled again by the next eval.
 fn link_failure_cases(test: TestState, state: service.StartupState) -> Unit !{IO} =
   do
-    first <- eval_text("", "1 + 1", state)
-    assert_true(test, "an eval works before the objects go", first == "{\"ok\":true,\"value\":[\"2\"]}")
+    assert_evals(test, "an eval works before the objects go", "1 + 1", "2", state)
     dir <- service.scratch_dir_of(state)
     let objs = dir ++ "/objs"
     match fs.list_dir(objs) with
@@ -157,8 +154,24 @@ fn link_failure_cases(test: TestState, state: service.StartupState) -> Unit !{IO
     | Err e -> assert_true(test, "list the objects (" ++ fs.fs_error_message(e) ++ ")", false)
     broken <- eval_text("", "2 + 2", state)
     assert_true(test, "an eval with no objects fails to link", string.contains(broken, "\"ok\":false"))
-    healed <- eval_text("", "3 + 3", state)
-    assert_true(test, "the next eval compiles the objects again", healed == "{\"ok\":true,\"value\":[\"6\"]}")
+    let forgotten = service.runtime_objects_of(state)
+    assert_true(test, "a link that found an object missing forgets the objects", is_nothing(forgotten))
+    assert_evals(test, "the next eval compiles the objects again", "3 + 3", "6", state)
+
+# A link that fails because of the program leaves the compiled runtime objects as they were: the
+# next eval links them without compiling again.
+fn bad_ir_cases(test: TestState, state: service.StartupState) -> Unit !{IO} =
+  do
+    assert_evals(test, "an eval works before the program that does not link", "1 + 1", "2", state)
+    let before = service.runtime_objects_of(state)
+    assert_true(test, "the runtime objects are recorded", is_just(before))
+    broken <- eval_text("extern fn sprout_no_such_runtime_symbol(x: Int) -> Int\n",
+                        "sprout_no_such_runtime_symbol(1)", state)
+    assert_true(test, "a program that calls a symbol the runtime lacks fails to link",
+      string.contains(broken, "\"ok\":false") && string.contains(broken, "clang link failed"))
+    let after = service.runtime_objects_of(state)
+    assert_true(test, "the runtime objects are still recorded after that link failure", after == before)
+    assert_evals(test, "the next eval links the recorded objects", "2 + 2", "4", state)
 
 fn main() -> Unit !{IO} =
   do
@@ -177,6 +190,7 @@ fn main() -> Unit !{IO} =
             foreign_scratch_cases(test, state)
             wrong_owner_cases(test, state)
             shutdown_foreign_cases(test, state)
+            bad_ir_cases(test, state)
             link_failure_cases(test, state)
             last_dir <- service.scratch_dir_of(state)
             service.shutdown_state(state)

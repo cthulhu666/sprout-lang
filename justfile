@@ -4721,6 +4721,12 @@ lsp-smoke: build-sproutd
 repl-smoke: build-sproutd
   bash scripts/repl_smoke.sh
 
+# The analysis service run as a process: end of stdin stops it even in the middle of an eval, with
+# no eval binary or scratch dir left. OPT-IN like lsp-smoke: it needs the sproutd build.
+[group('test')]
+analysis-cancel-smoke: build-sproutd
+  bash scripts/analysis_cancel_smoke.sh
+
 # Drive `app.run`'s TermResized arm under a pty. OPT-IN, not in any aggregate:
 # it depends on `script(1)` and on process timing, and has no CI track record
 # yet. Every other arm of `run` is reachable with piped stdin; this one needs a
@@ -4847,7 +4853,7 @@ dod: verify-bootstrap-fixed-point gate-quick rooting-cost-gate scc-cost-gate run
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate noscan-gate spec-gate spec-corpus-check check-approved-builtins test-approved-builtins test-check-extern-signatures check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape test-runtime-word-casts cloexec-gate test-cloexec-gate test-gc-safety-check linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test test-asan lsp-smoke repl-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
+gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate noscan-gate spec-gate spec-corpus-check check-approved-builtins test-approved-builtins test-check-extern-signatures check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape test-runtime-word-casts cloexec-gate test-cloexec-gate test-gc-safety-check linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test test-asan lsp-smoke repl-smoke analysis-cancel-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."
