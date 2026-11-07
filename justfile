@@ -4174,8 +4174,9 @@ gc-adapt-check: bootstrap-from-seed
 # store without its barrier is caught by the verifier within a few allocations. Each program must
 # print the exact stdout in its sidecar tests/gc_gen/<name>.out, and must have run minor
 # collections. Also run with SPROUT_FL_VERIFY=1 and with SPROUT_GC_LINEAGE=1 (same flags, same
-# output), and with the mode off, where the output must be the same. The two analysis
-# helpers are static and need a live analysis service to reach from Sprout, so a C case covers
+# output), at SPROUT_GC_PROMOTE_AGE=2 and 3 with SPROUT_GC_NURSERY=1 (plus FL_VERIFY at K=2), and
+# with the mode off, where the output must be the same.
+# The two analysis helpers are static and need a live analysis service to reach from Sprout, so a C case covers
 # them (tests/c_runtime/analysis_strings.c).
 [group('test')]
 gc-gen-check: bootstrap-from-seed
@@ -4220,6 +4221,22 @@ gc-gen-check: bootstrap-from-seed
       rc=$?
       if [ "$rc" != 0 ] || ! cmp -s "$want_file" "$TMPD/$name.mode.out"; then
         echo "gc-gen-check: $name failed under MINOR=1 GENCHECK=1 STRESS=1 $mode (rc=$rc)" >&2
+        echo "  expected: $(cat "$want_file")" >&2
+        echo "  actual:   $(cat "$TMPD/$name.mode.out")" >&2
+        grep -A4 'GENCHECK\|FL_VERIFY' "$TMPD/$name.mode.err" | head -8 >&2
+        failed=1
+      fi
+    done
+    # Promotion age and the nursery rule (docs/gc-stage2-v0.md §5): young survivors, the
+    # remembered rule and premise 3 only exist at K > 1, so the default runs above never reach them.
+    for kmode in "SPROUT_GC_PROMOTE_AGE=2 SPROUT_GC_NURSERY=1" "SPROUT_GC_PROMOTE_AGE=3 SPROUT_GC_NURSERY=1" \
+                 "SPROUT_GC_PROMOTE_AGE=2 SPROUT_GC_NURSERY=1 SPROUT_FL_VERIFY=1"; do
+      # shellcheck disable=SC2086
+      env $kmode SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 \
+        "$TMPD/$name.bin" > "$TMPD/$name.mode.out" 2>"$TMPD/$name.mode.err"
+      rc=$?
+      if [ "$rc" != 0 ] || ! cmp -s "$want_file" "$TMPD/$name.mode.out"; then
+        echo "gc-gen-check: $name failed under MINOR=1 GENCHECK=1 STRESS=1 $kmode (rc=$rc)" >&2
         echo "  expected: $(cat "$want_file")" >&2
         echo "  actual:   $(cat "$TMPD/$name.mode.out")" >&2
         grep -A4 'GENCHECK\|FL_VERIFY' "$TMPD/$name.mode.err" | head -8 >&2
@@ -4330,6 +4347,8 @@ gc-walk-check: bootstrap-from-seed
 #      minor collections on and off. A floor that counts free slots by class demand grows it
 #      ~100,000 slots a cycle there instead. Free alone is not the footprint under minors: a major
 #      moves the dead old objects a minor kept from the heap count into the free pool.
+#   3. It settles with the nursery rule too (SPROUT_GC_NURSERY=1, also with PROMOTE_AGE=2): the
+#      rule sizes every collection, so the floor is its lower bound before a major and at it.
 # The probes clear the GC tuning env; SPROUT_GC_THRESHOLD turns the floor off (§12 Q5).
 [group('test')]
 gc-trigger-check: bootstrap-from-seed
@@ -4341,17 +4360,23 @@ gc-trigger-check: bootstrap-from-seed
     clang -c "$rtsrc" -O2 {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
       || { echo "gc-trigger-check: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
   done
-  # run <test> [default|0|1]: SPROUT_GC_MINOR unset (the default) or set; the log is <test>.<mode>.log.
+  # run <test> [default|0|1|nursery|nursery_k2]: SPROUT_GC_MINOR unset (the default) or set; the last
+  # two add SPROUT_GC_NURSERY=1 (and SPROUT_GC_PROMOTE_AGE=2) to minors on. Log: <test>.<mode>.log.
   run() {
     local name="$1" mode="${2:-default}" f="tests/stdlib/$1.spr" menv=(-u SPROUT_GC_MINOR)
-    [ "$mode" = default ] || menv=("SPROUT_GC_MINOR=$mode")
+    case "$mode" in
+      default) ;;
+      nursery)    menv=(SPROUT_GC_MINOR=1 SPROUT_GC_NURSERY=1) ;;
+      nursery_k2) menv=(SPROUT_GC_MINOR=1 SPROUT_GC_NURSERY=1 SPROUT_GC_PROMOTE_AGE=2) ;;
+      *)          menv=("SPROUT_GC_MINOR=$mode") ;;
+    esac
     [ -f "$f" ] || { echo "gc-trigger-check: missing $f" >&2; return 1; }
     "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$f" > "$TMPD/$name.ll" 2>"$TMPD/$name.err" \
       || { echo "gc-trigger-check: compile failed: $f" >&2; cat "$TMPD/$name.err" >&2; return 1; }
     clang "$TMPD/$name.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$name.bin" 2>"$TMPD/$name.err" \
       || { echo "gc-trigger-check: link failed: $f" >&2; cat "$TMPD/$name.err" >&2; return 1; }
     env -u SPROUT_GC_THRESHOLD -u SPROUT_GC_ADAPT_FACTOR -u SPROUT_GC_ADAPT_RATIO -u SPROUT_GC_ADAPT_CAP \
-      -u SPROUT_GC_LINEAGE -u SPROUT_GC_STRESS "${menv[@]}" SPROUT_DEBUG_GC=1 "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.$mode.log" \
+      -u SPROUT_GC_LINEAGE -u SPROUT_GC_STRESS -u SPROUT_GC_NURSERY -u SPROUT_GC_PROMOTE_AGE "${menv[@]}" SPROUT_DEBUG_GC=1 "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.$mode.log" \
       || { echo "gc-trigger-check: $name ($mode) failed" >&2; tail -5 "$TMPD/$name.$mode.log" >&2; return 1; }
     grep -q "SUITE PASSED" "$TMPD/$name.out" \
       || { echo "gc-trigger-check: $name did not pass" >&2; tail -5 "$TMPD/$name.out" >&2; return 1; }
@@ -4387,7 +4412,7 @@ gc-trigger-check: bootstrap-from-seed
     (( sp_w < 4 * sp_s )) \
       || { echo "gc-trigger-check: walk_sparse walked ${sp_w} >= 4x swept ${sp_s} — the footprint floor is not raising the threshold" >&2; failed=1; }
   else failed=1; fi
-  for mode in default 0; do
+  for mode in default 0 nursery nursery_k2; do
     if read -r ad_c ad_mid ad_end < <(pool test_gc_trigger_adversary "$mode"); then
       echo "  adversary   : minor=${mode} cycles=${ad_c} free+heap at middle=${ad_mid} at end=${ad_end}"
       (( ad_end - ad_mid <= ad_mid / 50 )) \

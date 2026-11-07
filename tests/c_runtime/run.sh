@@ -607,6 +607,46 @@ for sel in walked_young free_count no_double_list region_release large_young lin
   test "$(cat "$TMP_DIR/ys_$sel.out")" = "young-sweep-$sel"
 done
 
+echo "==> c runtime: promotion age, the remembered rule and the nursery rule, and GENCHECK aborts on an unremembered old->young edge"
+# promote_age.c includes sprout_runtime.c (like young_sweep.c). The corrupting cases and the bad
+# switch values must abort with their message: a check that tests nothing fails here.
+PA="$TMP_DIR/promote_age"
+clang "$ROOT/tests/c_runtime/promote_age.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
+  "${CLANG_EXTRA[@]}" -O0 -g ${SAN[@]+"${SAN[@]}"} -o "$PA"
+expect_abort() {  # expect_abort <tag> <message> <args...>
+  local tag="$1" want="$2"
+  shift 2
+  if ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$PA" "$@" > "$TMP_DIR/pa_$tag.out" 2> "$TMP_DIR/pa_$tag.err"; then
+    echo "  promote_age '$tag' did not abort" >&2
+    exit 1
+  fi
+  grep -q "$want" "$TMP_DIR/pa_$tag.err" || {
+    echo "  promote_age '$tag' failed without the message '$want':" >&2
+    cat "$TMP_DIR/pa_$tag.out" "$TMP_DIR/pa_$tag.err" >&2
+    exit 1
+  }
+}
+expect_abort unremembered_edge "GENCHECK: old→young edge not remembered" bad_unremembered_edge
+grep -q "owner: kind=REF .* field=0" "$TMP_DIR/pa_unremembered_edge.err" || {
+  echo "  promote_age: the check did not name the owner and field:" >&2
+  cat "$TMP_DIR/pa_unremembered_edge.err" >&2
+  exit 1
+}
+expect_abort major_bit13 "GENCHECK: remembered bit set before a major" bad_major_bit13
+expect_abort major_set "GENCHECK: remembered set not empty before a major" bad_major_set
+expect_abort bad_k0 "SPROUT_GC_PROMOTE_AGE: expected integer in \[1, 15\]" bad_env SPROUT_GC_PROMOTE_AGE 0
+expect_abort bad_k16 "SPROUT_GC_PROMOTE_AGE: expected integer in \[1, 15\]" bad_env SPROUT_GC_PROMOTE_AGE 16
+expect_abort bad_kx "SPROUT_GC_PROMOTE_AGE: expected integer in \[1, 15\]" bad_env SPROUT_GC_PROMOTE_AGE x
+expect_abort bad_nursery "SPROUT_GC_NURSERY: expected 0 or 1" bad_env SPROUT_GC_NURSERY 2
+for sel in age2 age3 age_large major_age remember set_before_major major_rule nursery_sizing nursery_pinned nursery_floor_before_major nursery_floor_binds census_age; do
+  ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$PA" "$sel" > "$TMP_DIR/pa_$sel.out" 2> "$TMP_DIR/pa_$sel.err" || {
+    echo "  promote_age '$sel' failed:" >&2
+    cat "$TMP_DIR/pa_$sel.out" "$TMP_DIR/pa_$sel.err" >&2
+    exit 1
+  }
+  test "$(cat "$TMP_DIR/pa_$sel.out")" = "promote-age-$sel"
+done
+
 echo "==> c runtime: NOSCAN vectors are not scanned, keep the bit through set/append/concat/push, and skip the barrier"
 # vec_noscan.c includes sprout_runtime.c (like gen_check.c). Each case is its own process.
 VN="$TMP_DIR/vec_noscan"

@@ -1070,7 +1070,11 @@ must run at least 20 minor collections, and it must print the same output with
 `SPROUT_GC_LINEAGE=1` (same switches, same output): the young-only sweep keeps the free lists
 between minors, FL_VERIFY compares them with a full walk after every collection, and lineage mode
 poisons dead OBJs instead of listing them, which is the case the incremental free count has to
-get right. The two static `sprout_analysis_*` helpers cannot be reached without a live
+get right. Each program also runs under the stage-2 switches ([gc-stage2-v0.md](gc-stage2-v0.md)
+§5), with the same flags and the same expected output: `SPROUT_GC_PROMOTE_AGE=2` and `=3`, each
+with `SPROUT_GC_NURSERY=1`, plus `SPROUT_FL_VERIFY=1` at K=2. Only K > 1 leaves young survivors, the remembered rule and
+the premise-3 check (an old, unremembered object points at no young one; before a major the set
+is empty and no header has bit 13), so the default runs never reach them. The two static `sprout_analysis_*` helpers cannot be reached without a live
 analysis service, so `tests/c_runtime/analysis_strings.c` covers them under the same switches and
 the same 20-minor floor. `just c-runtime-test`
 holds the verifier's own test (`tests/c_runtime/gen_check.c`): an unbarriered old-to-young store
@@ -1079,7 +1083,14 @@ sweep's: a minor over a large old heap walks only the young slots, the free coun
 walk's after reuse and inline-tail splits, no slot is listed twice, fresh empty regions are
 released, large young objects are freed or promoted, lineage mode agrees, and three corrupting
 cases (a cleared young bit, a stale bit on a FREE slot, a perturbed free count) must abort with
-the `GENCHECK:` message.
+the `GENCHECK:` message. `tests/c_runtime/promote_age.c` holds the stage-2 switches': a survivor
+is young until its Kth collection (colour, youngmap bit, region counts, also for a large object),
+a major's colour-keeping sweep promotes only at age K−1, a store into a young `Ref` whose parent is
+then promoted keeps the child alive, the set is empty before a major, the 2× rule's two inputs and
+the nursery sizing (and its pinned exception, and the footprint floor as its lower bound before a
+major and at it) are pinned, and an unremembered
+old-to-young edge, a stray bit 13 or a non-empty set before a major, and each bad switch value
+must abort with their messages.
 
 **Each site test was confirmed to fail with its barrier removed**, and the fact is the only reason
 to trust the gate: ref_write, vector_mutset, vector_push, each analysis helper, and the barrier
@@ -1127,6 +1138,9 @@ at landing, 25 with the floor off) with minor collections off, since with them o
 without the floor (2.3), and `test_gc_trigger_adversary`'s footprint (`free=` plus
 `heap_after=` on the cycle line) grows by at most 2% over the second half of the run, with minor
 collections on (177,604 → 177,712) and off (152,435 → 152,557).
+The same probe runs with `SPROUT_GC_NURSERY=1`, and with `SPROUT_GC_PROMOTE_AGE=2` added: the
+nursery rule sizes every collection, so the floor must stay its lower bound before a major and at
+the major, or the free pool grows there too.
 
 **The second probe is there to fail the floor that looks right.** Counting free slots only in
 classes with allocation demand diverges on that fixture, and so does the floor without its `/ 3`.
