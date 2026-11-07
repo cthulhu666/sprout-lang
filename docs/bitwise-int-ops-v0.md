@@ -8,7 +8,7 @@ decisions (§5.2, §5.3) with the alternatives that lost.
 
 Sprout has **no language-level bitwise operations**. There is no way to mask a field out
 of a word, no way to shift, and no way to XOR two integers. The arithmetic operator set
-is `+ - * /` — there is not even a `%`, which is why `stdlib/rng.sprout:24` carries a
+is `+ - * /` — there is not even a `%`, which is why `stdlib/rng.sprout` carries a
 hand-rolled `imod(a, b) = a - ((a / b) * b)`.
 
 Four consequences are visible in the tree today:
@@ -16,7 +16,7 @@ Four consequences are visible in the tree today:
 | Consequence | Where |
 |---|---|
 | SHA-256, HMAC-SHA-256 **and a plain byte-wise XOR** are C builtins | `runtime/APPROVED_BUILTINS:64-67`, `stdlib/crypto.sprout:17` |
-| The PRNG is an LCG over `imod`, not a xorshift | `stdlib/rng.sprout:24,28` |
+| The PRNG is an LCG over `imod`, not a xorshift | `stdlib/rng.sprout` (`imod`, `rng_next`) |
 | The 64-bit GC header word (kind 8b \| colour 2b \| reserved 4b \| aux 50b, ~14 consumer sites) cannot be read from Sprout at all | `docs/gc-phase2-retro-handoff-2026-07-05.md` §2 |
 | `stdlib.math`'s exponent extraction has to substitute division and subtraction for shift and mask | `docs/double-bit-access-v0.md` §5 |
 

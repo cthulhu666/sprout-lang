@@ -6,10 +6,17 @@ module stdlib.rng
 # reproducibility matters. It is NOT cryptographic: the stream is fully
 # predictable from any output. For unpredictable bytes use crypto.random_bytes.
 #
-# State is an Int held in [0, M). One step is the classic recurrence
+# Any Int is a valid state. It is reduced mod 2^31 first, so seeds equal mod 2^31 give
+# the same stream. To derive a well-spread seed from a 64-bit value, hash it with
+# `rng_hash2` rather than relying on that truncation. One step is the classic recurrence
 #   state' = (A * state + C) mod M      M = 2^31, A = 1103515245, C = 12345
-# A * (M - 1) < 2^62 < 2^63, so the multiply never overflows an i64 — the stream
-# is identical regardless of a target's integer-overflow semantics.
+# The reduced state keeps A * state < 2^62 < 2^63, so the multiply never overflows an
+# i64 — the stream is identical regardless of a target's integer-overflow semantics.
+#
+# Compatibility: states in [0, 2^31) give exactly the old values. A negative state now
+# yields the non-negative representative of the same residue (the old code gave a
+# negative Int: rng_next(-1) was -1103502900, now 1043980748). `rng_below` of a state
+# >= 2^31 changes.
 
 let rng_modulus = 2147483648  # 2^31
 let rng_mult = 1103515245
@@ -23,21 +30,27 @@ let rng_high_shift = 65536
 # a - (a / b) * b (integer `/` truncates toward zero).
 fn imod(a: Int, b: Int) -> Int = a - ((a / b) * b)
 
-# Advance the generator one step. Pure: threading the returned state is how a
-# caller draws successive values. O(1).
-export fn rng_next(state: Int) -> Int = imod((rng_mult * state) + rng_incr, rng_modulus)
-
-# A value in [0, n) derived from `state`, taken from its high bits for better
-# uniformity than a raw `state mod n`. Total: n <= 0 yields 0. O(1).
-export fn rng_below(state: Int, n: Int) -> Int =
-  if n <= 0 then 0 else imod(state / rng_high_shift, n)
-
 # Non-negative reduction into [0, rng_modulus). Unlike `imod` (which truncates toward
 # zero and so can return a negative remainder), this corrects the sign, so a hash of a
 # negative coordinate is still a valid generator state. O(1).
 fn rng_mod(a: Int) -> Int =
   let m = imod(a, rng_modulus)
   in if m < 0 then m + rng_modulus else m
+
+# Any Int as a generator state: already in [0, rng_modulus) passes through, else reduced.
+fn rng_state(s: Int) -> Int = if (s >= 0) && (s < rng_modulus) then s else rng_mod(s)
+
+# Advance the generator one step. Pure: threading the returned state is how a
+# caller draws successive values. Accepts any Int state. O(1).
+export fn rng_next(state: Int) -> Int =
+  imod((rng_mult * rng_state(state)) + rng_incr, rng_modulus)
+
+# A value in [0, n) derived from `state`, taken from its high bits for better
+# uniformity than a raw `state mod n`. Total: n <= 0 yields 0. O(1).
+# Draws from 15 bits (state / 65536 < 32768): n > 32768 is not covered, and an n that
+# does not divide 32768 is slightly biased.
+export fn rng_below(state: Int, n: Int) -> Int =
+  if n <= 0 then 0 else imod(rng_state(state) / rng_high_shift, n)
 
 # The two large primes that decorrelate the x and z axes of a spatial hash (the classic
 # Perlin lattice constants). Distinct primes so the two coordinates never share a stride.
