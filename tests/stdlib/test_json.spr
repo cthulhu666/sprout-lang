@@ -47,6 +47,13 @@ fn field_int_is(input: String, key: String, want: Int) -> Bool =
 
 fn zeros(n: Int) -> String = if n <= 0 then "" else "0" ++ zeros(n - 1)
 
+# `{"k0":0,"k1":1,...}` with `n` distinct keys; `n` must be >= 1.
+fn many_keys_go(i: Int, n: Int, acc: String) -> String =
+  if i >= n then acc ++ "}"
+  else many_keys_go(i + 1, n, acc ++ ",\"k" ++ int_to_string(i) ++ "\":" ++ int_to_string(i))
+
+fn many_keys(n: Int) -> String = many_keys_go(1, n, "{\"k0\":0")
+
 # Built by arithmetic, not by parsing: -1.0 * 0.0 is -0.0 under IEEE 754.
 fn neg_zero() -> Double = (0.0 - 1.0) * 0.0
 
@@ -380,5 +387,38 @@ fn main() -> Unit !{IO} =
     check_true("multi-byte string value decodes byte-for-byte",
       field_string_is("{\"a\": \"café\"}", "a", "café")),
     check_true("3-byte string value decodes byte-for-byte",
-      field_string_is("{\"a\": \"日本語\"}", "a", "日本語"))
+      field_string_is("{\"a\": \"日本語\"}", "a", "日本語")),
+
+    # --- values that cannot be represented are decode errors ---
+    # A Sprout String holds no NUL, so \u0000 has no value to decode to.
+    check_true("\\u0000 inside a string is an error",
+      is_err(json.parse("\"ad\\u0000min\""))),
+    check_true("a lone \\u0000 string is an error",
+      is_err(json.parse("\"\\u0000\""))),
+    check_true("\\u0000 in an object key is an error",
+      is_err(json.parse("{\"a\\u0000\": 1}"))),
+    check_true("\\u0001 still decodes", is_ok(json.parse("\"\\u0001\""))),
+    check_true("1e999 is an error", is_err(json.parse("1e999"))),
+    check_true("-1e999 is an error", is_err(json.parse("-1e999"))),
+    check_true("1.5e400 is an error", is_err(json.parse("1.5e400"))),
+    check_true("an out-of-range number inside an array is an error",
+      is_err(json.parse("[1e999]"))),
+    check_true("1e-999 underflows to 0.0", top_float_approx("1e-999", 0.0, 0.0001)),
+
+    # --- duplicate object keys are decode errors ---
+    check_true("a duplicate key is an error", is_err(json.parse("{\"a\":1,\"a\":2}"))),
+    check_true("keys compare after escape decoding",
+      is_err(json.parse("{\"a\":1,\"\\u0061\":2}"))),
+    check_true("a duplicate key in a nested object is an error",
+      is_err(json.parse("{\"x\":{\"a\":1,\"a\":2}}"))),
+    check_true("a duplicate key in an object inside an array is an error",
+      is_err(json.parse("[{\"a\":1,\"b\":2,\"a\":3}]"))),
+    check_true("the same key in sibling objects is fine",
+      is_ok(json.parse("{\"x\":{\"a\":1},\"y\":{\"a\":2}}"))),
+    check_true("the same key in a parent and a child is fine",
+      is_ok(json.parse("{\"a\":{\"a\":1}}"))),
+    check_true("distinct keys that differ in case are fine",
+      is_ok(json.parse("{\"a\":1,\"A\":2}"))),
+    check_true("a 2000-key object with distinct keys parses",
+      is_ok(json.parse(many_keys(2000))))
   ])

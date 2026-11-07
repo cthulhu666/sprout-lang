@@ -179,6 +179,17 @@ for sel in neg toobig surrogate from_neg; do
     exit 1
   }
 done
+if "$TMP_DIR/char_codepoint_validate" nul > "$TMP_DIR/cc.out" 2> "$TMP_DIR/cc.err"; then
+  echo "  codepoint case 'nul' did not abort" >&2
+  cat "$TMP_DIR/cc.out" >&2
+  exit 1
+fi
+grep -q "char_to_string: NUL cannot be in a String" "$TMP_DIR/cc.err" || {
+  echo "  codepoint case 'nul' aborted without the expected message:" >&2
+  cat "$TMP_DIR/cc.err" >&2
+  exit 1
+}
+test "$("$TMP_DIR/char_codepoint_validate" nul_char)" = "nul-char-ok"
 "$TMP_DIR/char_codepoint_validate" ok > "$TMP_DIR/cc_ok.out"
 test "$(cat "$TMP_DIR/cc_ok.out")" = "char-codepoint-validated"
 
