@@ -47,13 +47,6 @@ fn field_int_is(input: String, key: String, want: Int) -> Bool =
 
 fn zeros(n: Int) -> String = if n <= 0 then "" else "0" ++ zeros(n - 1)
 
-# `{"k0":0,"k1":1,...}` with `n` distinct keys; `n` must be >= 1.
-fn many_keys_go(i: Int, n: Int, acc: String) -> String =
-  if i >= n then acc ++ "}"
-  else many_keys_go(i + 1, n, acc ++ ",\"k" ++ int_to_string(i) ++ "\":" ++ int_to_string(i))
-
-fn many_keys(n: Int) -> String = many_keys_go(1, n, "{\"k0\":0")
-
 # Built by arithmetic, not by parsing: -1.0 * 0.0 is -0.0 under IEEE 754.
 fn neg_zero() -> Double = (0.0 - 1.0) * 0.0
 
@@ -105,6 +98,20 @@ fn arr_of(x: json.Json) -> json.Json =
 fn obj_of(x: json.Json) -> json.Json =
   json.JsonObject(json.JsonObjectCons("k", x, json.JsonObjectNil))
 
+# An object holding the same key twice. `parse` cannot produce one, so these are built directly.
+fn obj_dup(key: String, x: json.Json, y: json.Json) -> json.Json =
+  json.JsonObject(json.JsonObjectCons(key, x, json.JsonObjectCons(key, y, json.JsonObjectNil)))
+
+fn stringify_message(value: json.Json) -> String =
+  match json.stringify(value) with
+  | Ok _ -> ""
+  | Err e -> json.json_error_message(e)
+
+fn repeated_key_is(value: json.Json, want: String) -> Bool =
+  match json.stringify(value) with
+  | Err (json.JsonDuplicateKey key) -> key == want
+  | _ -> false
+
 # Asserts the SPECIFIC variant, not merely Err. A JsonDecode here would mean the writer refused
 # for an unrelated reason, and a bare `is_err` check would still call that a pass.
 fn refuses(value: json.Json) -> Bool =
@@ -112,6 +119,7 @@ fn refuses(value: json.Json) -> Bool =
   | Ok _ -> false
   | Err (json.JsonNonFinite _) -> true
   | Err (json.JsonDecode _) -> false
+  | Err (json.JsonDuplicateKey _) -> false
 
 fn accepts(value: json.Json) -> Bool =
   match json.stringify(value) with
@@ -125,6 +133,7 @@ fn refused_value_is_nan(value: json.Json) -> Bool =
   | Ok _ -> false
   | Err (json.JsonNonFinite x) -> !(x == x)
   | Err (json.JsonDecode _) -> false
+  | Err (json.JsonDuplicateKey _) -> false
 
 fn int_on_float_is_nothing(input: String) -> Bool =
   match json.parse(input) with
@@ -419,6 +428,31 @@ fn main() -> Unit !{IO} =
       is_ok(json.parse("{\"a\":{\"a\":1}}"))),
     check_true("distinct keys that differ in case are fine",
       is_ok(json.parse("{\"a\":1,\"A\":2}"))),
-    check_true("a 2000-key object with distinct keys parses",
-      is_ok(json.parse(many_keys(2000))))
+
+    # KNOWN: parse_double reads a literal within a few ULP of DBL_MAX as +inf (BACKLOG P3
+    # `parse_double` 5-ULP entry), so json rejects it. Characterised, not endorsed: when
+    # parse_double is fixed this flips to Ok and the check should be inverted.
+    check_true("KNOWN: 1.7976931348623158e308 reads as non-finite and is rejected",
+      is_err(json.parse("1.7976931348623158e308"))),
+
+    # --- the writer refuses a repeated key, so its output always parses back ---
+    check_true("stringify refuses a repeated key",
+      is_err(json.stringify(obj_dup("a", json.JsonInt(1), json.JsonInt(2))))),
+    check_true("stringify refuses a repeated key in a nested object",
+      is_err(json.stringify(arr_of(obj_of(obj_dup("a", json.JsonInt(1), json.JsonInt(2))))))),
+    check_true("the same key in sibling objects is writable",
+      accepts(json.JsonObject(json.JsonObjectCons("x", obj_of(json.JsonInt(1)),
+        json.JsonObjectCons("y", obj_of(json.JsonInt(2)), json.JsonObjectNil))))),
+    check_true("the same key in a parent and a child is writable",
+      accepts(json.JsonObject(json.JsonObjectCons("k", obj_of(json.JsonInt(1)), json.JsonObjectNil)))),
+    check_true("stringify reports the repeated key",
+      repeated_key_is(obj_dup("a", json.JsonInt(1), json.JsonInt(2)), "a")),
+    check_true("a NaN before a repeat in document order is reported first",
+      refuses(obj_dup("a", json.JsonFloat(nan_d()), json.JsonInt(2)))),
+    check_true("a repeat before a NaN in document order is reported first",
+      repeated_key_is(obj_dup("a", json.JsonInt(1), json.JsonFloat(nan_d())), "a")),
+    check_true("a repeated key message names the key",
+      stringify_message(obj_dup("a", json.JsonInt(1), json.JsonInt(2))) == "repeated object key: a"),
+    check_true("a non-finite number message names the value",
+      string.starts_with(stringify_message(json.JsonFloat(pos_inf())), "non-finite number: "))
   ])

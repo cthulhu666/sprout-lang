@@ -548,11 +548,13 @@ JSON stdlib helpers (in `stdlib/json.sprout`):
 - `JsonEncode a` plus `encode(value)` for directly encodable values (`Json`, `Int`, `Bool`, `String`)
 - `JsonArrayStep` / `JsonObjectStep` traversal ADTs
 - builder helpers: `null`, `bool(value)`, `int(value)`, `string(value)`, `array_from_list(items)`, `object_from_pairs(items)`, `object_from_dict(items)`
-- `parse(raw) -> Result JsonError Json`. Input nested more than 128 arrays/objects deep is rejected with `Err(JsonDecode("invalid JSON"))`; the limit is fixed because the parser recurses once per level on a fixed-size task stack. A `\u0000` escape, a number with no finite `Double` (`1e999`; underflow such as `1e-999` reads as `0.0`) and a repeated key within one object (compared after escape decoding) are decode errors too: a `String` holds no NUL, a `JsonFloat` must be writable, and RFC 7493 §2.3 forbids repeated names.
+- `parse(raw) -> Result JsonError Json`. Input nested more than 128 arrays/objects deep is rejected with `Err(JsonDecode("invalid JSON"))`; the limit is fixed because the parser recurses once per level on a fixed-size task stack. A `\u0000` escape, a number `parse_double` reads as non-finite (`1e999`; this includes a literal within a few ULP of `DBL_MAX`, which `parse_double` misreads as `+inf`; underflow such as `1e-999` reads as `0.0`) and a repeated key within one object (compared after escape decoding) are decode errors too: a `String` holds no NUL, a `JsonFloat` must be writable, and RFC 7493 §2.3 forbids repeated names.
 - `stringify(value: Json) -> Result JsonError String` (compact JSON). Returns `Err(JsonNonFinite x)`
   when the tree contains a NaN or an infinity: RFC 8259 §6 has no syntax for either, so a writer
   must choose between refusing and inventing a stand-in, and every stand-in (`null`, a quoted
-  `"NaN"`) comes back a different `Json` constructor than went in.
+  `"NaN"`) comes back a different `Json` constructor than went in. Returns
+  `Err(JsonDuplicateKey key)` when one object holds the same key twice, since `parse` would refuse
+  that output. The first problem in document order is the one reported.
 - `json_error_message(err: JsonError) -> String` — render any `JsonError` without matching on the
   variant set
 - `json_get_field(value, key) -> Maybe Json`
