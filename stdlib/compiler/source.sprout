@@ -1,10 +1,5 @@
 module stdlib.compiler.source
 import stdlib.string as string
-# Load-bearing despite the alias never being written: `bytes_from_utf8` / `bytes_get` below are
-# `extern fn`s owned by stdlib.bytes, and externs resolve by bare name only once their module is
-# in the bundle (an extern is never module-qualified, so it resolves by bare name).
-# Removing this import does not produce a scoping error — it produces a link failure.
-import stdlib.bytes as bytes
 
 # A position in a source file: the codepoint INDEX (0-based), and the LINE and
 # COLUMN a human reads in an editor (both 1-based).
@@ -27,13 +22,11 @@ import stdlib.bytes as bytes
 # single-constructor `match` still emits.
 export type SourcePos (..) = (index: Int, line: Int, column: Int)
 
-# SourceCursor carries the raw source String (for byte slicing and prefix
-# matching), its UTF-8 Bytes (for safe, bounds-checked codepoint decoding), the
-# current BYTE offset, and the SourcePos (codepoint index + line/column for
-# diagnostics).  The byte offset indexes both the String and the Bytes — they
-# share byte positions since the Bytes are the String's UTF-8 encoding.
+# SourceCursor carries the raw source String (read byte by byte with `str_byte_at`,
+# sliced and prefix-matched), the current BYTE offset into it, and the SourcePos
+# (codepoint index + line/column for diagnostics).
 export type SourceCursor (..) =
-  | SourceCursor String Bytes Int SourcePos
+  | SourceCursor String Int SourcePos
 
 # FilePath is the path to a single source file (e.g. "main.sprout").
 # StdlibRoot is the directory from which `stdlib.*` imports resolve.
@@ -77,11 +70,11 @@ export fn global_name_str(g: GlobalName) -> String =
   match g with | GlobalName s -> s
 
 export fn cursor_from_string(raw: String) -> SourceCursor =
-  SourceCursor(raw, bytes_from_utf8(raw), 0, SourcePos(index = 0, line = 1, column = 1))
+  SourceCursor(raw, 0, SourcePos(index = 0, line = 1, column = 1))
 
 export fn source_position(cursor: SourceCursor) -> SourcePos =
   match cursor with
-  | SourceCursor _ _ _ pos -> pos
+  | SourceCursor _ _ pos -> pos
 
 # No position_index / position_line / position_column accessors: read the fields
 # directly (`pos.index`, `pos.line`, `pos.column`). They existed to name the slots
@@ -91,22 +84,19 @@ export fn source_position(cursor: SourceCursor) -> SourcePos =
 
 fn cursor_source(cursor: SourceCursor) -> String =
   match cursor with
-  | SourceCursor raw _ _ _ -> raw
-
-fn cursor_bytes(cursor: SourceCursor) -> Bytes =
-  match cursor with
-  | SourceCursor _ bytes _ _ -> bytes
+  | SourceCursor raw _ _ -> raw
 
 # cursor_byte_offset: the current BYTE offset into the raw source.  SourcePos.index
 # still tracks the codepoint index for diagnostics — these two are intentionally
 # separate.
 export fn cursor_byte_offset(cursor: SourceCursor) -> Int =
   match cursor with
-  | SourceCursor _ _ byte_offset _ -> byte_offset
+  | SourceCursor _ byte_offset _ -> byte_offset
 
-# ── Safe UTF-8 decode over Bytes ─────────────────────────────────────────────
-# Every byte read goes through bytes_get, which is bounds-checked (Nothing past
-# the end), so no offset — however large or fabricated — can read out of bounds.
+# ── Safe UTF-8 decode over a String ──────────────────────────────────────────
+# Every byte read goes through str_byte_at, which is bounds-checked (Nothing past
+# the end or below 0), so no offset — however large or fabricated — can read out
+# of bounds.
 
 fn is_cont(byte: Int) -> Bool =
   byte >= 128 && byte < 192
@@ -119,40 +109,40 @@ fn is_cont(byte: Int) -> Bool =
 # digit.  Representation-stable: this is pure byte arithmetic, independent of how
 # Char is represented at runtime, so the parser can use it to record char-literal
 # codepoints in the AST without depending on the Char representation.
-export fn decode_codepoint_at(b: Bytes, i: Int) -> Maybe (Int, Int) =
-  match bytes_get(b, i) with
+export fn decode_codepoint_at(s: String, i: Int) -> Maybe (Int, Int) =
+  match str_byte_at(s, i) with
   | Nothing -> Nothing
   | Just b0 ->
       if b0 < 128 then Just((b0, i + 1))
       else if b0 < 192 then Nothing
-      else if b0 < 224 then decode2(b, i, b0)
-      else if b0 < 240 then decode3(b, i, b0)
-      else if b0 < 248 then decode4(b, i, b0)
+      else if b0 < 224 then decode2(s, i, b0)
+      else if b0 < 240 then decode3(s, i, b0)
+      else if b0 < 248 then decode4(s, i, b0)
       else Nothing
 
-fn decode2(b: Bytes, i: Int, b0: Int) -> Maybe (Int, Int) =
-  match bytes_get(b, i + 1) with
+fn decode2(s: String, i: Int, b0: Int) -> Maybe (Int, Int) =
+  match str_byte_at(s, i + 1) with
   | Nothing -> Nothing
   | Just b1 ->
       if is_cont(b1) then
         Just(((b0 - 192) * 64 + (b1 - 128), i + 2))
       else Nothing
 
-fn decode3(b: Bytes, i: Int, b0: Int) -> Maybe (Int, Int) =
-  match bytes_get(b, i + 1) with
+fn decode3(s: String, i: Int, b0: Int) -> Maybe (Int, Int) =
+  match str_byte_at(s, i + 1) with
   | Nothing -> Nothing
   | Just b1 ->
-      match bytes_get(b, i + 2) with
+      match str_byte_at(s, i + 2) with
       | Nothing -> Nothing
       | Just b2 ->
           if is_cont(b1) && is_cont(b2) then
             Just(((b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128), i + 3))
           else Nothing
 
-fn decode4(b: Bytes, i: Int, b0: Int) -> Maybe (Int, Int) =
-  let Just b1 = bytes_get(b, i + 1) else Nothing
-      Just b2 = bytes_get(b, i + 2) else Nothing
-      Just b3 = bytes_get(b, i + 3) else Nothing
+fn decode4(s: String, i: Int, b0: Int) -> Maybe (Int, Int) =
+  let Just b1 = str_byte_at(s, i + 1) else Nothing
+      Just b2 = str_byte_at(s, i + 2) else Nothing
+      Just b3 = str_byte_at(s, i + 3) else Nothing
   in
     if is_cont(b1) && is_cont(b2) && is_cont(b3) then
       Just(((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128), i + 4))
@@ -160,8 +150,8 @@ fn decode4(b: Bytes, i: Int, b0: Int) -> Maybe (Int, Int) =
 
 # decode_char_at: total UTF-8 decode at a byte offset.  Returns the codepoint as
 # a Char plus the next byte offset.  Thin wrapper over decode_codepoint_at.
-export fn decode_char_at(b: Bytes, i: Int) -> Maybe (Char, Int) =
-  match decode_codepoint_at(b, i) with
+export fn decode_char_at(s: String, i: Int) -> Maybe (Char, Int) =
+  match decode_codepoint_at(s, i) with
   | Nothing -> Nothing
   | Just (cp, next) -> Just((char_from_codepoint(cp), next))
 
@@ -170,7 +160,7 @@ export fn decode_char_at(b: Bytes, i: Int) -> Maybe (Char, Int) =
 # codepoints in the AST without going through str_char_at (whose result type flips
 # with the Char representation).
 export fn first_codepoint(s: String) -> Maybe Int =
-  match decode_codepoint_at(bytes_from_utf8(s), 0) with
+  match decode_codepoint_at(s, 0) with
   | Nothing -> Nothing
   | Just (cp, _) -> Just(cp)
 
@@ -392,18 +382,22 @@ export fn prelude_private_message(marked: String) -> String =
 # ordinary code. Stripping therefore carries the open-parenthesis depth and keeps
 # consuming while it is positive.
 export fn strip_headers(s: String) -> String =
-  strip_headers_go(s, bytes_from_utf8(s), 0, 0, 0)
+  strip_headers_go(s, 0, 0, 0)
 
 # Is the line starting at byte `pos` a header line? The one rule for a whole
 # source and for a single line: an empty line is a `\n` at `pos`, or `pos` at the
 # end of a line string.
 fn is_header_line_byte(s: String, pos: Int) -> Bool =
-  pos >= str_byte_len(s) ||
-  str_starts_with_at_byte(s, pos, "\n") ||
-  str_starts_with_at_byte(s, pos, "module ") ||
-  str_starts_with_at_byte(s, pos, "import ") ||
-  str_starts_with_at_byte(s, pos, "#") ||
-  is_no_prelude_line_byte(s, pos)
+  match str_byte_at(s, pos) with
+  | Nothing -> true
+  # '\n'
+  | Just 10 -> true
+  # '#'
+  | Just 35 -> true
+  | Just _ ->
+      str_starts_with_at_byte(s, pos, "module ") ||
+      str_starts_with_at_byte(s, pos, "import ") ||
+      is_no_prelude_line_byte(s, pos)
 
 # The same rule for a line without its `\n`, as `str_split_lines` gives it.
 export fn is_header_line(line: String) -> Bool = is_header_line_byte(line, 0)
@@ -436,9 +430,9 @@ fn is_no_prelude_line_byte(s: String, pos: Int) -> Bool =
     is_line_end_at_byte(s, pos + str_byte_len(no_prelude_directive))
 
 fn is_line_end_at_byte(s: String, pos: Int) -> Bool =
-  pos >= str_byte_len(s) ||
-    str_starts_with_at_byte(s, pos, "\n") ||
-    str_starts_with_at_byte(s, pos, "\r")
+  match str_byte_at(s, pos) with
+  | Nothing -> true
+  | Just b -> starts_line(b)
 
 # Does this source opt out of the prelude?
 #
@@ -448,17 +442,17 @@ fn is_line_end_at_byte(s: String, pos: Int) -> Bool =
 # multi-line string literal and suppress the prelude for text the parser still
 # sees as code.
 export fn has_no_prelude(s: String) -> Bool =
-  has_no_prelude_go(s, bytes_from_utf8(s), 0, 0)
+  has_no_prelude_go(s, 0, 0)
 
-fn has_no_prelude_go(s: String, bytes: Bytes, pos: Int, depth: Int) -> Bool =
+fn has_no_prelude_go(s: String, pos: Int, depth: Int) -> Bool =
   if pos >= str_byte_len(s) then false
   else if depth == 0 && is_no_prelude_line_byte(s, pos) then true
   # Mirrors strip_headers_go: `depth > 0` means an import's parenthesised list is
   # still open, so this line is a continuation whatever it looks like.
   else if depth > 0 || is_header_line_byte(s, pos) then
-    has_no_prelude_go(s, bytes, eol, floor_zero(depth + paren_delta_bytes(bytes, pos, eol, 0)))
+    has_no_prelude_go(s, eol, floor_zero(depth + paren_delta_bytes(s, pos, eol, 0)))
   else false
-  where eol = next_line_byte(bytes, pos)
+  where eol = next_line_byte(s, pos)
 
 # Net parenthesis depth contributed by the bytes in [i, limit).
 #
@@ -470,21 +464,20 @@ fn has_no_prelude_go(s: String, bytes: Bytes, pos: Int, depth: Int) -> Bool =
 # Scanning stops at `#` so a trailing comment cannot miscount — `import x (a, b) # (`
 # is balanced. An import header contains no string literals, so no quoting rule
 # is needed here.
-fn paren_delta_bytes(b: Bytes, i: Int, limit: Int, depth: Int) -> Int =
+fn paren_delta_bytes(s: String, i: Int, limit: Int, depth: Int) -> Int =
   if i >= limit then depth
   else
-    match decode_char_at(b, i) with
+    match decode_char_at(s, i) with
     | Nothing -> depth
     | Just (ch, next) ->
         if ch == '#' then depth
-        else if ch == '(' then paren_delta_bytes(b, next, limit, depth + 1)
-        else if ch == ')' then paren_delta_bytes(b, next, limit, depth - 1)
-        else paren_delta_bytes(b, next, limit, depth)
+        else if ch == '(' then paren_delta_bytes(s, next, limit, depth + 1)
+        else if ch == ')' then paren_delta_bytes(s, next, limit, depth - 1)
+        else paren_delta_bytes(s, next, limit, depth)
 
 # The String entry point to the same scan, for callers that already hold a line.
 export fn line_paren_delta(line: String) -> Int =
-  paren_delta_bytes(b, 0, str_byte_len(line), 0)
-  where b = bytes_from_utf8(line)
+  paren_delta_bytes(line, 0, str_byte_len(line), 0)
 
 # A line with any comment removed, applying the SAME `#` rule the scan above uses
 # to stop counting.
@@ -499,29 +492,29 @@ export fn strip_line_comment(line: String) -> String =
   where i = str_find(line, "#")
 
 # Byte index just past the next '\n' from byte offset i (or end of input).
-fn next_line_byte(b: Bytes, i: Int) -> Int =
-  match decode_char_at(b, i) with
+fn next_line_byte(s: String, i: Int) -> Int =
+  match decode_char_at(s, i) with
   | Nothing -> i
-  | Just (ch, next) -> if ch == '\n' then next else next_line_byte(b, next)
+  | Just (ch, next) -> if ch == '\n' then next else next_line_byte(s, next)
 
 # Count codepoints in bytes [0, limit) — converts a byte offset to a str_slice
 # codepoint index.
-fn byte_to_cp(b: Bytes, i: Int, cp: Int, limit: Int) -> Int =
+fn byte_to_cp(s: String, i: Int, cp: Int, limit: Int) -> Int =
   if i >= limit then cp
   else
-    match decode_char_at(b, i) with
+    match decode_char_at(s, i) with
     | Nothing -> cp
-    | Just (_, next) -> byte_to_cp(b, next, cp + 1, limit)
+    | Just (_, next) -> byte_to_cp(s, next, cp + 1, limit)
 
 # `depth > 0` means the previous line left an import's list open, so this line is
 # a continuation and is consumed whatever it looks like. Depth is floored at zero
 # so a stray `)` cannot drive it negative and silently disable the check.
-fn strip_headers_go(s: String, bytes: Bytes, pos: Int, stripped: Int, depth: Int) -> String =
+fn strip_headers_go(s: String, pos: Int, stripped: Int, depth: Int) -> String =
   if pos >= str_byte_len(s) then string.repeat("\n", stripped)
   else if depth > 0 || is_header_line_byte(s, pos) then
-    strip_headers_go(s, bytes, eol, stripped + 1, floor_zero(depth + paren_delta_bytes(bytes, pos, eol, 0)))
-  else body_after_headers(s, stripped, byte_to_cp(bytes, 0, 0, pos))
-  where eol = next_line_byte(bytes, pos)
+    strip_headers_go(s, eol, stripped + 1, floor_zero(depth + paren_delta_bytes(s, pos, eol, 0)))
+  else body_after_headers(s, stripped, byte_to_cp(s, 0, 0, pos))
+  where eol = next_line_byte(s, pos)
 
 # The body from codepoint `cp` on, behind one newline per stripped header line.
 # Its own function so `byte_to_cp` runs once, where the headers end: as a `where`
@@ -535,7 +528,7 @@ fn floor_zero(n: Int) -> Int = if n < 0 then 0 else n
 
 # peek: the codepoint at the cursor, or Nothing at end. O(1).
 export fn peek(cursor: SourceCursor) -> Maybe Char =
-  match decode_char_at(cursor_bytes(cursor), cursor_byte_offset(cursor)) with
+  match decode_char_at(cursor_source(cursor), cursor_byte_offset(cursor)) with
   | Nothing -> Nothing
   | Just (ch, _) -> Just(ch)
 
@@ -555,47 +548,47 @@ fn advance_position(pos: SourcePos, new_line: Bool) -> SourcePos =
 # scan can't silently spin past the end the way a cursor->cursor advance could.
 export fn next(cursor: SourceCursor) -> Maybe (Char, SourceCursor) =
   match cursor with
-  | SourceCursor raw bytes byte_offset pos ->
-      match bytes_get(bytes, byte_offset) with
+  | SourceCursor raw byte_offset pos ->
+      match str_byte_at(raw, byte_offset) with
       | Nothing -> Nothing
       | Just b ->
           # An ASCII byte is its own codepoint; skip the decoder's tuples.
           if b < 128 then
             let ch = char_from_codepoint(b)
-            in Just((ch, SourceCursor(raw, bytes, byte_offset + 1, advance_position(pos, starts_line(b)))))
+            in Just((ch, SourceCursor(raw, byte_offset + 1, advance_position(pos, starts_line(b)))))
           else
-            match decode_char_at(bytes, byte_offset) with
+            match decode_char_at(raw, byte_offset) with
             | Nothing -> Nothing
             | Just (ch, next_off) ->
-                Just((ch, SourceCursor(raw, bytes, next_off, advance_position(pos, false))))
+                Just((ch, SourceCursor(raw, next_off, advance_position(pos, false))))
 
 # take_while: advance past every codepoint satisfying pred; returns the advanced
 # cursor.  Text extraction is slice-based and the caller's job (record the start
 # cursor, then slice between byte offsets) — O(run), no per-char concatenation.
 export fn take_while(cursor: SourceCursor, pred: Char -> Bool) -> SourceCursor =
   match cursor with
-  | SourceCursor raw bytes off pos -> take_run(raw, bytes, pred, off, pos.index, pos.line, pos.column)
+  | SourceCursor raw off pos -> take_run(raw, pred, off, pos.index, pos.line, pos.column)
 
 # The run walks on plain Ints and builds one cursor where it stops, so an ASCII
 # char allocates nothing. Line and column move as in advance_position.
-fn take_run(raw: String, bytes: Bytes, pred: Char -> Bool, off: Int, index: Int, line: Int, column: Int) -> SourceCursor =
-  match bytes_get(bytes, off) with
-  | Nothing -> cursor_at(raw, bytes, off, index, line, column)
+fn take_run(raw: String, pred: Char -> Bool, off: Int, index: Int, line: Int, column: Int) -> SourceCursor =
+  match str_byte_at(raw, off) with
+  | Nothing -> cursor_at(raw, off, index, line, column)
   | Just b ->
       if b < 128 then
         if pred(char_from_codepoint(b)) then
-          if starts_line(b) then take_run(raw, bytes, pred, off + 1, index + 1, line + 1, 1)
-          else take_run(raw, bytes, pred, off + 1, index + 1, line, column + 1)
-        else cursor_at(raw, bytes, off, index, line, column)
+          if starts_line(b) then take_run(raw, pred, off + 1, index + 1, line + 1, 1)
+          else take_run(raw, pred, off + 1, index + 1, line, column + 1)
+        else cursor_at(raw, off, index, line, column)
       else
-        match decode_char_at(bytes, off) with
-        | Nothing -> cursor_at(raw, bytes, off, index, line, column)
+        match decode_char_at(raw, off) with
+        | Nothing -> cursor_at(raw, off, index, line, column)
         | Just (ch, next_off) ->
-            if pred(ch) then take_run(raw, bytes, pred, next_off, index + 1, line, column + 1)
-            else cursor_at(raw, bytes, off, index, line, column)
+            if pred(ch) then take_run(raw, pred, next_off, index + 1, line, column + 1)
+            else cursor_at(raw, off, index, line, column)
 
-fn cursor_at(raw: String, bytes: Bytes, off: Int, index: Int, line: Int, column: Int) -> SourceCursor =
-  SourceCursor(raw, bytes, off, SourcePos(index = index, line = line, column = column))
+fn cursor_at(raw: String, off: Int, index: Int, line: Int, column: Int) -> SourceCursor =
+  SourceCursor(raw, off, SourcePos(index = index, line = line, column = column))
 
 # advance_one: advance past one codepoint (no-op at end).  Internal helper for
 # match_string's character-by-character walk over a known-present prefix.

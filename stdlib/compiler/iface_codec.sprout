@@ -4,9 +4,6 @@ import stdlib.compiler.ast as ast
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.source as source
 import stdlib.compiler.linear_check as linear_check
-# Load-bearing despite the alias never being written — see the note in source.sprout.
-# `bytes_from_utf8` is an extern owned by stdlib.bytes and needs that module bundled.
-import stdlib.bytes as bytes
 import stdlib.string as string
 
 # ============================================================================
@@ -99,11 +96,10 @@ export fn decode_scheme(input: String) -> Maybe types.Scheme =
   decode_whole(decode_scheme_at, input)
 
 # `input` as exactly one value read by `dec`, with only whitespace around it.
-fn decode_whole(dec: String -> Bytes -> Int -> Int -> Maybe(a, Int), input: String) -> Maybe a =
-  let Just(v, next) = dec(input, bytes, skip_ws(input, bytes, 0, n), n) else Nothing
-  in if only_ws_remaining(input, bytes, next, n) then Just(v) else Nothing
+fn decode_whole(dec: String -> Int -> Int -> Maybe(a, Int), input: String) -> Maybe a =
+  let Just(v, next) = dec(input, skip_ws(input, 0, n), n) else Nothing
+  in if only_ws_remaining(input, next, n) then Just(v) else Nothing
   where n = str_byte_len(input)
-        bytes = bytes_from_utf8(input)
 
 # ----------------------------------------------------------------------------
 # Tokenization primitives
@@ -113,22 +109,22 @@ fn is_ws(ch: Char) -> Bool =
   ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
 
 # O(leading-ws). Returns the byte position past any leading whitespace.
-fn skip_ws(s: String, bytes: Bytes, i: Int, total: Int) -> Int =
+fn skip_ws(s: String, i: Int, total: Int) -> Int =
   if i >= total then i
   else
-    match source.decode_char_at(bytes, i) with
+    match source.decode_char_at(s, i) with
     | Nothing -> i
-    | Just (ch, _) -> if is_ws(ch) then skip_ws(s, bytes, i + 1, total) else i
+    | Just (ch, _) -> if is_ws(ch) then skip_ws(s, i + 1, total) else i
 
 # True iff bytes [i, total) contain only whitespace.
-fn only_ws_remaining(s: String, bytes: Bytes, i: Int, total: Int) -> Bool =
-  skip_ws(s, bytes, i, total) == total
+fn only_ws_remaining(s: String, i: Int, total: Int) -> Bool =
+  skip_ws(s, i, total) == total
 
 # Expect a specific ASCII char at byte i. Returns Just(i+1) on match.
-fn expect_char(s: String, bytes: Bytes, i: Int, total: Int, ch: Char) -> Maybe Int =
+fn expect_char(s: String, i: Int, total: Int, ch: Char) -> Maybe Int =
   if i >= total then Nothing
   else
-    match source.decode_char_at(bytes, i) with
+    match source.decode_char_at(s, i) with
     | Nothing -> Nothing
     | Just (c, _) -> if c == ch then Just(i + 1) else Nothing
 
@@ -140,24 +136,24 @@ fn is_atom_char(ch: Char) -> Bool =
   else true
 
 # Reads one atom starting at byte i. Returns (atom_string, byte_pos_after).
-fn read_atom(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (String, Int) =
+fn read_atom(s: String, i: Int, total: Int) -> Maybe (String, Int) =
   if i >= total then Nothing
   else
-    match source.decode_char_at(bytes, i) with
+    match source.decode_char_at(s, i) with
     | Nothing -> Nothing
-    | Just (c, _) -> if is_atom_char(c) then read_atom_continue(s, bytes, i, total) else Nothing
+    | Just (c, _) -> if is_atom_char(c) then read_atom_continue(s, i, total) else Nothing
 
-fn read_atom_continue(s: String, bytes: Bytes, start: Int, total: Int) -> Maybe (String, Int) =
+fn read_atom_continue(s: String, start: Int, total: Int) -> Maybe (String, Int) =
   Just((str_slice(s, start, end_pos - start), end_pos))
-  where end_pos = scan_atom_end(s, bytes, start + 1, total)
+  where end_pos = scan_atom_end(s, start + 1, total)
 
 # Scans forward from i until the next non-atom char or EOF; returns that position.
-fn scan_atom_end(s: String, bytes: Bytes, i: Int, total: Int) -> Int =
+fn scan_atom_end(s: String, i: Int, total: Int) -> Int =
   if i >= total then i
   else
-    match source.decode_char_at(bytes, i) with
+    match source.decode_char_at(s, i) with
     | Nothing -> i
-    | Just (c, _) -> if is_atom_char(c) then scan_atom_end(s, bytes, i + 1, total) else i
+    | Just (c, _) -> if is_atom_char(c) then scan_atom_end(s, i + 1, total) else i
 
 # ----------------------------------------------------------------------------
 # Decoders return Just(value, byte_pos_after) on success.
@@ -165,97 +161,97 @@ fn scan_atom_end(s: String, bytes: Bytes, i: Int, total: Int) -> Int =
 # ----------------------------------------------------------------------------
 
 # `(<tag> ...)`: the node's tag must be `tag`; `body` reads the rest.
-fn decode_tagged(tag: String, body: String -> Bytes -> Int -> Int -> Maybe(a, Int),
-                 s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(a, Int) =
-  let Just j = expect_char(s, bytes, i, total, '(') else Nothing
-      Just(found, k) = read_atom(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
-  in if found == tag then body(s, bytes, k, total) else Nothing
+fn decode_tagged(tag: String, body: String -> Int -> Int -> Maybe(a, Int),
+                 s: String, i: Int, total: Int) -> Maybe(a, Int) =
+  let Just j = expect_char(s, i, total, '(') else Nothing
+      Just(found, k) = read_atom(s, skip_ws(s, j, total), total) else Nothing
+  in if found == tag then body(s, k, total) else Nothing
 
 # `( <item>* )`, each item read by `item`.
-fn decode_list_at(item: String -> Bytes -> Int -> Int -> Maybe(a, Int),
-                  s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List a, Int) =
-  let Just j = expect_char(s, bytes, i, total, '(') else Nothing
-  in decode_items(item, s, bytes, skip_ws(s, bytes, j, total), total, Nil)
+fn decode_list_at(item: String -> Int -> Int -> Maybe(a, Int),
+                  s: String, i: Int, total: Int) -> Maybe (List a, Int) =
+  let Just j = expect_char(s, i, total, '(') else Nothing
+  in decode_items(item, s, skip_ws(s, j, total), total, Nil)
 
-fn decode_items(item: String -> Bytes -> Int -> Int -> Maybe(a, Int),
-                s: String, bytes: Bytes, i: Int, total: Int, acc: List a) -> Maybe (List a, Int) =
-  match expect_char(s, bytes, i, total, ')') with
+fn decode_items(item: String -> Int -> Int -> Maybe(a, Int),
+                s: String, i: Int, total: Int, acc: List a) -> Maybe (List a, Int) =
+  match expect_char(s, i, total, ')') with
   | Just end -> Just((list_reverse(acc), end))
   | Nothing ->
-      let Just(x, j) = item(s, bytes, i, total) else Nothing
-      in decode_items(item, s, bytes, skip_ws(s, bytes, j, total), total, Cons(x, acc))
+      let Just(x, j) = item(s, i, total) else Nothing
+      in decode_items(item, s, skip_ws(s, j, total), total, Cons(x, acc))
 
-fn decode_scheme_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Scheme, Int) =
-  decode_tagged("Scheme", decode_scheme_body, s, bytes, i, total)
+fn decode_scheme_at(s: String, i: Int, total: Int) -> Maybe(types.Scheme, Int) =
+  decode_tagged("Scheme", decode_scheme_body, s, i, total)
 
-fn decode_scheme_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Scheme, Int) =
-  let Just(tvars, k2) = decode_str_list_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
-      Just(evars, k3) = decode_str_list_at(s, bytes, skip_ws(s, bytes, k2, total), total) else Nothing
-      Just(body, k4) = decode_type_at(s, bytes, skip_ws(s, bytes, k3, total), total) else Nothing
-      Just(effect, k5) = decode_effect_at(s, bytes, skip_ws(s, bytes, k4, total), total) else Nothing
-      Just(constraints, k6) = decode_constraints_at(s, bytes, skip_ws(s, bytes, k5, total), total) else Nothing
-      Just end = expect_char(s, bytes, skip_ws(s, bytes, k6, total), total, ')') else Nothing
+fn decode_scheme_body(s: String, i: Int, total: Int) -> Maybe(types.Scheme, Int) =
+  let Just(tvars, k2) = decode_str_list_at(s, skip_ws(s, i, total), total) else Nothing
+      Just(evars, k3) = decode_str_list_at(s, skip_ws(s, k2, total), total) else Nothing
+      Just(body, k4) = decode_type_at(s, skip_ws(s, k3, total), total) else Nothing
+      Just(effect, k5) = decode_effect_at(s, skip_ws(s, k4, total), total) else Nothing
+      Just(constraints, k6) = decode_constraints_at(s, skip_ws(s, k5, total), total) else Nothing
+      Just end = expect_char(s, skip_ws(s, k6, total), total, ')') else Nothing
   in Just((types.Scheme(tvars, evars, body, effect, constraints), end))
 
 # Parse `(<pair> <pair> ...)` where each pair is `(<head_token> <class>)`.
-fn decode_constraints_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List (String, String), Int) =
-  decode_list_at(decode_constraint_at, s, bytes, i, total)
+fn decode_constraints_at(s: String, i: Int, total: Int) -> Maybe (List (String, String), Int) =
+  decode_list_at(decode_constraint_at, s, i, total)
 
-fn decode_constraint_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe((String, String), Int) =
-  let Just j = expect_char(s, bytes, i, total, '(') else Nothing
-      Just(head, k) = read_atom(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
-      Just(cls, end) = read_atom_then_close(s, bytes, k, total) else Nothing
+fn decode_constraint_at(s: String, i: Int, total: Int) -> Maybe((String, String), Int) =
+  let Just j = expect_char(s, i, total, '(') else Nothing
+      Just(head, k) = read_atom(s, skip_ws(s, j, total), total) else Nothing
+      Just(cls, end) = read_atom_then_close(s, k, total) else Nothing
   in Just(((head, cls), end))
 
-fn decode_type_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
-  let Just j = expect_char(s, bytes, i, total, '(') else Nothing
-      Just(tag, k) = read_atom(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
-  in decode_type_by_tag(s, bytes, k, total, tag)
+fn decode_type_at(s: String, i: Int, total: Int) -> Maybe(types.Type, Int) =
+  let Just j = expect_char(s, i, total, '(') else Nothing
+      Just(tag, k) = read_atom(s, skip_ws(s, j, total), total) else Nothing
+  in decode_type_by_tag(s, k, total, tag)
 
-fn decode_type_by_tag(s: String, bytes: Bytes, i: Int, total: Int, tag: String) -> Maybe(types.Type, Int) =
-  if tag == "TVar" then decode_tvar_at(s, bytes, i, total)
-  else if tag == "TConst" then decode_tconst_at(s, bytes, i, total)
-  else if tag == "TApp" then decode_tapp_at(s, bytes, i, total)
-  else if tag == "TFunc" then decode_tfunc_at(s, bytes, i, total)
-  else if tag == "TThunk" then decode_tthunk_at(s, bytes, i, total)
-  else if tag == "TTuple" then decode_ttuple_at(s, bytes, i, total)
+fn decode_type_by_tag(s: String, i: Int, total: Int, tag: String) -> Maybe(types.Type, Int) =
+  if tag == "TVar" then decode_tvar_at(s, i, total)
+  else if tag == "TConst" then decode_tconst_at(s, i, total)
+  else if tag == "TApp" then decode_tapp_at(s, i, total)
+  else if tag == "TFunc" then decode_tfunc_at(s, i, total)
+  else if tag == "TThunk" then decode_tthunk_at(s, i, total)
+  else if tag == "TTuple" then decode_ttuple_at(s, i, total)
   else Nothing
 
 # Reads `<atom>)`. Returns the atom + position past the `)`.
-fn read_atom_then_close(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (String, Int) =
-  let Just(name, j) = read_atom(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
-      Just end = expect_char(s, bytes, skip_ws(s, bytes, j, total), total, ')') else Nothing
+fn read_atom_then_close(s: String, i: Int, total: Int) -> Maybe (String, Int) =
+  let Just(name, j) = read_atom(s, skip_ws(s, i, total), total) else Nothing
+      Just end = expect_char(s, skip_ws(s, j, total), total, ')') else Nothing
   in Just((name, end))
 
-fn decode_tvar_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
-  decode_named_close(\name -> types.TVar(types.tyvar_id(name)), s, bytes, i, total)
+fn decode_tvar_at(s: String, i: Int, total: Int) -> Maybe(types.Type, Int) =
+  decode_named_close(\name -> types.TVar(types.tyvar_id(name)), s, i, total)
 
-fn decode_tconst_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
-  decode_named_close(\name -> types.TConst(types.type_id(name)), s, bytes, i, total)
+fn decode_tconst_at(s: String, i: Int, total: Int) -> Maybe(types.Type, Int) =
+  decode_named_close(\name -> types.TConst(types.type_id(name)), s, i, total)
 
 # `<atom>)`, the atom turned into a value by `make`.
-fn decode_named_close(make: String -> a, s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(a, Int) =
-  let Just(name, end) = read_atom_then_close(s, bytes, i, total) else Nothing
+fn decode_named_close(make: String -> a, s: String, i: Int, total: Int) -> Maybe(a, Int) =
+  let Just(name, end) = read_atom_then_close(s, i, total) else Nothing
   in Just((make(name), end))
 
-fn decode_tapp_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
-  let Just(t1, j) = decode_type_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
-      Just(t2, k) = decode_type_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
-      Just end = expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') else Nothing
+fn decode_tapp_at(s: String, i: Int, total: Int) -> Maybe(types.Type, Int) =
+  let Just(t1, j) = decode_type_at(s, skip_ws(s, i, total), total) else Nothing
+      Just(t2, k) = decode_type_at(s, skip_ws(s, j, total), total) else Nothing
+      Just end = expect_char(s, skip_ws(s, k, total), total, ')') else Nothing
   in Just((types.TApp(t1, t2), end))
 
-fn decode_tfunc_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
-  let Just(t1, j) = decode_type_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
-      Just(t2, k) = decode_type_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
-      Just(e, m) = decode_effect_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
-      Just(own_atom, n) = read_atom(s, bytes, skip_ws(s, bytes, m, total), total) else Nothing
-      Just end = expect_char(s, bytes, skip_ws(s, bytes, n, total), total, ')') else Nothing
+fn decode_tfunc_at(s: String, i: Int, total: Int) -> Maybe(types.Type, Int) =
+  let Just(t1, j) = decode_type_at(s, skip_ws(s, i, total), total) else Nothing
+      Just(t2, k) = decode_type_at(s, skip_ws(s, j, total), total) else Nothing
+      Just(e, m) = decode_effect_at(s, skip_ws(s, k, total), total) else Nothing
+      Just(own_atom, n) = read_atom(s, skip_ws(s, m, total), total) else Nothing
+      Just end = expect_char(s, skip_ws(s, n, total), total, ')') else Nothing
   in Just((types.TFunc(t1, t2, e, ownership_from_str(own_atom)), end))
 
-fn decode_tthunk_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
-  let Just(t1, j) = decode_type_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
-      Just(e, k) = decode_effect_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
-      Just end = expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') else Nothing
+fn decode_tthunk_at(s: String, i: Int, total: Int) -> Maybe(types.Type, Int) =
+  let Just(t1, j) = decode_type_at(s, skip_ws(s, i, total), total) else Nothing
+      Just(e, k) = decode_effect_at(s, skip_ws(s, j, total), total) else Nothing
+      Just end = expect_char(s, skip_ws(s, k, total), total, ')') else Nothing
   in Just((types.TThunk(t1, e), end))
 
 # The ownership tag on the wire. This is what carries `borrowing` ACROSS a module
@@ -278,37 +274,37 @@ fn ownership_from_str(s: String) -> types.Ownership =
   else if s == "local" then types.OwnLocal
   else types.OwnConsume
 
-fn decode_ttuple_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
-  let Just(ts, j) = decode_type_list_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
-      Just end = expect_char(s, bytes, skip_ws(s, bytes, j, total), total, ')') else Nothing
+fn decode_ttuple_at(s: String, i: Int, total: Int) -> Maybe(types.Type, Int) =
+  let Just(ts, j) = decode_type_list_at(s, skip_ws(s, i, total), total) else Nothing
+      Just end = expect_char(s, skip_ws(s, j, total), total, ')') else Nothing
   in Just((types.TTuple(ts), end))
 
-fn decode_effect_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Effect, Int) =
-  let Just j = expect_char(s, bytes, i, total, '(') else Nothing
-      Just(tag, k) = read_atom(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
-  in decode_effect_by_tag(s, bytes, k, total, tag)
+fn decode_effect_at(s: String, i: Int, total: Int) -> Maybe(types.Effect, Int) =
+  let Just j = expect_char(s, i, total, '(') else Nothing
+      Just(tag, k) = read_atom(s, skip_ws(s, j, total), total) else Nothing
+  in decode_effect_by_tag(s, k, total, tag)
 
-fn decode_effect_by_tag(s: String, bytes: Bytes, i: Int, total: Int, tag: String) -> Maybe(types.Effect, Int) =
-  if tag == "EffectPure" then decode_effect_pure_close(s, bytes, i, total)
-  else if tag == "EffectIO" then decode_effect_io_close(s, bytes, i, total)
-  else if tag == "EffectRow" then decode_effect_row_at(s, bytes, i, total)
-  else if tag == "EffectVar" then decode_effect_var_at(s, bytes, i, total)
+fn decode_effect_by_tag(s: String, i: Int, total: Int, tag: String) -> Maybe(types.Effect, Int) =
+  if tag == "EffectPure" then decode_effect_pure_close(s, i, total)
+  else if tag == "EffectIO" then decode_effect_io_close(s, i, total)
+  else if tag == "EffectRow" then decode_effect_row_at(s, i, total)
+  else if tag == "EffectVar" then decode_effect_var_at(s, i, total)
   else Nothing
 
-fn decode_effect_pure_close(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Effect, Int) =
-  decode_close(types.EffectPure, s, bytes, i, total)
+fn decode_effect_pure_close(s: String, i: Int, total: Int) -> Maybe(types.Effect, Int) =
+  decode_close(types.EffectPure, s, i, total)
 
-fn decode_effect_io_close(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Effect, Int) =
-  decode_close(types.EffectIO, s, bytes, i, total)
+fn decode_effect_io_close(s: String, i: Int, total: Int) -> Maybe(types.Effect, Int) =
+  decode_close(types.EffectIO, s, i, total)
 
 # A bare `)` closing a node that carries no fields: `value` itself.
-fn decode_close(value: a, s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(a, Int) =
-  let Just end = expect_char(s, bytes, skip_ws(s, bytes, i, total), total, ')') else Nothing
+fn decode_close(value: a, s: String, i: Int, total: Int) -> Maybe(a, Int) =
+  let Just end = expect_char(s, skip_ws(s, i, total), total, ')') else Nothing
   in Just((value, end))
 
-fn decode_effect_row_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Effect, Int) =
-  let Just(xs, j) = decode_str_list_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
-      Just end = expect_char(s, bytes, skip_ws(s, bytes, j, total), total, ')') else Nothing
+fn decode_effect_row_at(s: String, i: Int, total: Int) -> Maybe(types.Effect, Int) =
+  let Just(xs, j) = decode_str_list_at(s, skip_ws(s, i, total), total) else Nothing
+      Just end = expect_char(s, skip_ws(s, j, total), total, ')') else Nothing
   in Just((types.EffectRow(xs), end))
 
 # An interface is a file on disk, so the source-side rule-9 check is not enough:
@@ -318,20 +314,20 @@ fn decode_effect_row_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(ty
 #
 # The test is well-formed-VARIABLE-NAME, not lowercase: a generalized scheme
 # carries `$eN`, so a lowercase-only guard rejected this encoder's own output.
-fn decode_effect_var_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Effect, Int) =
-  match read_atom_then_close(s, bytes, i, total) with
+fn decode_effect_var_at(s: String, i: Int, total: Int) -> Maybe(types.Effect, Int) =
+  match read_atom_then_close(s, i, total) with
   | Nothing -> Nothing
   | Just (name, end) ->
       if types.effect_var_name_is_wellformed(name) then Just((types.EffectVar(name), end))
       else Nothing
 
 # Decodes `( atom* )` as a List String.
-fn decode_str_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List String, Int) =
-  decode_list_at(read_atom, s, bytes, i, total)
+fn decode_str_list_at(s: String, i: Int, total: Int) -> Maybe (List String, Int) =
+  decode_list_at(read_atom, s, i, total)
 
 # Decodes `( <type>* )` as a List Type.
-fn decode_type_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List types.Type, Int) =
-  decode_list_at(decode_type_at, s, bytes, i, total)
+fn decode_type_list_at(s: String, i: Int, total: Int) -> Maybe (List types.Type, Int) =
+  decode_list_at(decode_type_at, s, i, total)
 
 # ============================================================================
 # IfaceFile — the top-level iface artifact for one module
@@ -476,21 +472,21 @@ fn encode_instance_info(i: InstanceInfo) -> String =
 export fn decode_iface_file(input: String) -> Maybe IfaceFile =
   decode_whole(decode_iface_file_at, input)
 
-fn decode_iface_file_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (IfaceFile, Int) =
-  decode_tagged("IfaceFile", decode_iface_file_body, s, bytes, i, total)
+fn decode_iface_file_at(s: String, i: Int, total: Int) -> Maybe (IfaceFile, Int) =
+  decode_tagged("IfaceFile", decode_iface_file_body, s, i, total)
 
-fn decode_iface_file_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (IfaceFile, Int) =
-  let Just(version_atom, j) = read_atom(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
+fn decode_iface_file_body(s: String, i: Int, total: Int) -> Maybe (IfaceFile, Int) =
+  let Just(version_atom, j) = read_atom(s, skip_ws(s, i, total), total) else Nothing
       Just version = decode_iface_version(version_atom) else Nothing
-  in decode_iface_v2_tail(s, bytes, j, total, version)
+  in decode_iface_v2_tail(s, j, total, version)
 
-fn decode_iface_v2_tail(s: String, bytes: Bytes, i: Int, total: Int, version: Int) -> Maybe (IfaceFile, Int) =
-  let Just(mod_name, k) = read_atom(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
-      Just(schemes, m) = decode_named_scheme_list_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
-      Just(ctors, n2) = decode_ctor_info_list_at(s, bytes, skip_ws(s, bytes, m, total), total) else Nothing
-      Just(classes, n3) = decode_class_info_list_at(s, bytes, skip_ws(s, bytes, n2, total), total) else Nothing
-      Just(instances, n4) = decode_instance_info_list_at(s, bytes, skip_ws(s, bytes, n3, total), total) else Nothing
-      Just end = expect_char(s, bytes, skip_ws(s, bytes, n4, total), total, ')') else Nothing
+fn decode_iface_v2_tail(s: String, i: Int, total: Int, version: Int) -> Maybe (IfaceFile, Int) =
+  let Just(mod_name, k) = read_atom(s, skip_ws(s, i, total), total) else Nothing
+      Just(schemes, m) = decode_named_scheme_list_at(s, skip_ws(s, k, total), total) else Nothing
+      Just(ctors, n2) = decode_ctor_info_list_at(s, skip_ws(s, m, total), total) else Nothing
+      Just(classes, n3) = decode_class_info_list_at(s, skip_ws(s, n2, total), total) else Nothing
+      Just(instances, n4) = decode_instance_info_list_at(s, skip_ws(s, n3, total), total) else Nothing
+      Just end = expect_char(s, skip_ws(s, n4, total), total, ')') else Nothing
   in Just((IfaceFile(version, mod_name, schemes, ctors, classes, instances), end))
 
 # Accept only the current version — future bumps add to the if-chain. Using
@@ -530,16 +526,16 @@ fn decode_iface_v2_tail(s: String, bytes: Bytes, i: Int, total: Int, version: In
 fn decode_iface_version(s: String) -> Maybe Int =
   if s == int_to_string(iface_version) then Just(iface_version) else Nothing
 
-fn decode_named_scheme_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List NamedScheme, Int) =
-  decode_list_at(decode_named_scheme_at, s, bytes, i, total)
+fn decode_named_scheme_list_at(s: String, i: Int, total: Int) -> Maybe (List NamedScheme, Int) =
+  decode_list_at(decode_named_scheme_at, s, i, total)
 
-fn decode_named_scheme_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (NamedScheme, Int) =
-  decode_tagged("NamedScheme", decode_named_scheme_body, s, bytes, i, total)
+fn decode_named_scheme_at(s: String, i: Int, total: Int) -> Maybe (NamedScheme, Int) =
+  decode_tagged("NamedScheme", decode_named_scheme_body, s, i, total)
 
-fn decode_named_scheme_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (NamedScheme, Int) =
-  let Just(name, j) = read_atom(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
-      Just(scheme, k) = decode_scheme_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
-      Just end = expect_char(s, bytes, skip_ws(s, bytes, k, total), total, ')') else Nothing
+fn decode_named_scheme_body(s: String, i: Int, total: Int) -> Maybe (NamedScheme, Int) =
+  let Just(name, j) = read_atom(s, skip_ws(s, i, total), total) else Nothing
+      Just(scheme, k) = decode_scheme_at(s, skip_ws(s, j, total), total) else Nothing
+      Just end = expect_char(s, skip_ws(s, k, total), total, ')') else Nothing
   in Just((NamedScheme(name, scheme), end))
 
 # ============================================================================
@@ -911,43 +907,43 @@ fn head_type_from_args(type_args: List ast.TypeExpr) -> types.Type =
 # Decoders for CtorInfo / ClassInfo / InstanceInfo
 # ============================================================================
 
-fn decode_ctor_info_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List CtorInfo, Int) =
-  decode_list_at(decode_ctor_info_at, s, bytes, i, total)
+fn decode_ctor_info_list_at(s: String, i: Int, total: Int) -> Maybe (List CtorInfo, Int) =
+  decode_list_at(decode_ctor_info_at, s, i, total)
 
-fn decode_ctor_info_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (CtorInfo, Int) =
-  decode_tagged("CtorInfo", decode_ctor_info_body, s, bytes, i, total)
+fn decode_ctor_info_at(s: String, i: Int, total: Int) -> Maybe (CtorInfo, Int) =
+  decode_tagged("CtorInfo", decode_ctor_info_body, s, i, total)
 
-fn decode_ctor_info_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (CtorInfo, Int) =
-  let Just(ctor_name, j) = read_atom(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
-      Just(adt_name, k) = read_atom(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
-      Just(field_types, m) = decode_type_list_at(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
-      Just end = expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') else Nothing
+fn decode_ctor_info_body(s: String, i: Int, total: Int) -> Maybe (CtorInfo, Int) =
+  let Just(ctor_name, j) = read_atom(s, skip_ws(s, i, total), total) else Nothing
+      Just(adt_name, k) = read_atom(s, skip_ws(s, j, total), total) else Nothing
+      Just(field_types, m) = decode_type_list_at(s, skip_ws(s, k, total), total) else Nothing
+      Just end = expect_char(s, skip_ws(s, m, total), total, ')') else Nothing
   in Just((CtorInfo(ctor_name, adt_name, field_types), end))
 
-fn decode_class_info_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List ClassInfo, Int) =
-  decode_list_at(decode_class_info_at, s, bytes, i, total)
+fn decode_class_info_list_at(s: String, i: Int, total: Int) -> Maybe (List ClassInfo, Int) =
+  decode_list_at(decode_class_info_at, s, i, total)
 
-fn decode_class_info_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (ClassInfo, Int) =
-  decode_tagged("ClassInfo", decode_class_info_body, s, bytes, i, total)
+fn decode_class_info_at(s: String, i: Int, total: Int) -> Maybe (ClassInfo, Int) =
+  decode_tagged("ClassInfo", decode_class_info_body, s, i, total)
 
-fn decode_class_info_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (ClassInfo, Int) =
+fn decode_class_info_body(s: String, i: Int, total: Int) -> Maybe (ClassInfo, Int) =
   do
-    (name, j) <- read_atom(s, bytes, skip_ws(s, bytes, i, total), total)
-    (type_params, k) <- decode_str_list_at(s, bytes, skip_ws(s, bytes, j, total), total)
-    (superclasses, m) <- decode_str_list_at(s, bytes, skip_ws(s, bytes, k, total), total)
-    (methods, n) <- decode_named_scheme_list_at(s, bytes, skip_ws(s, bytes, m, total), total)
-    end <- expect_char(s, bytes, skip_ws(s, bytes, n, total), total, ')')
+    (name, j) <- read_atom(s, skip_ws(s, i, total), total)
+    (type_params, k) <- decode_str_list_at(s, skip_ws(s, j, total), total)
+    (superclasses, m) <- decode_str_list_at(s, skip_ws(s, k, total), total)
+    (methods, n) <- decode_named_scheme_list_at(s, skip_ws(s, m, total), total)
+    end <- expect_char(s, skip_ws(s, n, total), total, ')')
     Just((ClassInfo(name, type_params, superclasses, methods), end))
 
-fn decode_instance_info_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List InstanceInfo, Int) =
-  decode_list_at(decode_instance_info_at, s, bytes, i, total)
+fn decode_instance_info_list_at(s: String, i: Int, total: Int) -> Maybe (List InstanceInfo, Int) =
+  decode_list_at(decode_instance_info_at, s, i, total)
 
-fn decode_instance_info_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (InstanceInfo, Int) =
-  decode_tagged("InstanceInfo", decode_instance_info_body, s, bytes, i, total)
+fn decode_instance_info_at(s: String, i: Int, total: Int) -> Maybe (InstanceInfo, Int) =
+  decode_tagged("InstanceInfo", decode_instance_info_body, s, i, total)
 
-fn decode_instance_info_body(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (InstanceInfo, Int) =
-  let Just(class_name, j) = read_atom(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
-      Just(head_type, k) = decode_type_at(s, bytes, skip_ws(s, bytes, j, total), total) else Nothing
-      Just(dict_name, m) = read_atom(s, bytes, skip_ws(s, bytes, k, total), total) else Nothing
-      Just end = expect_char(s, bytes, skip_ws(s, bytes, m, total), total, ')') else Nothing
+fn decode_instance_info_body(s: String, i: Int, total: Int) -> Maybe (InstanceInfo, Int) =
+  let Just(class_name, j) = read_atom(s, skip_ws(s, i, total), total) else Nothing
+      Just(head_type, k) = decode_type_at(s, skip_ws(s, j, total), total) else Nothing
+      Just(dict_name, m) = read_atom(s, skip_ws(s, k, total), total) else Nothing
+      Just end = expect_char(s, skip_ws(s, m, total), total, ')') else Nothing
   in Just((InstanceInfo(class_name, head_type, dict_name), end))
