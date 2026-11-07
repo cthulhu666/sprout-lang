@@ -1072,8 +1072,7 @@ between minors, FL_VERIFY compares them with a full walk after every collection,
 poisons dead OBJs instead of listing them, which is the case the incremental free count has to
 get right. Each program also runs under the stage-2 switches ([gc-stage2-v0.md](gc-stage2-v0.md)
 §5), with the same flags and the same expected output: `SPROUT_GC_PROMOTE_AGE=2` and `=3`, each
-with `SPROUT_GC_NURSERY=1`, plus `SPROUT_FL_VERIFY=1` and, separately,
-`SPROUT_GC_MAJOR_INPUT=old` at K=2. Only K > 1 leaves young survivors, the remembered rule and
+with `SPROUT_GC_NURSERY=1`, plus `SPROUT_FL_VERIFY=1` at K=2. Only K > 1 leaves young survivors, the remembered rule and
 the premise-3 check (an old, unremembered object points at no young one; before a major the set
 is empty and no header has bit 13), so the default runs never reach them. The two static `sprout_analysis_*` helpers cannot be reached without a live
 analysis service, so `tests/c_runtime/analysis_strings.c` covers them under the same switches and

@@ -638,8 +638,7 @@ expect_abort bad_k0 "SPROUT_GC_PROMOTE_AGE: expected integer in \[1, 15\]" bad_e
 expect_abort bad_k16 "SPROUT_GC_PROMOTE_AGE: expected integer in \[1, 15\]" bad_env SPROUT_GC_PROMOTE_AGE 16
 expect_abort bad_kx "SPROUT_GC_PROMOTE_AGE: expected integer in \[1, 15\]" bad_env SPROUT_GC_PROMOTE_AGE x
 expect_abort bad_nursery "SPROUT_GC_NURSERY: expected 0 or 1" bad_env SPROUT_GC_NURSERY 2
-expect_abort bad_input "SPROUT_GC_MAJOR_INPUT: expected heap or old" bad_env SPROUT_GC_MAJOR_INPUT both
-for sel in age2 age3 age_large major_age remember set_before_major major_input_heap major_input_old nursery_sizing nursery_pinned nursery_floor_before_major nursery_floor_binds census_age; do
+for sel in age2 age3 age_large major_age remember set_before_major major_rule nursery_sizing nursery_pinned nursery_floor_before_major nursery_floor_binds census_age; do
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$PA" "$sel" > "$TMP_DIR/pa_$sel.out" 2> "$TMP_DIR/pa_$sel.err" || {
     echo "  promote_age '$sel' failed:" >&2
     cat "$TMP_DIR/pa_$sel.out" "$TMP_DIR/pa_$sel.err" >&2

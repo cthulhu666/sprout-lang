@@ -953,19 +953,15 @@ typedef struct {
   /* A/B switches (docs/gc-stage2-v0.md §5); the defaults are stage 1's behaviour. */
   unsigned  promote_age;         /* SPROUT_GC_PROMOTE_AGE: 1..SPROUT_GC_AGE_MAX */
   int       nursery;             /* SPROUT_GC_NURSERY: size minors from the baseline, not the heap */
-  int       major_old;           /* SPROUT_GC_MAJOR_INPUT=old: the 2x rule reads the old count */
 } SproutGenState;
 static SproutGenState g_gen = { .major_every = 19, .colorless = 1, .promote_age = 1 };
-/* Marked objects that will be old after this sweep; counted only for SPROUT_GC_MAJOR_INPUT=old. */
-static long long g_gc_marked_promoting = 0;
 
 /* Reads the generational switches at startup (sprout_set_argv), so a bad value fails before
  * the program runs, not inside the atexit collection.  SPROUT_GC_MINOR is on when unset or
  * empty, `1` is on, `0` is off, and anything else fails.  SPROUT_GC_GENCHECK and
  * SPROUT_GC_MAJOR_EVERY are read only with the mode on, so a bad value is ignored while it is
  * off.  SPROUT_GC_MAJOR_EVERY=0 makes every collection a major.  SPROUT_GC_PROMOTE_AGE
- * (1..SPROUT_GC_AGE_MAX), SPROUT_GC_NURSERY (0 or 1) and SPROUT_GC_MAJOR_INPUT (heap or old)
- * are read the same way. */
+ * (1..SPROUT_GC_AGE_MAX) and SPROUT_GC_NURSERY (0 or 1) are read the same way. */
 static void sprout_gc_gen_init(void) {
   const char* m = getenv("SPROUT_GC_MINOR");
   if (m == NULL || m[0] == '\0' || strcmp(m, "1") == 0) g_gen.on = 1;
@@ -995,12 +991,6 @@ static void sprout_gc_gen_init(void) {
     if (strcmp(nursery, "0") != 0 && strcmp(nursery, "1") != 0)
       sprout_fail("SPROUT_GC_NURSERY: expected 0 or 1");
     g_gen.nursery = nursery[0] == '1';
-  }
-  const char* input = getenv("SPROUT_GC_MAJOR_INPUT");
-  if (input != NULL && input[0] != '\0') {
-    if (strcmp(input, "heap") != 0 && strcmp(input, "old") != 0)
-      sprout_fail("SPROUT_GC_MAJOR_INPUT: expected heap or old");
-    g_gen.major_old = input[0] == 'o';
   }
 }
 
@@ -2580,7 +2570,6 @@ static void gc_mark_enqueue(void* payload, SproutRegion* r) {
     g_ap_marked_by_age[sprout_hdr_age(h)]++;
     g_ap_marked_total++;
   }
-  if (g_gen.major_old && sprout_hdr_age(h) + 1 >= g_gen.promote_age) g_gc_marked_promoting++;
   h |= SPROUT_GC_COLOR_BIT;
   memcpy(hdr_ptr, &h, 8);
   g_gc_marked_count++;
@@ -2758,24 +2747,18 @@ static int sprout_gc_gen_choose_minor(const char* reason) {
  *
  * With SPROUT_GC_PROMOTE_AGE > 1 a minor re-marks young survivors that the previous count
  * already holds, so the minor's count is the old objects after the previous sweep
- * (`old_count`) plus the marked.  At K = 1 every survivor is old and the two are equal.
- * SPROUT_GC_MAJOR_INPUT=old feeds the 2x rule the old count the coming sweep will leave
- * instead: the old objects plus the marked ones that reach age K - 1. */
+ * (`old_count`) plus the marked.  At K = 1 every survivor is old and the two are equal. */
 static int sprout_gc_gen_record(int minor) {
-  long long pred_old;
   if (minor) {
     g_gen.last_live = g_gen.old_count + g_gc_marked_count;
-    pred_old = g_gen.old_count + g_gc_marked_promoting;
     g_gen.minors_since_major++;
     g_gen.n_minor++;
   } else {
     g_gen.last_live = g_gen.baseline = g_gc_marked_count;
-    pred_old = g_gc_marked_promoting;
     g_gen.minors_since_major = 0;
     g_gen.n_major++;
   }
-  g_gen.colorless = (g_gen.major_old ? pred_old : g_gen.last_live) > 2 * g_gen.baseline
-                    || g_gen.minors_since_major >= g_gen.major_every;
+  g_gen.colorless = g_gen.last_live > 2 * g_gen.baseline || g_gen.minors_since_major >= g_gen.major_every;
   return g_gen.colorless;
 }
 
@@ -3836,7 +3819,6 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   SPROUT_PROF_COLD(g_prof_cycles++);
   SPROUT_PROF_COLD(g_prof_mark_slots += (unsigned long long)root_count);
   g_gc_marked_count = 0;
-  g_gc_marked_promoting = 0;
   /* With minor collections on, a minor marks only young objects (plus what the remembered set
      reaches); a major marks everything.  The kind of the NEXT collection is known before
      the sweep, so when it is a major the sweep clears the color bits itself and that major

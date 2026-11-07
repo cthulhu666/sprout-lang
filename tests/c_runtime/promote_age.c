@@ -16,7 +16,7 @@
  *                    minor that promotes it.  The crash case without the rule.
  *   set_before_major — when the next collection is a major the set is empty and no header
  *                    carries bit 13, and the child is still alive after that major.
- *   major_input_*  — the 2x rule reads the heap count, or the old count.
+ *   major_rule     — the 2x rule reads the heap count: young survivors count toward a major.
  *   nursery_*      — the next collection runs heap + max(base, baseline x 2) allocations on; a
  *                    pinned threshold turns the rule off; the footprint floor is a lower bound before a major
  *                    and at the major.
@@ -193,22 +193,19 @@ static int set_before_major(void) {
 }
 
 /* K=2: N=2000 survivors of the first major, then 5000 new ones.  The heap count says "major
- * next" (7000 > 2 x 2000); the old count does not (2000 promoted, the new ones stay young). */
-static int major_input(int want_colorless) {
+ * next" (7000 > 2 x 2000), although only 2000 are old. */
+static int major_rule(void) {
   register_roots();
   extend_chain(2000);
   collect();
   extend_chain(5000);
   collect();
   check(g_gen.n_minor == 1, "the second collection is a minor");
-  check(g_gen.colorless == want_colorless, want_colorless ? "the heap count triggers a major"
-                                                          : "the old count does not trigger a major");
+  check(g_gen.colorless == 1, "the heap count triggers a major");
   collect();
   check(chain_length() == 7000, "the chain is intact");
   return g_failed;
 }
-static int major_input_heap(void) { return major_input(1); }
-static int major_input_old(void)  { return major_input(0); }
 
 static long long imax(long long a, long long b) { return a > b ? a : b; }
 
@@ -369,28 +366,26 @@ typedef struct {
   int (*fn)(void);
   int k;               /* SPROUT_GC_PROMOTE_AGE */
   int nursery;         /* SPROUT_GC_NURSERY */
-  const char* input;   /* SPROUT_GC_MAJOR_INPUT, or NULL */
   const char* every;   /* SPROUT_GC_MAJOR_EVERY */
   const char* thr;     /* SPROUT_GC_THRESHOLD, or NULL */
 } AgeCase;
 
 static const AgeCase k_cases[] = {
-  { "age2",                      age_seq,                     2, 0, NULL,   "1000", NULL },
-  { "age3",                      age_seq,                     3, 0, NULL,   "1000", NULL },
-  { "age_large",                 age_large,                   2, 0, NULL,   "1000", NULL },
-  { "major_age",                 major_age,                   3, 0, NULL,   "1",    NULL },
-  { "remember",                  remember,                    2, 0, NULL,   "1000", NULL },
-  { "set_before_major",          set_before_major,            2, 0, NULL,   "1",    NULL },
-  { "major_input_heap",          major_input_heap,            2, 0, "heap", "1000", NULL },
-  { "major_input_old",           major_input_old,             2, 0, "old",  "1000", NULL },
-  { "nursery_sizing",            nursery_sizing,              1, 1, NULL,   "1000", NULL },
-  { "nursery_pinned",            nursery_pinned,              1, 1, NULL,   "1000", "5000" },
-  { "nursery_floor_before_major", nursery_floor_before_major, 1, 1, NULL,   "1",    NULL },
-  { "nursery_floor_binds",       nursery_floor_binds,         1, 1, NULL,   "1",    NULL },
-  { "census_age",                census_age,                  3, 0, NULL,   "1000", NULL },
-  { "bad_unremembered_edge",    bad_unremembered_edge,       2, 0, NULL,   "1000", NULL },
-  { "bad_major_bit13",           bad_major_bit13,             2, 0, NULL,   "1",    NULL },
-  { "bad_major_set",             bad_major_set,               2, 0, NULL,   "1",    NULL },
+  { "age2",                      age_seq,                     2, 0, "1000", NULL },
+  { "age3",                      age_seq,                     3, 0, "1000", NULL },
+  { "age_large",                 age_large,                   2, 0, "1000", NULL },
+  { "major_age",                 major_age,                   3, 0, "1",    NULL },
+  { "remember",                  remember,                    2, 0, "1000", NULL },
+  { "set_before_major",          set_before_major,            2, 0, "1",    NULL },
+  { "major_rule",                major_rule,                  2, 0, "1000", NULL },
+  { "nursery_sizing",            nursery_sizing,              1, 1, "1000", NULL },
+  { "nursery_pinned",            nursery_pinned,              1, 1, "1000", "5000" },
+  { "nursery_floor_before_major", nursery_floor_before_major, 1, 1, "1",    NULL },
+  { "nursery_floor_binds",       nursery_floor_binds,         1, 1, "1",    NULL },
+  { "census_age",                census_age,                  3, 0, "1000", NULL },
+  { "bad_unremembered_edge",    bad_unremembered_edge,       2, 0, "1000", NULL },
+  { "bad_major_bit13",           bad_major_bit13,             2, 0, "1",    NULL },
+  { "bad_major_set",             bad_major_set,               2, 0, "1",    NULL },
 };
 
 int main(int argc, char** argv) {
@@ -418,8 +413,6 @@ int main(int argc, char** argv) {
   snprintf(buf, sizeof buf, "%d", c->k);
   setenv("SPROUT_GC_PROMOTE_AGE", buf, 1);
   setenv("SPROUT_GC_NURSERY", c->nursery ? "1" : "0", 1);
-  if (c->input) setenv("SPROUT_GC_MAJOR_INPUT", c->input, 1);
-  else unsetenv("SPROUT_GC_MAJOR_INPUT");
   setenv("SPROUT_GC_MAJOR_EVERY", c->every, 1);
   if (c->thr) setenv("SPROUT_GC_THRESHOLD", c->thr, 1);
   g_k = c->k;
