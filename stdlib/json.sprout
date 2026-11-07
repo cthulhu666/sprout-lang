@@ -122,10 +122,6 @@ fn p_number(s: String, i: Int) -> Maybe (Json, Int) =
                # is, and the same choice JavaScript's JSON.parse makes. A
                # structurally bad token still fails here, since parse_double
                # rejects everything parse_int does bar the width.
-               # Written out rather than via `and_then`: that carries a
-               # `Monad m` constraint, and Monad's superclass chain drags an
-               # Applicative and a Functor dictionary into every consumer of
-               # this module for a two-arm decision.
                | Nothing -> p_float(tok, j)
 
 # A JsonFloat only when parse_double yields a finite Double, on both the '.'/'e' arm and the
@@ -134,6 +130,9 @@ fn p_number(s: String, i: Int) -> Maybe (Json, Int) =
 # parse_double misreads as +inf (BACKLOG, `parse_double` 5-ULP entry). A JsonFloat(inf) would
 # parse and then be refused by the writer's non-finite check — a document that reads has to be
 # writable. Underflow (1e-999) is finite and reads as 0.0.
+# Written out rather than via `and_then`: that carries a `Monad m` constraint, and Monad's
+# superclass chain drags an Applicative and a Functor dictionary into every consumer of this
+# module for a two-arm decision.
 fn p_float(tok: String, j: Int) -> Maybe (Json, Int) =
   match parse_double(tok) with
   | Nothing -> Nothing
@@ -280,8 +279,8 @@ fn p_object_members(s: String, len: Int, depth: Int, i: Int, acc: List (String, 
            else Nothing
   else Nothing
 
-# `seen` with `key` added, or Nothing when `key` was already in it. One tree walk: the insert is
-# the lookup, and a repeat leaves the size unchanged (`set_size` is O(1)). Shared by the parser
+# `seen` with `key` added, or Nothing when `key` was already in it. A repeat leaves the size
+# unchanged, so there is no separate `set_member` walk (`set_size` is O(1)). Shared by the parser
 # and the writer so the two agree on what a repeat is.
 fn note_key(key: String, seen: Set) -> Maybe Set =
   let seen2 = set_insert(key, seen)

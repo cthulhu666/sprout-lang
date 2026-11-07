@@ -693,7 +693,8 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   each round, and a result landing subnormal rounds a second time on the split divisor. Bound is
   `|parsed - exact| <= 5 ULP` over 10^-322..10^308, held by
   `tests/stdlib/test_parse_double_differential.spr` (`just parse-double-sweep`), and tight. Edges:
-  `1.7976931348623158e308` reads as `+inf` (so `json.parse` rejects it); `2.47e-324` flushes to 0.
+  `1.7976931348623158e308` reads as `+inf` (so `json.parse` rejects it);
+  `2.4703282292062328e-324` (just over half the smallest subnormal) reads as 0, not that subnormal.
   Fixes: a two-double power-of-ten table with Dekker products, a correctly-rounded algorithm, or a
   `strtod`-backed builtin (needs approval under Builtin vs Stdlib 4-6, on *correctness*, not speed).
 
