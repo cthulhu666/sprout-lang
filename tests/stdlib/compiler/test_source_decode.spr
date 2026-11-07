@@ -1,18 +1,20 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
 import stdlib.compiler.source as source
 
-# decode_char_at(bytes, i) -> Maybe (Char, Int): total UTF-8 decode over Bytes.
+# decode_char_at(s, i) -> Maybe (Char, Int): total UTF-8 decode over a String.
 # Returns the codepoint as a Char plus the next byte offset, or Nothing at end,
-# out-of-range, truncated, or invalid input. Safe by construction: every read is
-# a bounds-checked bytes_get, so no offset can read out of bounds.
+# out of range, below zero, or on a continuation byte (not a lead byte). Safe by
+# construction: every read is a bounds-checked str_byte_at, so no offset can read
+# out of bounds. A String is valid UTF-8, so a truncated sequence cannot be built;
+# the invalid-lead cases are the offsets that land mid-character.
 
-fn dchar(b: Bytes, i: Int) -> String =
-  match source.decode_char_at(b, i) with
+fn dchar(s: String, i: Int) -> String =
+  match source.decode_char_at(s, i) with
   | Nothing -> "none"
   | Just (ch, _) -> char_to_string(ch)
 
-fn dnext(b: Bytes, i: Int) -> Int =
-  match source.decode_char_at(b, i) with
+fn dnext(s: String, i: Int) -> Int =
+  match source.decode_char_at(s, i) with
   | Nothing -> -1
   | Just (_, next) -> next
 
@@ -21,41 +23,41 @@ fn main() -> Unit !{IO} =
     state <- new_state()
 
     # ASCII: one byte, advances by 1
-    assert_eq(state, "ascii char @0", dchar(bytes_from_utf8("abc"), 0), "a")
-    assert_eq(state, "ascii next @0", dnext(bytes_from_utf8("abc"), 0), 1)
-    assert_eq(state, "ascii char @1", dchar(bytes_from_utf8("abc"), 1), "b")
-    assert_eq(state, "ascii next @2", dnext(bytes_from_utf8("abc"), 2), 3)
+    assert_eq(state, "ascii char @0", dchar("abc", 0), "a")
+    assert_eq(state, "ascii next @0", dnext("abc", 0), 1)
+    assert_eq(state, "ascii char @1", dchar("abc", 1), "b")
+    assert_eq(state, "ascii next @2", dnext("abc", 2), 3)
 
     # Two-byte codepoint (U+00E9 'é' = 0xC3 0xA9): advances by 2
-    assert_eq(state, "2-byte char", dchar(bytes_from_utf8("é"), 0), "é")
-    assert_eq(state, "2-byte next", dnext(bytes_from_utf8("é"), 0), 2)
+    assert_eq(state, "2-byte char", dchar("é", 0), "é")
+    assert_eq(state, "2-byte next", dnext("é", 0), 2)
 
     # Three-byte codepoint (U+20AC '€'): advances by 3
-    assert_eq(state, "3-byte char", dchar(bytes_from_utf8("€"), 0), "€")
-    assert_eq(state, "3-byte next", dnext(bytes_from_utf8("€"), 0), 3)
+    assert_eq(state, "3-byte char", dchar("€", 0), "€")
+    assert_eq(state, "3-byte next", dnext("€", 0), 3)
 
     # Four-byte codepoint (U+1F600 '😀' emoji): advances by 4 — exercises decode4
-    assert_eq(state, "4-byte char", dchar(bytes_from_utf8("😀"), 0), "😀")
-    assert_eq(state, "4-byte next", dnext(bytes_from_utf8("😀"), 0), 4)
+    assert_eq(state, "4-byte char", dchar("😀", 0), "😀")
+    assert_eq(state, "4-byte next", dnext("😀", 0), 4)
 
-    # Truncated 4-byte sequences: missing the 3rd and 2nd continuation bytes
-    # respectively — exercises decode4's two internal Nothing-propagation branches.
-    assert_eq(state, "truncated 4-byte (missing byte 3) -> none",
-      dchar(bytes_slice(bytes_from_utf8("😀"), 0, 3), 0), "none")
-    assert_eq(state, "truncated 4-byte (missing bytes 2,3) -> none",
-      dchar(bytes_slice(bytes_from_utf8("😀"), 0, 2), 0), "none")
+    # A codepoint at a nonzero offset, after a multi-byte one
+    assert_eq(state, "after 2-byte char", dchar("é€", 2), "€")
+    assert_eq(state, "after 2-byte next", dnext("é€", 2), 5)
 
     # End of input -> Nothing
-    assert_eq(state, "end -> none", dchar(bytes_from_utf8("ab"), 2), "none")
+    assert_eq(state, "end -> none", dchar("ab", 2), "none")
+    assert_eq(state, "empty -> none", dchar("", 0), "none")
 
-    # Out of range -> Nothing (the F3 OOB case: cannot read past the buffer)
-    assert_eq(state, "oob -> none", dchar(bytes_from_utf8("ab"), 99), "none")
-    assert_eq(state, "negative -> none", dchar(bytes_from_utf8("ab"), 0 - 1), "none")
+    # Out of range -> Nothing (cannot read past the end)
+    assert_eq(state, "oob -> none", dchar("ab", 99), "none")
+    assert_eq(state, "negative -> none", dchar("ab", 0 - 1), "none")
 
-    # Truncated multibyte: lead byte of 'é' with the continuation byte missing
-    assert_eq(state, "truncated -> none", dchar(bytes_slice(bytes_from_utf8("é"), 0, 1), 0), "none")
-
-    # Lone continuation byte as lead -> invalid -> Nothing
-    assert_eq(state, "lone continuation -> none", dchar(bytes_slice(bytes_from_utf8("é"), 1, 1), 0), "none")
+    # An offset on a continuation byte is not a lead byte -> Nothing
+    assert_eq(state, "continuation of 2-byte -> none", dchar("é", 1), "none")
+    assert_eq(state, "continuation 1 of 3-byte -> none", dchar("€", 1), "none")
+    assert_eq(state, "continuation 2 of 3-byte -> none", dchar("€", 2), "none")
+    assert_eq(state, "continuation 1 of 4-byte -> none", dchar("😀", 1), "none")
+    assert_eq(state, "continuation 2 of 4-byte -> none", dchar("😀", 2), "none")
+    assert_eq(state, "continuation 3 of 4-byte -> none", dchar("😀", 3), "none")
 
     summary(state)

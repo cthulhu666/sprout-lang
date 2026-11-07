@@ -8,9 +8,6 @@ import stdlib.compiler.module_loader as module_loader
 import stdlib.compiler.types as types
 import stdlib.compiler.deriving as deriving
 import stdlib.string as string
-# Load-bearing despite the alias never being written — see the note in source.sprout.
-# `bytes_from_utf8` is an extern owned by stdlib.bytes and needs that module bundled.
-import stdlib.bytes as bytes
 import stdlib.fs as fs
 
 # ---------------------------------------------------------------------------
@@ -233,43 +230,43 @@ fn dict_get_or(key: String, d: Dict String, default: String) -> String =
 # Source scanning: module name and export names from raw source text
 # ---------------------------------------------------------------------------
 
-fn find_newline(s: String, bytes: Bytes, b: Int) -> Int =
+fn find_newline(s: String, b: Int) -> Int =
   if b >= str_byte_len(s) then str_byte_len(s)
   else
-    match source.decode_char_at(bytes, b) with
+    match source.decode_char_at(s, b) with
     | Nothing -> b + 1
-    | Just (ch, next_b) -> if ch == '\n' then b else find_newline(s, bytes, next_b)
+    | Just (ch, next_b) -> if ch == '\n' then b else find_newline(s, next_b)
 
-fn skip_spaces_in(s: String, bytes: Bytes, b: Int) -> Int =
+fn skip_spaces_in(s: String, b: Int) -> Int =
   if b >= str_byte_len(s) then b
   else
-    match source.decode_char_at(bytes, b) with
+    match source.decode_char_at(s, b) with
     | Nothing -> b
-    | Just (ch, _) -> if ch == ' ' || ch == '\t' then skip_spaces_in(s, bytes, b + 1) else b
+    | Just (ch, _) -> if ch == ' ' || ch == '\t' then skip_spaces_in(s, b + 1) else b
 
 fn is_ident_char(ch: Char) -> Bool =
   (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
   (ch >= '0' && ch <= '9') || ch == '_'
 
 # Read a dotted identifier like "stdlib.compiler.ast".
-fn read_dotted_ident_chars(s: String, bytes: Bytes, b: Int, acc: String) -> (String, Int) =
+fn read_dotted_ident_chars(s: String, b: Int, acc: String) -> (String, Int) =
   if b >= str_byte_len(s) then (acc, b)
   else
-    match source.decode_char_at(bytes, b) with
+    match source.decode_char_at(s, b) with
     | Nothing -> (acc, b)
     | Just (ch, _) ->
-        if is_ident_char(ch) then read_dotted_ident_chars(s, bytes, b + 1, str_concat(acc, char_to_string(ch)))
+        if is_ident_char(ch) then read_dotted_ident_chars(s, b + 1, str_concat(acc, char_to_string(ch)))
         else if ch == '.' then
-          match source.decode_char_at(bytes, b + 1) with
+          match source.decode_char_at(s, b + 1) with
           | Nothing -> (acc, b)
           | Just (next, _) ->
               if is_ident_char(next) then
-                read_dotted_ident_chars(s, bytes, b + 1, str_concat(acc, char_to_string(ch)))
+                read_dotted_ident_chars(s, b + 1, str_concat(acc, char_to_string(ch)))
               else (acc, b)
         else (acc, b)
 
-fn read_dotted_ident_at(s: String, bytes: Bytes, b: Int) -> (String, Int) =
-  read_dotted_ident_chars(s, bytes, skip_spaces_in(s, bytes, b), "")
+fn read_dotted_ident_at(s: String, b: Int) -> (String, Int) =
+  read_dotted_ident_chars(s, skip_spaces_in(s, b), "")
 
 # Returns (module_name, exported_names, ctor_export_type_names).
 #
@@ -301,15 +298,14 @@ fn surface_info(mod_name: String, surface: parser.ModuleSurface) -> (String, Lis
 # took the last, which would have preferred a line inside a multi-line string
 # literal over the real header.
 export fn scan_module_name(src: String) -> String =
-  scan_module_name_at(src, bytes, 0)
-  where bytes = bytes_from_utf8(src)
+  scan_module_name_at(src, 0)
 
-fn scan_module_name_at(src: String, bytes: Bytes, i: Int) -> String =
+fn scan_module_name_at(src: String, i: Int) -> String =
   if i >= str_byte_len(src) then ""
   else if str_starts_with_at_byte(src, i, "module ") then
-    match read_dotted_ident_at(src, bytes, i + 7) with
+    match read_dotted_ident_at(src, i + 7) with
     | (name, _) -> name
-  else scan_module_name_at(src, bytes, find_newline(src, bytes, i) + 1)
+  else scan_module_name_at(src, find_newline(src, i) + 1)
 
 # ---------------------------------------------------------------------------
 # Header stripping (strips module + import lines before parsing)

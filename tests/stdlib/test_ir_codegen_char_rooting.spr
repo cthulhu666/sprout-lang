@@ -10,7 +10,7 @@ import stdlib.compiler.token as token
 # Char" UAF this file was written for is structurally impossible now.  What it
 # still exercises is the surrounding hazard: source.decode_char_at returns a
 # boxed `Maybe (Int, Int)` tuple, and the decode walks multi-byte sequences while
-# other heap values (Bytes, the tuple) are live across allocations.
+# other heap values (the source String, the tuple) are live across allocations.
 #
 # These cases run in the test's OWN typed-compiled runtime, so under
 # `--use-ir-codegen` + SPROUT_GC_STRESS=1 (collect on every allocation) they
@@ -19,8 +19,8 @@ import stdlib.compiler.token as token
 # Decode the codepoint at byte offset `i`, returning its string rendering or a
 # marker.  The Char is held live across the boxed-tuple allocation inside
 # decode_char_at — the exact rooting hazard under test.
-fn decoded_str(b: Bytes, i: Int) -> String =
-  match source.decode_char_at(b, i) with
+fn decoded_str(s: String, i: Int) -> String =
+  match source.decode_char_at(s, i) with
   | Nothing -> "<none>"
   | Just (ch, _) -> char_to_string(ch)
 
@@ -34,11 +34,11 @@ fn main() -> Unit !{IO} =
     # --- Multi-byte Char round-trips through decode_char_at (the é case) ---
     # "Aé" — 'A' is ASCII (offset 0), 'é' is 2-byte UTF-8 (offset 1).
     check_eq("char-root: ASCII 'A' decodes",
-              decoded_str(bytes_from_utf8("Aé"), 0), "A"),
+              decoded_str("Aé", 0), "A"),
     check_eq("char-root: 2-byte 'é' decodes (UAF if Char unrooted)",
-              decoded_str(bytes_from_utf8("Aé"), 1), "é"),
+              decoded_str("Aé", 1), "é"),
     check_eq("char-root: 3-byte '─' decodes",
-              decoded_str(bytes_from_utf8("─"), 0), "─"),
+              decoded_str("─", 0), "─"),
 
     # --- Lexing survives box-drawing chars + multi-char operators ---
     # The box-drawing chars in the comment header are 3-byte heap Chars; a
