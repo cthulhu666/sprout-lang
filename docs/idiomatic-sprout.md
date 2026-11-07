@@ -203,6 +203,11 @@ live — 70–90x** — because per-read allocation is flat but collection cost
 scales with the live set (`bench/results-2026-09-28-vec-box-tax.md`). It is why
 `mutvec_at` exists beside `mutvec_get`.
 
+A literal under `Just` keeps a builtin read (`str_byte_at`, `bytes_get`, `str_char_at`) unboxed
+when the payload is a scalar: `| Just 45 -> …` allocates nothing, also in a tuple column. A
+function worker or argument worker takes only a variable or `_` under `Just`, so a literal there
+builds the wrapper ([why](inline-byte-reads-v0.md#43-the-payload-kind)).
+
 Returning a wrapper keeps it unboxed through a layer that ends in a constructor,
 an `if`, or a call to a function some `match` also scrutinises, unless that
 function is in the caller's own recursive group. Nor is this

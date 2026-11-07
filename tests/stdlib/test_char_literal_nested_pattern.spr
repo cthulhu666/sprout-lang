@@ -1,0 +1,99 @@
+import stdlib.test (check_eq, run_suite)
+
+# A Char literal nested in a constructor or tuple pattern, over the boxed match path: a variable,
+# a user function's result, a tuple, and a pattern inside a pattern. An Int literal in the same
+# places already worked; each case runs a hit, a miss and `Nothing`.
+
+type Box =
+  | Box Char Int
+
+fn on_var(m: Maybe Char) -> Int =
+  match m with
+  | Just 'a' -> 1
+  | Just _ -> 2
+  | Nothing -> 0
+
+fn on_var_wild(m: Maybe Char) -> Int =
+  match m with
+  | Just 'a' -> 1
+  | _ -> 0
+
+# A user function's result, which has no unboxed read to take the arm.
+fn char_at(i: Int) -> Maybe Char =
+  if i == 0 then Just('a') else if i == 1 then Just('b') else Nothing
+
+fn on_call(i: Int) -> Int =
+  match char_at(i) with
+  | Just 'a' -> 1
+  | Just _ -> 2
+  | Nothing -> 0
+
+fn on_tuple_lit(m: Maybe Char, n: Int) -> Int =
+  match (m, n) with
+  | (Just 'a', 0) -> 1
+  | (Just 'a', k) -> 10 + k
+  | (Nothing, _) -> -1
+  | _ -> 0
+
+fn on_tuple_value(p: (Maybe Char, Int)) -> Int =
+  match p with
+  | (Just 'a', n) -> n
+  | _ -> -1
+
+fn on_char_in_tuple(p: (Char, Int)) -> Int =
+  match p with
+  | ('a', n) -> n
+  | (_, n) -> -n
+
+fn on_char_in_split(c: Char, n: Int) -> Int =
+  match (c, n) with
+  | ('a', k) -> k
+  | (_, k) -> -k
+
+fn on_nested(m: Maybe (Maybe Char)) -> Int =
+  match m with
+  | Just (Just 'a') -> 1
+  | Just (Just _) -> 2
+  | Just Nothing -> 3
+  | Nothing -> 0
+
+fn on_field(b: Box) -> Int =
+  match b with
+  | Box 'a' n -> n
+  | Box _ n -> -n
+
+fn main() -> Unit !{IO} =
+  run_suite("char_literal_nested_pattern", [
+    check_eq("var hit", on_var(Just('a')), 1),
+    check_eq("var miss", on_var(Just('b')), 2),
+    check_eq("var nothing", on_var(Nothing), 0),
+    check_eq("var wildcard hit", on_var_wild(Just('a')), 1),
+    check_eq("var wildcard miss", on_var_wild(Just('b')), 0),
+    check_eq("var wildcard nothing", on_var_wild(Nothing), 0),
+
+    check_eq("call hit", on_call(0), 1),
+    check_eq("call miss", on_call(1), 2),
+    check_eq("call nothing", on_call(2), 0),
+
+    check_eq("tuple literal hit", on_tuple_lit(Just('a'), 0), 1),
+    check_eq("tuple literal second row", on_tuple_lit(Just('a'), 5), 15),
+    check_eq("tuple literal miss", on_tuple_lit(Just('b'), 0), 0),
+    check_eq("tuple literal nothing", on_tuple_lit(Nothing, 0), -1),
+
+    check_eq("tuple value hit", on_tuple_value((Just('a'), 7)), 7),
+    check_eq("tuple value miss", on_tuple_value((Just('b'), 7)), -1),
+    check_eq("tuple value nothing", on_tuple_value((Nothing, 7)), -1),
+
+    check_eq("char in tuple hit", on_char_in_tuple(('a', 3)), 3),
+    check_eq("char in tuple miss", on_char_in_tuple(('b', 3)), -3),
+    check_eq("char in split hit", on_char_in_split('a', 3), 3),
+    check_eq("char in split miss", on_char_in_split('b', 3), -3),
+
+    check_eq("nested hit", on_nested(Just (Just('a'))), 1),
+    check_eq("nested miss", on_nested(Just (Just('b'))), 2),
+    check_eq("nested inner nothing", on_nested(Just (Nothing)), 3),
+    check_eq("nested outer nothing", on_nested(Nothing), 0),
+
+    check_eq("field hit", on_field(Box('a', 4)), 4),
+    check_eq("field miss", on_field(Box('b', 4)), -4)
+  ])

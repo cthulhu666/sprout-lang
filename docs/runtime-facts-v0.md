@@ -179,9 +179,9 @@ stubs, which all call `sprout_fail`.
 **Has an unboxed variant** when the runtime defines `<name>_unboxed` returning `i128`
 (`SproutUnboxed2` is `unsigned __int128`) with `<name>`'s parameter count. x86_64 clang ≤ 21
 lowers `__int128` as `{ i64, i64 }` (`ci.yml`); the clang floor in §4.1 rules that out.
-`ast_to_ir` still requires the call's type to be a `Maybe` and its arms to be simple, as
-`maybe_unboxable` and `all_arms_simple_maybe` do now. `ir_header` emits a `declare` for each
-entry, so the routing and the declarations cannot disagree.
+`ast_to_ir` still requires the call's type to be a `Maybe` and its arms to be simple (or, for a
+scalar payload, `Just <literal>`), as `maybe_unboxable` and `all_arms_simple_maybe` do now.
+`ir_header` emits a `declare` for each entry, so the routing and the declarations cannot disagree.
 
 **Cannot change a vector's length** unless it runs other code or can reach a function that writes
 `VectorVal.len`. The rule follows calls, as the GC rule does. The runtime passes vectors as

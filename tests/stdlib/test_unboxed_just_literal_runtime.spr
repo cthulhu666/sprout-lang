@@ -1,0 +1,179 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.bytes as bytes
+import stdlib.bytes (bytes_get)
+
+# `Just <literal>` arms over the Tier-1 Maybe reads (docs/inline-byte-reads-v0.md): the match tests
+# the tag, then the payload. Each arm order is run over a hit, a miss and the two out-of-range
+# indices, for `str_byte_at`, `bytes_get` and a Char literal over `str_char_at`.
+
+# "a-b" is 97 45 98; "-./" is 45 46 47; "é-b" is the chars é - b.
+fn idxs() -> List Int = [-1, 0, 1, 2, 3]
+
+# --- str_byte_at ---
+
+fn s_lit_wild(s: String, i: Int) -> Int =
+  match str_byte_at(s, i) with
+  | Just 45 -> 1
+  | _ -> 0
+
+fn s_lit_var(s: String, i: Int) -> Int =
+  match str_byte_at(s, i) with
+  | Just 45 -> 1
+  | Just b -> b + 100
+  | Nothing -> -1
+
+fn s_nothing_first(s: String, i: Int) -> Int =
+  match str_byte_at(s, i) with
+  | Nothing -> -1
+  | Just 45 -> 1
+  | _ -> 0
+
+fn s_many(s: String, i: Int) -> Int =
+  match str_byte_at(s, i) with
+  | Just 45 -> 1
+  | Just 46 -> 2
+  | Just 47 -> 3
+  | _ -> 0
+
+fn s_let_else(s: String, i: Int) -> Int =
+  let Just 45 = str_byte_at(s, i) else 0
+  in 1
+
+fn s_tuple(s: String, i: Int) -> Int =
+  match (str_byte_at(s, i), str_byte_at(s, 0)) with
+  | (Just 45, Just _) -> 1
+  | (Nothing, _) -> -1
+  | _ -> 0
+
+# A literal in either column falls through to the next row on a tag miss and on a payload miss.
+fn s_rows(s: String, i: Int, j: Int) -> Int =
+  match (str_byte_at(s, i), str_byte_at(s, j)) with
+  | (Just 45, Just b) -> b
+  | (Just b, _) -> b + 1000
+  | _ -> -1
+
+fn s_rows2(s: String, i: Int, j: Int) -> Int =
+  match (str_byte_at(s, i), str_byte_at(s, j)) with
+  | (Just 45, Just 46) -> 1
+  | (_, Just 46) -> 2
+  | (Just 45, _) -> 3
+  | _ -> 0
+
+# --- bytes_get ---
+
+fn b_lit_wild(b: Bytes, i: Int) -> Int =
+  match bytes_get(b, i) with
+  | Just 45 -> 1
+  | _ -> 0
+
+fn b_lit_var(b: Bytes, i: Int) -> Int =
+  match bytes_get(b, i) with
+  | Just 45 -> 1
+  | Just v -> v + 100
+  | Nothing -> -1
+
+fn b_nothing_first(b: Bytes, i: Int) -> Int =
+  match bytes_get(b, i) with
+  | Nothing -> -1
+  | Just 45 -> 1
+  | _ -> 0
+
+fn b_many(b: Bytes, i: Int) -> Int =
+  match bytes_get(b, i) with
+  | Just 45 -> 1
+  | Just 46 -> 2
+  | Just 47 -> 3
+  | _ -> 0
+
+# --- str_char_at ---
+
+fn c_lit_wild(s: String, i: Int) -> Int =
+  match str_char_at(s, i) with
+  | Just '-' -> 1
+  | _ -> 0
+
+fn c_lit_var(s: String, i: Int) -> Int =
+  match str_char_at(s, i) with
+  | Just '-' -> 1
+  | Just _ -> 2
+  | Nothing -> -1
+
+fn c_nothing_first(s: String, i: Int) -> Int =
+  match str_char_at(s, i) with
+  | Nothing -> -1
+  | Just '-' -> 1
+  | _ -> 0
+
+fn c_many(s: String, i: Int) -> Int =
+  match str_char_at(s, i) with
+  | Just 'é' -> 4
+  | Just '-' -> 1
+  | Just '.' -> 2
+  | _ -> 0
+
+fn c_rows(s: String, i: Int, j: Int) -> Int =
+  match (str_char_at(s, i), str_char_at(s, j)) with
+  | (Just '-', Just _) -> 1
+  | (Just _, Just 'é') -> 2
+  | _ -> 0
+
+fn b_rows(b: Bytes, i: Int, j: Int) -> Int =
+  match (bytes_get(b, i), bytes_get(b, j)) with
+  | (Just 45, Just v) -> v
+  | (Just v, _) -> v + 1000
+  | _ -> -1
+
+fn main() -> Unit !{IO} =
+  run_suite("unboxed_just_literal_runtime", [
+    # a-b: index 1 hits the literal, 0 and 2 miss it, -1 and 3 are out of range.
+    check_eq("str lit/wild", map(s_lit_wild("a-b", _), idxs()), [0, 0, 1, 0, 0]),
+    check_eq("str lit/var/nothing", map(s_lit_var("a-b", _), idxs()), [-1, 197, 1, 198, -1]),
+    check_eq("str nothing first", map(s_nothing_first("a-b", _), idxs()), [-1, 0, 1, 0, -1]),
+    check_eq("str many literals, hit first", map(s_many("-./", _), idxs()), [0, 1, 2, 3, 0]),
+    check_eq("str many literals, miss all", map(s_many("a-b", _), idxs()), [0, 0, 1, 0, 0]),
+    check_eq("str let..else", map(s_let_else("a-b", _), idxs()), [0, 0, 1, 0, 0]),
+    check_eq("str tuple column", map(s_tuple("-b", _), idxs()), [-1, 1, 0, -1, -1]),
+    # "-." is 45 46: index 2 is out of range.
+    check_eq("str rows: both hit", s_rows("-.", 0, 1), 46),
+    check_eq("str rows: second column tag miss", s_rows("-.", 0, 5), 1045),
+    check_eq("str rows: first payload miss", s_rows("-.", 1, 0), 1046),
+    check_eq("str rows: first payload miss, second hit", s_rows("-.", 1, 1), 1046),
+    check_eq("str rows: first Nothing", s_rows("-.", 5, 0), -1),
+    check_eq("str rows: negative index", s_rows("-.", -1, 0), -1),
+    check_eq("str rows: first out of range", s_rows("-.", 2, 0), -1),
+    check_eq("str rows2: both literals", s_rows2("-.", 0, 1), 1),
+    check_eq("str rows2: second column literal only", s_rows2("-.", 1, 1), 2),
+    check_eq("str rows2: second payload miss", s_rows2("-.", 0, 0), 3),
+    check_eq("str rows2: both payload miss", s_rows2("-.", 1, 0), 0),
+    check_eq("str rows2: second Nothing", s_rows2("-.", 0, 5), 3),
+    check_eq("str rows2: first Nothing", s_rows2("-.", 5, 1), 2),
+    check_eq("str rows2: both Nothing", s_rows2("-.", 5, 5), 0),
+    check_eq("str rows2: negative index", s_rows2("-.", -1, 1), 2),
+    check_eq("str high byte is not 45", s_lit_wild("é", 0), 0),
+    check_eq("str empty", s_lit_wild("", 0), 0),
+
+    check_eq("bytes lit/wild", map(b_lit_wild(bytes.from_string("a-b"), _), idxs()), [0, 0, 1, 0, 0]),
+    check_eq("bytes lit/var/nothing", map(b_lit_var(bytes.from_string("a-b"), _), idxs()),
+             [-1, 197, 1, 198, -1]),
+    check_eq("bytes nothing first", map(b_nothing_first(bytes.from_string("a-b"), _), idxs()),
+             [-1, 0, 1, 0, -1]),
+    check_eq("bytes many literals, hit first", map(b_many(bytes.from_string("-./"), _), idxs()),
+             [0, 1, 2, 3, 0]),
+    check_eq("bytes rows: both hit", b_rows(bytes.from_string("-."), 0, 1), 46),
+    check_eq("bytes rows: second column tag miss", b_rows(bytes.from_string("-."), 0, 5), 1045),
+    check_eq("bytes rows: first payload miss", b_rows(bytes.from_string("-."), 1, 0), 1046),
+    check_eq("bytes rows: first out of range", b_rows(bytes.from_string("-."), 2, 0), -1),
+    check_eq("bytes empty", b_lit_wild(bytes.from_string(""), 0), 0),
+
+    check_eq("char lit/wild", map(c_lit_wild("a-b", _), idxs()), [0, 0, 1, 0, 0]),
+    check_eq("char lit/var/nothing", map(c_lit_var("a-b", _), idxs()), [-1, 2, 1, 2, -1]),
+    check_eq("char nothing first", map(c_nothing_first("a-b", _), idxs()), [-1, 0, 1, 0, -1]),
+    check_eq("char many literals, multi-byte first", map(c_many("é-.", _), idxs()), [0, 4, 1, 2, 0]),
+
+    # "-é-" is the chars - é -.
+    check_eq("char rows: first row", c_rows("-é-", 0, 1), 1),
+    check_eq("char rows: first payload miss, second hit", c_rows("-é-", 1, 1), 2),
+    check_eq("char rows: second payload miss", c_rows("-é-", 1, 0), 0),
+    check_eq("char rows: second Nothing", c_rows("-é-", 0, 5), 0),
+    check_eq("char rows: first Nothing", c_rows("-é-", 5, 1), 0)
+  ])

@@ -127,6 +127,15 @@ The kind comes from the producer's type, and the routers compute it where they p
 `vector_get` and the `map_*` reads, and `Maybe`-returning workers, when `T` is scalar. The inline
 reads' `val` phi joins two scalars and is never rooted.
 
+**Literal arms.** A scalar kind also lets a `match` over a Tier-1 extern take `Just <Int or Char
+literal>` arms (`just_literal`): `| Just 45 -> … | _ -> …` stays unboxed. The arm is two test
+blocks, the tag and then the payload, each missing to the next arm; the payload is a scalar on
+both the hit and the miss path, so reading it after the tag test is safe. An unknown kind keeps
+the boxed call. A tuple column (`translate_split_elem`) takes the same arms. A Tier-2 worker and
+an argument worker check arms with `is_simple_width2_arm`, which has no literal case, so such an
+arm takes the boxed path. `let Just 45 = str_byte_at(s, i) else …` is a `match` after
+elaboration and takes the same path.
+
 ## 5. Staging
 
 1. ~~**Payload kind.**~~ Landed (§4.3). `tests/stdlib/test_ir_unboxed_payload_kind.spr`: an `Int`
