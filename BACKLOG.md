@@ -83,6 +83,10 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   rejected by the bundler's `unresolved_in_types`, so that half is consolidation, not a missing
   check. Confirm each position empirically first. The lowercase case is a separate gap, filed in
   §9.
+- [ ] `P3` **rng_below draws from 15 bits.** `stdlib/rng.sprout` `rng_below` takes
+  `state / 65536`, which is below 32768. So `n > 32768` never yields a value >= 32768, and an `n`
+  that does not divide 32768 is slightly biased. Fix by drawing more bits (or rejection
+  sampling), which changes pinned streams in `tests/stdlib/test_rng.spr`.
 - [ ] `P3` **Make a top-level `let` visible above its own declaration.** Forward-referencing one is
   `Unknown variable` — `pre_scan_fn_decls` has no `LetDecl` arm. Never worked; filed as the
   additive feature it is. Bigger than it looks: pre-scanning means inferring the RHS, so the

@@ -206,15 +206,15 @@ fn sample_exact(s: Sweep, _n: Int) -> Sweep =
 fn repeat_sample(step: Sweep -> Int -> Sweep, s: Sweep, n: Int, left: Int) -> Sweep =
   if left <= 0 then s else repeat_sample(step, step(s, n), n, left - 1)
 
-# `rng_next` needs its state in [0, 2^31) — the multiply leaves i64 above ~8.4e9,
-# so an out-of-range `--seed` aborted the process with a raw Int-overflow panic.
+# Keeps `--seed` in [0, 2^31) so the `seed + 1` / `seed + 2` derivation below cannot
+# overflow for a seed near MAX_INT.
 fn seed_state(seed: Int) -> Int =
   let m = seed - ((seed / 2147483648) * 2147483648)
   in if m < 0 then m + 2147483648 else m
 
 fn sweep(step: Sweep -> Int -> Sweep, seed: Int, runs: Int, lengths: Vec Int) -> Sweep =
   vec_fold(\ (s, n) -> repeat_sample(step, s, n, runs),
-           Sweep(seed_state(seed), 0, 0, "none"), lengths)
+           Sweep(seed, 0, 0, "none"), lengths)
 
 
 # Both ends, because neither alone reproduces: the exponent is at the tail and
