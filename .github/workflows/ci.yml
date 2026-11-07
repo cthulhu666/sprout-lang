@@ -519,7 +519,11 @@ jobs:
       - name: Drive the LSP server with framed JSON-RPC
         # Builds sproutd via the recipe's own dependency, then asserts framing, diagnostic
         # line/column, document lifecycle, and capability honesty.
-        run: just lsp-smoke
+        #
+        # Also runs the analysis service gate: it asserts the service exits, with no eval binary
+        # or scratch dir left, when stdin closes during an eval that never ends. Both recipes in
+        # one invocation, so `just` builds sproutd once.
+        run: just lsp-smoke analysis-cancel-smoke
 
   # JetBrains plugin (editors/intellij, docs/intellij-plugin-v0.md). Separate job because it is a
   # Gradle/Kotlin build with a JVM toolchain that no other job needs — the toolchain is pinned in

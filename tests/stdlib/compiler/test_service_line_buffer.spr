@@ -1,0 +1,115 @@
+module main
+
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler.analysis_service_driver as service
+import stdlib.bytes as bytes
+import stdlib.string as string
+
+# The analysis service reads stdin in chunks and cuts them into request lines. `split_requests`
+# takes the chunks held back so far (newest first) and the next chunk; `final_requests` takes
+# what is held when stdin ends.
+
+fn show_request(r: service.Request) -> String =
+  match r with
+  | service.Line text -> "L:" ++ text
+  | service.BadLine -> "BAD"
+
+fn show_requests(rs: List service.Request) -> String =
+  string.join("|", list_map(show_request, rs))
+
+fn text(s: String) -> Bytes =
+  bytes.from_string(s)
+
+# Bytes that are not valid UTF-8 on their own: a lone 0xE9.
+fn lone_e9() -> Bytes =
+  bytes.singleton(233)
+
+# The held chunks as the text they spell, oldest first.
+fn show_held(held: List Bytes) -> String =
+  match bytes.to_string(bytes.builder_build(bytes.builder_concat(list_map(bytes.builder_bytes, list_reverse(held))))) with
+  | Ok s -> s
+  | Err _ -> "<not text>"
+
+# Feeds the chunks one after another, as the reader does. The requests of all calls, then what is
+# held back after the last one.
+fn feed(held: List Bytes, chunks: List Bytes, acc: List service.Request) -> String =
+  match chunks with
+  | Nil -> show_requests(acc) ++ " /" ++ show_held(held)
+  | Cons chunk rest ->
+      match service.split_requests(held, chunk) with
+      | (requests, now_held) -> feed(now_held, rest, list_append(acc, requests))
+
+fn show_feed(chunks: List Bytes) -> String =
+  feed(Nil, chunks, Nil)
+
+fn split_cases(test: TestState) -> Unit !{IO} =
+  do
+    assert_eq(test, "a request cut across two reads is served once whole",
+      show_feed([text("{\"a\""), text(":1}\n")]), "L:{\"a\":1} /")
+    assert_eq(test, "a read without a newline is held",
+      show_feed([text("{\"a\"")]), " /{\"a\"")
+    assert_eq(test, "two requests in one read come out in order",
+      show_feed([text("one\ntwo\n")]), "L:one|L:two /")
+    assert_eq(test, "a read that ends mid-request holds the rest back",
+      show_feed([text("one\ntw")]), "L:one /tw")
+    assert_eq(test, "the held bytes join the next read",
+      show_feed([text("one\ntw"), text("o\nthree")]), "L:one|L:two /three")
+    assert_eq(test, "reads with no newline only grow the held bytes",
+      show_feed([text("ab"), text("cd"), text("ef")]), " /abcdef")
+    assert_eq(test, "CRLF is cut like LF", show_feed([text("a\r\nb\r\n")]), "L:a|L:b /")
+    assert_eq(test, "every trailing CR is dropped", show_feed([text("a\r\r\n")]), "L:a /")
+    assert_eq(test, "a CR at the end of one read and the LF at the start of the next",
+      show_feed([text("a\r"), text("\n")]), "L:a /")
+    assert_eq(test, "empty lines are skipped", show_feed([text("\n\r\na\n\n")]), "L:a /")
+    assert_eq(test, "a newline that starts a read ends the held line",
+      show_feed([text("ab"), text("\ncd")]), "L:ab /cd")
+    assert_eq(test, "a CR inside a line is kept", show_feed([text("a\rb\n")]), "L:a\rb /")
+
+fn many_chunks(n: Int, piece: String, acc: List Bytes) -> List Bytes =
+  if n <= 0 then acc else many_chunks(n - 1, piece, Cons(text(piece), acc))
+
+fn many_cases(test: TestState) -> Unit !{IO} =
+  do
+    # 500 reads of 4 bytes make one line of 2000 bytes, then a second line starts.
+    let chunks = list_append(many_chunks(500, "abcd", Nil), [text("\nnext")])
+    assert_eq(test, "a line spread over many reads is joined whole",
+      show_feed(chunks),
+      "L:" ++ string.repeat("abcd", 500) ++ " /next")
+    let many_lines = many_chunks(300, "x\n", Nil)
+    assert_eq(test, "many short lines each come out",
+      show_feed(many_lines),
+      string.join("|", list_map(\_ -> "L:x", many_lines)) ++ " /")
+
+fn invalid_cases(test: TestState) -> Unit !{IO} =
+  do
+    assert_eq(test, "a line that is not UTF-8 is a bad line, in order",
+      show_feed([bytes.append(text("ok\n"), bytes.append(lone_e9(), text("\nlater\n")))]),
+      "L:ok|BAD|L:later /")
+    assert_eq(test, "a NUL byte makes a bad line",
+      show_feed([bytes.append(text("a"), bytes.append(bytes.singleton(0), text("b\n")))]),
+      "BAD /")
+    # U+00E9 is 0xC3 0xA9. Cut between the two bytes, the line is whole once the second arrives.
+    assert_eq(test, "a character cut across two reads is decoded once whole",
+      show_feed([bytes.singleton(195), bytes.append(bytes.singleton(169), text("\n"))]), "L:é /")
+
+fn final_cases(test: TestState) -> Unit !{IO} =
+  do
+    assert_eq(test, "bytes without a newline at the end of input are a last request",
+      show_requests(service.final_requests([text("last")])), "L:last")
+    assert_eq(test, "a last request held in several chunks is joined",
+      show_requests(service.final_requests([text("t"), text("as"), text("l")])), "L:last")
+    assert_eq(test, "nothing held means no last request",
+      show_requests(service.final_requests(Nil)), "")
+    assert_eq(test, "held bytes that are only a CR are no request",
+      show_requests(service.final_requests([text("\r")])), "")
+    assert_eq(test, "the last request may be a bad line",
+      show_requests(service.final_requests([lone_e9()])), "BAD")
+
+fn main() -> Unit !{IO} =
+  do
+    test <- new_state()
+    split_cases(test)
+    many_cases(test)
+    invalid_cases(test)
+    final_cases(test)
+    summary(test)

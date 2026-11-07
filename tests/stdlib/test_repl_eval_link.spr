@@ -36,22 +36,68 @@ fn dotfile_case(state: TestState, use_darwin: Bool) -> Unit !{IO} =
       do
         let rt_dir = dir ++ "/runtime"
         let objs_dir = dir ++ "/objs"
-        objs_ref <- ref_new(false)
-        assert_true(state, "make the runtime copy dir", is_ok(fs.make_dir_all(rt_dir)))
-        match fs.list_dir("runtime") with
-        | Err _ -> assert_true(state, "list runtime/", false)
-        | Ok names ->
-            list_each(\n -> copy_runtime_file(state, rt_dir, n),
-                      list_filter(\n -> string.ends_with(n, ".c") || string.ends_with(n, ".h"), names))
+        objs_ref <- ref_new(Nothing)
+        intake <- service.new_intake()
+        copy_runtime(state, rt_dir)
         assert_true(state, "write the stray file", is_ok(fs.write_text(rt_dir ++ "/._sprout_runtime.c", "this is not C\n")))
         assert_true(state, "write the IR", is_ok(fs.write_text(dir ++ "/eval.ll", trivial_main_ir)))
         match service.compile_runtime_and_link_eval(
-          rt_dir, dir ++ "/eval.ll", dir ++ "/eval_bin", objs_dir, objs_ref, use_darwin) with
+          intake, rt_dir, dir ++ "/eval.ll", dir ++ "/eval_bin", objs_dir, objs_ref, use_darwin) with
         | Ok _ -> assert_true(state, "a dot-prefixed .c file is not compiled", !fs.exists(objs_dir ++ "/._sprout_runtime.o"))
         | Err emsg ->
             do
               terminal.write("[test_repl_eval_link] link failed:\n" ++ emsg ++ "\n")
               assert_true(state, "a dot-prefixed .c file is not compiled", false)
+        assert_true(state, "the temp dir is removed", is_ok(fs.remove_dir_all(dir)))
+
+let not_ir: String = "this is not LLVM IR\n"
+
+fn copy_runtime(state: TestState, rt_dir: String) -> Unit !{IO} =
+  do
+    assert_true(state, "make the runtime copy dir", is_ok(fs.make_dir_all(rt_dir)))
+    match fs.list_dir("runtime") with
+    | Err _ -> assert_true(state, "list runtime/", false)
+    | Ok names ->
+        list_each(\n -> copy_runtime_file(state, rt_dir, n),
+                  list_filter(\n -> string.ends_with(n, ".c") || string.ends_with(n, ".h"), names))
+
+# The objects are kept across a link that fails because of the program, and dropped across one that
+# fails after the runtime sources changed. The state under test is the recorded objects.
+fn stale_objects_case(state: TestState, use_darwin: Bool) -> Unit !{IO} =
+  match fs.make_temp_dir("sprout-eval-stale-") with
+  | Err e -> assert_true(state, "make a temp dir (" ++ fs.fs_error_message(e) ++ ")", false)
+  | Ok dir ->
+      do
+        let rt_dir = dir ++ "/runtime"
+        let objs_dir = dir ++ "/objs"
+        let ir_path = dir ++ "/eval.ll"
+        let bin_path = dir ++ "/eval_bin"
+        objs_ref <- ref_new(Nothing)
+        intake <- service.new_intake()
+        copy_runtime(state, rt_dir)
+        assert_true(state, "write the IR", is_ok(fs.write_text(ir_path, trivial_main_ir)))
+        let first = service.compile_runtime_and_link_eval(intake, rt_dir, ir_path, bin_path, objs_dir, objs_ref, use_darwin)
+        assert_true(state, "the first link succeeds", is_ok(first))
+        assert_true(state, "the IR is compiled to an object file of its own", fs.is_file(ir_path ++ ".o"))
+        let recorded = ref_read(objs_ref)
+        assert_true(state, "the runtime objects are recorded", is_just(recorded))
+        assert_true(state, "write IR that does not compile", is_ok(fs.write_text(ir_path, not_ir)))
+        let bad_ir = service.compile_runtime_and_link_eval(intake, rt_dir, ir_path, bin_path, objs_dir, objs_ref, use_darwin)
+        assert_true(state, "IR that does not compile fails", is_err(bad_ir))
+        let kept = ref_read(objs_ref)
+        assert_true(state, "unchanged sources and bad IR keep the objects", is_just(kept))
+        match fs.read_text(rt_dir ++ "/sprout_runtime.c") with
+        | Err _ -> assert_true(state, "read the runtime source", false)
+        | Ok text -> assert_true(state, "edit a runtime source", is_ok(fs.write_text(rt_dir ++ "/sprout_runtime.c", text ++ "\n/* edited */\n")))
+        let bad_again = service.compile_runtime_and_link_eval(intake, rt_dir, ir_path, bin_path, objs_dir, objs_ref, use_darwin)
+        assert_true(state, "bad IR fails again", is_err(bad_again))
+        let dropped = ref_read(objs_ref)
+        assert_true(state, "a failed link after a source changed forgets the objects", is_nothing(dropped))
+        assert_true(state, "write the IR again", is_ok(fs.write_text(ir_path, trivial_main_ir)))
+        let healed = service.compile_runtime_and_link_eval(intake, rt_dir, ir_path, bin_path, objs_dir, objs_ref, use_darwin)
+        assert_true(state, "the next link compiles the runtime again and succeeds", is_ok(healed))
+        let again = ref_read(objs_ref)
+        assert_true(state, "the objects are recorded again", is_just(again))
         assert_true(state, "the temp dir is removed", is_ok(fs.remove_dir_all(dir)))
 
 fn main() -> Unit !{IO} =
@@ -72,7 +118,8 @@ fn main() -> Unit !{IO} =
               let bin_path = dir ++ "/eval_bin"
               let objs_dir = dir ++ "/objs"
               use_darwin <- is_darwin()
-              objs_ref <- ref_new(false)
+              objs_ref <- ref_new(Nothing)
+              intake <- service.new_intake()
               match fs.write_text(ir_path, trivial_main_ir) with
               | Err msg -> assert_true(state, "write trivial IR", false)
               | Ok _ ->
@@ -80,7 +127,7 @@ fn main() -> Unit !{IO} =
                   # Match the IO-Result action directly: a `<-` do-bind would strip
                   # the Result wrapper (do-block Result-unwrap quirk).
                   match service.compile_runtime_and_link_eval(
-                    "runtime", ir_path, bin_path, objs_dir, objs_ref, use_darwin) with
+                    intake, "runtime", ir_path, bin_path, objs_dir, objs_ref, use_darwin) with
                   | Ok _ ->
                       assert_true(state, "eval path links the whole runtime (scheduler_park_on_fd resolves)", true)
                   | Err emsg ->
@@ -91,5 +138,6 @@ fn main() -> Unit !{IO} =
                         assert_true(state, "eval path links the whole runtime (scheduler_park_on_fd resolves)", false)
               assert_true(state, "the temp dir is removed", is_ok(fs.remove_dir_all(dir)))
               dotfile_case(state, use_darwin)
+              stale_objects_case(state, use_darwin)
 
     summary(state)

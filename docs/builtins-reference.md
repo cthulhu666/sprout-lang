@@ -164,7 +164,12 @@ Experimental snapshot analysis hooks:
   `symbol_inventory_in_source`, `symbol_locations_in_source`, `check_source`,
   `diagnostics_in_source`, `type_of_in_source`, and `eval_expr_in_source` over a
   JSON-over-stdio protocol. Override the service command via
-  `SPROUT_ANALYSIS_SERVICE_CMD`.
+  `SPROUT_ANALYSIS_SERVICE_CMD`. The REPL starts it in its own process group, so a Ctrl-C at the
+  terminal does not reach it; it stops when its stdin reaches EOF and removes its scratch dir.
+  Every request it has read is answered, in order, so `sproutd --analysis-service <root> < requests`
+  is a batch run. After EOF no child process (clang, the eval binary) starts and a running one is
+  killed: an eval that has not finished gets an error reply ending in `input closed`, and requests
+  that need no child process are answered as usual. `just analysis-cancel-smoke` checks this.
 
 Native TCP listener and connection handle tables now reuse closed slots, so long-running native servers no longer fail after a fixed total number of accepted connections.
 

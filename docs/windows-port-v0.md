@@ -263,6 +263,11 @@ comment, so someone editing the DNS path learns the constraint without reading t
 None of this is a reason to prefer a different poller, because *the alternative has the same
 limitation* (below).
 
+The analysis service relies on the same helper: when its stdin reaches EOF it drops the task that
+waits for the running eval, and `proc_cancel_hook` kills the child. That needs no process groups, but on Windows the
+hook must call `TerminateProcess`, and a `NewGroup` child (which the service uses, so that the
+linker dies with clang) needs a job object to reach what it started.
+
 ### 4.3.1 Poller decision (2026-08-16): `WSAPoll`, revisitable
 
 **Decided: `WSAPoll`, vendoring nothing.** Recorded with its limits so the decision can be
