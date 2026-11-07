@@ -107,6 +107,31 @@ fn main() -> Unit !{IO} =
     assert_true(state, "strip_headers blanks every header line before a body",
       source.strip_headers("module m\n# café\nimport a.b\n\nfn a() -> Int = 1\n")
         == "\n\n\n\nfn a() -> Int = 1\n")
+    # Non-ASCII in a header comment and in the body: the header scan reads raw
+    # bytes, and the body is sliced at the byte offset where the headers end.
+    assert_true(state, "strip_headers keeps a non-ASCII body after a non-ASCII comment",
+      source.strip_headers("# é ─ note\nimport x\nfn f() = \"é\"\n")
+        == "\n\nfn f() = \"é\"\n")
+    assert_true(state, "strip_headers consumes a wrapped import list holding non-ASCII",
+      source.strip_headers("import a (\n  é,\n  b)\nfn f() = \"─\"\n")
+        == "\n\n\nfn f() = \"─\"\n")
+    assert_true(state, "strip_headers of an all-header non-ASCII source is only newlines",
+      source.strip_headers("# é\n# ─\n") == "\n\n")
+    assert_true(state, "has_no_prelude reads past a non-ASCII header comment",
+      source.has_no_prelude("# é ─\nno_prelude\nfn f() = 1\n"))
+    # --- direct: line_paren_delta counts ASCII parens whatever surrounds them ---
+    assert_true(state, "line_paren_delta ignores non-ASCII around balanced parens",
+      source.line_paren_delta("import a (é, ─b)") == 0)
+    assert_true(state, "line_paren_delta counts an open paren before non-ASCII",
+      source.line_paren_delta("import a (é,") == 1)
+    assert_true(state, "line_paren_delta counts a close paren after non-ASCII",
+      source.line_paren_delta("  é─ b)") == -1)
+    assert_true(state, "line_paren_delta counts several parens among non-ASCII",
+      source.line_paren_delta("─(é(─(─)─") == 2)
+    assert_true(state, "line_paren_delta stops at # after a paren",
+      source.line_paren_delta("(é # ( (") == 1)
+    assert_true(state, "line_paren_delta sees nothing after a non-ASCII comment's #",
+      source.line_paren_delta("# é ( (") == 0)
     # --- direct: is_header_line is the same rule for one line ---
     assert_true(state, "is_header_line accepts every header shape",
       all(source.is_header_line, ["", "module m", "import a.b", "# c", "no_prelude", "no_prelude\r"]))
