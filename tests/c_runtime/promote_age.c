@@ -333,6 +333,22 @@ static int bad_major_bit13(void) {
   return 1;
 }
 
+/* Bit 13 on an old object that is not in the set, then an ordinary minor.  The barrier and the
+ * premise-3 check both skip such an object, so only the bit count against the set sees it. */
+static int bad_stray_bit13(void) {
+  register_roots();
+  long long p = ref_new(0);
+  g_keep = (void*)(uintptr_t)p;
+  collect();
+  collect();                               /* K=2: P is old after the second collection */
+  check(is_old(p), "P is old");
+  uint64_t h = sprout_hdr_of((void*)(uintptr_t)p) | SPROUT_GC_REMEMBERED_BIT;
+  memcpy((char*)(uintptr_t)p - 8, &h, 8);  /* bit 13 set, not pushed on the set */
+  collect();                               /* minor, colour kept: the check aborts */
+  fprintf(stderr, "bad_stray_bit13: no abort\n");
+  return 1;
+}
+
 /* A non-empty set while the next collection is a major. */
 static int bad_major_set(void) {
   register_roots();
@@ -372,6 +388,7 @@ static const AgeCase k_cases[] = {
   { "bad_unremembered_edge",    bad_unremembered_edge,       2, 0, "1000", NULL },
   { "bad_major_bit13",           bad_major_bit13,             2, 0, "1",    NULL },
   { "bad_major_set",             bad_major_set,               2, 0, "1",    NULL },
+  { "bad_stray_bit13",           bad_stray_bit13,             2, 0, "1000", NULL },
 };
 
 int main(int argc, char** argv) {

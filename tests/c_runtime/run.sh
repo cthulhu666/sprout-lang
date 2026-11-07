@@ -634,6 +634,7 @@ grep -q "owner: kind=REF .* field=0" "$TMP_DIR/pa_unremembered_edge.err" || {
 }
 expect_abort major_bit13 "GENCHECK: remembered bit set before a major" bad_major_bit13
 expect_abort major_set "GENCHECK: remembered set not empty before a major" bad_major_set
+expect_abort stray_bit13 "GENCHECK: remembered bits differ from the remembered set" bad_stray_bit13
 expect_abort bad_k0 "SPROUT_GC_PROMOTE_AGE: expected integer in \[1, 15\]" bad_env SPROUT_GC_PROMOTE_AGE 0
 expect_abort bad_k16 "SPROUT_GC_PROMOTE_AGE: expected integer in \[1, 15\]" bad_env SPROUT_GC_PROMOTE_AGE 16
 expect_abort bad_kx "SPROUT_GC_PROMOTE_AGE: expected integer in \[1, 15\]" bad_env SPROUT_GC_PROMOTE_AGE x
