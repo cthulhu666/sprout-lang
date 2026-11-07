@@ -114,7 +114,7 @@ fn p_number(s: String, i: Int) -> Maybe (Json, Int) =
      else if (str_find(tok, ".") >= 0) || (str_find(tok, "e") >= 0) || (str_find(tok, "E") >= 0)
           then match parse_double(tok) with
                | Nothing -> Nothing
-               | Just x -> Just((JsonFloat(x), j))
+               | Just x -> if is_finite(x) then Just((JsonFloat(x), j)) else Nothing
           else match parse_int(tok) with
                | Just n -> Just((JsonInt(n), j))
                # RFC 8259 bounds no digit run, so a token wider than Int is
@@ -123,11 +123,13 @@ fn p_number(s: String, i: Int) -> Maybe (Json, Int) =
                # is, and the same choice JavaScript's JSON.parse makes. A
                # structurally bad token still fails here, since parse_double
                # rejects everything parse_int does bar the width.
-               # A finite result only: past ~309 digits there is no Double for
-               # the value, and a JsonFloat(inf) would parse and then be refused
-               # by the writer's non-finite check — a document that reads has to
-               # be writable. Before the fallback existed this was a parse
-               # error, and for that width it stays one.
+               # Both arms take a finite result only: past ~309 digits, or with
+               # an exponent such as 1e999, there is no Double for the value, and
+               # a JsonFloat(inf) would parse and then be refused by the
+               # writer's non-finite check — a document that reads has to be
+               # writable. Underflow (1e-999) is finite and reads as 0.0. Before
+               # the fallback existed this was a parse error, and for that width
+               # it stays one.
                # Written out rather than via `and_then`: that carries a
                # `Monad m` constraint, and Monad's superclass chain drags an
                # Applicative and a Functor dictionary into every consumer of
@@ -182,9 +184,11 @@ fn plain_end(s: String, len: Int, i: Int) -> Int =
   else if str_starts_with_at_byte(s, i, "\"") || str_starts_with_at_byte(s, i, "\\") then i
   else plain_end(s, len, i + 1)
 
+# A decoded code point of 0 fails the document: a Sprout String holds no NUL (spec-v0 §4), so
+# the value is not representable, and dropping or substituting it would change the data silently.
 fn p_unicode(s: String, len: Int, i: Int, parts: List String) -> Maybe (String, Int) =
   let cp = hex4(s, i)
-  in if cp < 0 then Nothing
+  in if cp <= 0 then Nothing
      else if (cp >= 55296) && (cp <= 56319) then
        if str_starts_with_at_byte(s, i + 4, "\\u") then
          let lo = hex4(s, i + 6)
@@ -252,20 +256,26 @@ fn p_array(s: String, len: Int, depth: Int, i: Int) -> Maybe (Json, Int) =
      else p_array_items(s, len, depth, j, Nil)
 
 # --- object ---------------------------------------------------------------------------------
-fn p_object_members(s: String, len: Int, depth: Int, i: Int, acc: List (String, Json)) -> Maybe (Json, Int) =
+# `seen` holds the DECODED keys of this object, so a repeated key fails the document and
+# `{"a":1,"a":2}` counts as a repeat. RFC 8259 §4 says names SHOULD be unique and that a
+# reader's behaviour on a repeat is unpredictable; RFC 7493 §2.3 makes it MUST NOT. Rejecting is
+# the one rule on which every other reader agrees about any document it accepts. A Set keeps the
+# check O(log n) per key. The set is per object: sibling and nested objects start empty.
+fn p_object_members(s: String, len: Int, depth: Int, i: Int, acc: List (String, Json), seen: Set) -> Maybe (Json, Int) =
   if str_starts_with_at_byte(s, i, "\"") then
     match p_string(s, len, i) with
     | Nothing -> Nothing
     | Just (key, j) ->
         let k = skip_ws(s, j)
-        in if str_starts_with_at_byte(s, k, ":") then
+        in if set_member(key, seen) then Nothing
+           else if str_starts_with_at_byte(s, k, ":") then
              match p_value(s, len, depth, k + 1) with
              | Nothing -> Nothing
              | Just (v, m) ->
                  let n = skip_ws(s, m)
                  in if str_starts_with_at_byte(s, n, "}")
                     then Just((JsonObject(json_object_from_reversed(Cons((key, v), acc), JsonObjectNil)), n + 1))
-                    else if str_starts_with_at_byte(s, n, ",") then p_object_members(s, len, depth, skip_ws(s, n + 1), Cons((key, v), acc))
+                    else if str_starts_with_at_byte(s, n, ",") then p_object_members(s, len, depth, skip_ws(s, n + 1), Cons((key, v), acc), set_insert(key, seen))
                     else Nothing
            else Nothing
   else Nothing
@@ -274,7 +284,7 @@ fn p_object(s: String, len: Int, depth: Int, i: Int) -> Maybe (Json, Int) =
   let j = skip_ws(s, i + 1)
   in if str_starts_with_at_byte(s, j, "}")
      then Just((JsonObject (JsonObjectNil), j + 1))
-     else p_object_members(s, len, depth, j, Nil)
+     else p_object_members(s, len, depth, j, Nil, set_empty())
 
 # --- value dispatch ---------------------------------------------------------------------------
 fn p_value(s: String, len: Int, depth: Int, i0: Int) -> Maybe (Json, Int) =

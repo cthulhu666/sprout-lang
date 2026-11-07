@@ -7797,9 +7797,12 @@ static void sprout_validate_codepoint(long long cp, const char* who) {
 
 /* char_to_string: a Char is an immediate i64 Unicode codepoint; encode it to a
  * fresh UTF-8 heap String. Validated again, so an out-of-range value fails
- * cleanly instead of minting invalid UTF-8. */
+ * cleanly instead of minting invalid UTF-8. Codepoint 0 is a valid Char but
+ * not a valid String: a String holds no NUL (spec-v0 §4), and the one-byte
+ * result would disagree with its C-string view. */
 long long char_to_string(long long ch) {
   sprout_validate_codepoint(ch, "char_to_string: codepoint out of Unicode range");
+  if (ch == 0) sprout_fail("char_to_string: NUL cannot be in a String");
   unsigned int cp = (unsigned int)ch;
   char buf[5];
   size_t len;

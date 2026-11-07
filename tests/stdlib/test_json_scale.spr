@@ -17,9 +17,9 @@ fn int_list(n: Int) -> List String =
 fn array_text(n: Int) -> String =
   "[" ++ string.join(",", int_list(n)) ++ "]"
 
-# `{"k":0,"k":1,…}` — duplicate keys are legal JSON and keep the input small.
+# `{"k0":0,"k1":1,…}` — distinct keys, since a repeated key is a decode error.
 fn object_text(n: Int) -> String =
-  "{" ++ string.join(",", list_map(\i -> "\"k\":" ++ i, int_list(n))) ++ "}"
+  "{" ++ string.join(",", list_map(\i -> "\"k" ++ i ++ "\":" ++ i, int_list(n))) ++ "}"
 
 # Walks the array checking element i is i, so order is checked as well as length.
 fn array_in_order(arr: json.JsonArray, i: Int) -> Int =
@@ -31,7 +31,8 @@ fn array_in_order(arr: json.JsonArray, i: Int) -> Int =
 fn object_in_order(obj: json.JsonObject, i: Int) -> Int =
   match obj with
   | json.JsonObjectNil -> i
-  | json.JsonObjectCons "k" (json.JsonInt v) rest -> if v == i then object_in_order(rest, i + 1) else -1
+  | json.JsonObjectCons key (json.JsonInt v) rest ->
+      if (v == i) && (key == "k" ++ int_to_string(i)) then object_in_order(rest, i + 1) else -1
   | json.JsonObjectCons _ _ _ -> -1
 
 fn ints(n: Int) -> List Int =
@@ -43,7 +44,7 @@ fn built_array(n: Int) -> json.JsonArray =
   | _ -> json.JsonArrayNil
 
 fn built_object(n: Int) -> json.JsonObject =
-  match json.object_from_pairs(list_map(\i -> ("k", i), ints(n))) with
+  match json.object_from_pairs(list_map(\i -> ("k" ++ int_to_string(i), i), ints(n))) with
   | json.JsonObject obj -> obj
   | _ -> json.JsonObjectNil
 

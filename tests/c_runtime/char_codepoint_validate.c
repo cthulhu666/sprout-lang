@@ -12,6 +12,8 @@
  *   toobig    -> char_to_string(0x110000)  must abort
  *   surrogate -> char_to_string(0xD800)    must abort
  *   from_neg  -> char_from_codepoint(-1)   must abort
+ *   nul       -> char_to_string(0)         must abort (a String holds no NUL)
+ *   nul_char  -> char_from_codepoint(0)    must succeed (0 is a valid Char)
  *   ok        -> char_to_string(0x1F600)   must succeed (valid scalar value)
  *
  * On the UNFIXED runtime the abort cases return a String instead of aborting,
@@ -47,6 +49,19 @@ int main(int argc, char** argv) {
   if (strcmp(argv[1], "from_neg") == 0) {
     volatile long long r = char_from_codepoint(-1);
     printf("char_from_codepoint(-1) returned %lld (should have aborted)\n", r);
+    return 0;
+  }
+  if (strcmp(argv[1], "nul") == 0) {
+    volatile long long r = char_to_string(0);
+    printf("char_to_string(0) returned %lld (should have aborted)\n", r);
+    return 0;
+  }
+  if (strcmp(argv[1], "nul_char") == 0) {
+    if (char_from_codepoint(0) != 0) {
+      fprintf(stderr, "FAIL: char_from_codepoint(0) did not return 0\n");
+      return 1;
+    }
+    printf("nul-char-ok\n");
     return 0;
   }
   if (strcmp(argv[1], "ok") == 0) {

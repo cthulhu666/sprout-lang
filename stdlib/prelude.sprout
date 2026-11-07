@@ -2224,7 +2224,8 @@ extern fn double_to_string(x: Double) -> String
 extern fn char_to_string(c: Char) -> String
 extern fn char_from_codepoint(cp: Int) -> Char
 
-# O(1): the UTF-8 encoding of one codepoint. Traps on a value outside the Unicode scalar range.
+# O(1): the UTF-8 encoding of one codepoint. Traps on a value outside the Unicode scalar range,
+# and on 0: a String holds no NUL.
 # Takes an Int CODEPOINT; `char_to_string` takes a `Char`. Kept in the prelude, not
 # stdlib.string: stdlib.terminal needs `char_to_str(27)`, and importing stdlib.string for it put
 # 62 unused wrapper bodies into every terminal consumer (examples/tcp_echo_once grew ~12%).
