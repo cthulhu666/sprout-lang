@@ -58,6 +58,19 @@ fn main() -> Unit !{IO} =
     check_eq("rng_below(s1, 0) is 0", rng_below(s1, 0), 0),
     check_eq("rng_below(s1, 1) is 0", rng_below(s1, 1), 0),
 
+    # Any Int is a valid state: it is reduced mod 2^31 first. Literals, worked by hand:
+    #   10000000000 - 4 * 2^31 = 1410065408;  (A * 1410065408 + 12345) mod 2^31 = 1082672185
+    #   -1 = 2^31 - 1 (mod 2^31);  MIN_INT = -2^63 = 0 (mod 2^31) so it steps like 0
+    #   1043980748 / 65536 = 15929;  15929 mod 100 = 29
+    check_eq("rng_next(MIN_INT) steps like 0", rng_next(0 - 9223372036854775807 - 1), 12345),
+    check_eq("rng_next(MAX_INT) steps like 2^31 - 1", rng_next(9223372036854775807), 1043980748),
+    check_eq("rng_next(1e10) reduces mod 2^31", rng_next(10000000000), rng_next(1410065408)),
+    check_eq("rng_next(1e10) literal", rng_next(10000000000), 1082672185),
+    check_eq("rng_next(-1) is the residue 2^31 - 1", rng_next(0 - 1), 1043980748),
+    check_eq("rng_below(1e10, 100)", rng_below(10000000000, 100), 15),
+    check_eq("rng_below(negative state, 100)", rng_below(0 - 1103502900, 100), 29),
+    check_eq("rng_next(s + 2^31) == rng_next(s)", rng_next(1 + 2147483648), s1),
+
     check_eq("rng_hash2(3, 7, 99)", h37, 1269841102),
     check_eq("rng_hash2(0, 0, 1)", h001, 855780075),
     check_true("rng_hash2: non-negative and bounded", (h37 >= 0) && (h37 < 2147483648)),
