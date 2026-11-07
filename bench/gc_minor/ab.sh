@@ -348,8 +348,12 @@ run_arms() { # <workload>: per round one MINOR=0 baseline and one MINOR=1 run pe
 
 # ── Main ─────────────────────────────────────────────────────────────────────────────────────
 START=$SECONDS
+HEADER=$'workload\tsetting\tminor\tmajor_every\trun\tload\treal\tuser\tsys\tmax_rss_kb\tcycles\tminors\tmajors\tgc_us_total\tgc_us_steady_p50\tgc_us_steady_p90\tmarked_total\tstdout_hash\texit\tarm'
 if [[ $REUSE == 0 || ! -s "$TSV" ]]; then
-  printf 'workload\tsetting\tminor\tmajor_every\trun\tload\treal\tuser\tsys\tmax_rss_kb\tcycles\tminors\tmajors\tgc_us_total\tgc_us_steady_p50\tgc_us_steady_p90\tmarked_total\tstdout_hash\texit\tarm\n' > "$TSV"
+  printf '%s\n' "$HEADER" > "$TSV"
+elif [[ "$(head -n 1 "$TSV")" != "$HEADER" ]]; then
+  echo "ab.sh: $TSV header differs from this ab.sh; use a fresh -o dir" >&2
+  exit 1
 fi
 echo "==> output: $OUT" >&2
 build_all

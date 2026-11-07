@@ -57,7 +57,10 @@ def main(paths):
     rows = []
     for p in paths:
         with open(p, newline="") as fh:
-            rows += list(csv.DictReader(fh, delimiter="\t"))
+            for r in csv.DictReader(fh, delimiter="\t"):
+                if None in r:
+                    sys.exit(f"{p}: a row has more fields than the header; the arms would merge")
+                rows.append(r)
     if not rows:
         print("no rows")
         return 1
