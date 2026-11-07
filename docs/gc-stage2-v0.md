@@ -215,8 +215,8 @@ adversary) would be walked at every major again. So the floor stays on the colle
 major and on the major, and `just gc-trigger-check`'s adversary runs in the default mode, which
 fails if it does not.
 
-Open in this design: whether the 2× rule should read the old count instead of the heap count.
-The prototype kept the heap count; §7 step 2 measures the alternative.
+The 2× rule reads the heap count. Reading the old count instead won on no workload in §7 step 2's
+A/B, so that switch was removed.
 
 ### 5.3 A young-only sweep
 
@@ -365,6 +365,18 @@ Each premise has a test or a check that fails when it breaks.
    its check, and the §14.8 workload set by `bench/gc_minor/ab.sh` (≥ 6 interleaved runs per arm)
    with K ∈ {1, 2, 3}, reporting peak slots, RSS and pause p50/p90 with each workload's spread.
    Pick K, and decide the 2× rule's input (§5.2). Flip only if the §2 goals hold.
+
+   **Implemented behind the switches; defaults unchanged**
+   ([results](../bench/results-2026-11-07-gc-promote-age.md)). The 2× rule keeps the heap count.
+   At K = 2 and 3 with the nursery on, the pause goal holds on every workload (galaxy_client's p50
+   falls to 0.05). Two goals miss: peak slots on galaxy_client (1.76), astar (1.11 at K = 2) and
+   compiler_test (1.07), and the self-compile's CPU (0.83 against 0.80).
+
+   **Step 2b: peak slots under the nursery**, then pick K and flip if the §2 goals hold.
+   galaxy_client: the footprint floor keeps the region count that startup reached, and promoted load-phase data
+   raises it from 8 to 12. astar and compiler_test, whose live sets are a few thousand slots: the
+   nursery is at least `g_gc_threshold_base`, so the threshold is the heap plus the base, where
+   minor-off's is the base. Re-measure the self-compile's CPU after both.
 3. Retire the switches that step 2 settled, and update `compiler-internals.md` and `gates.md`.
 
 ## 8. On landing
