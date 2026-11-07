@@ -1,0 +1,218 @@
+module main
+
+# The one-byte-probe scanners through their public APIs only, so the identical source compiles
+# against a stdlib that probes with `str_starts_with_at_byte` and one that reads with `str_byte_at`.
+# Every row prints a checksum (`out=`) over what the scanner returned; baseline and candidate must
+# print the same one. docs/string-byte-read-v0.md §7.
+#
+#   json_num     json.json_parse over a ~64 KB array of integers and decimals
+#   json_str     ... a ~64 KB array of strings, some with escapes and \u
+#   json_obj     ... a ~64 KB array of small objects with whitespace
+#   parse_int    the prelude parse_int over a fixed set of inputs
+#   parse_double the prelude parse_double over a fixed set of inputs
+#   uuid         uuid.parse over valid and invalid texts
+#
+# usage: byte_probes_bench <json_num|json_str|json_obj|parse_int|parse_double|uuid> <iterations>
+# json rows report ns per input byte, the others ns per call.
+
+import stdlib.time as time
+import stdlib.argv as argv
+import stdlib.json as json
+import stdlib.math as math
+import stdlib.string as string
+import stdlib.uuid as uuid
+
+fn rem(a: Int, m: Int) -> Int =
+  a - (a / m) * m
+
+fn frac3(r: Int) -> String =
+  if r < 10 then `00${r}` else if r < 100 then `0${r}` else `${r}`
+
+fn report(row: String, iters: Int, out: Int, units: Int, t0: Int, t1: Int) -> Unit !{IO} =
+  let ns_x1000 = (t1 - t0) * 1000000 / units
+  in print(`${row} iters=${iters} out=${out} ns_per_call=${ns_x1000 / 1000}.${frac3(rem(ns_x1000, 1000))}`)
+
+# --- checksum -------------------------------------------------------------------------------------
+
+# Bounded, so a sum of any Int cannot trap: |acc| < 1e9+7 and |rem(v, 1000003)| < 1000003.
+fn mix(acc: Int, v: Int) -> Int =
+  rem(acc * 31 + rem(v, 1000003), 1000000007)
+
+fn bytes_hash(s: String, i: Int, acc: Int) -> Int =
+  match str_byte_at(s, i) with
+  | Just b -> bytes_hash(s, i + 1, mix(acc, b))
+  | Nothing -> acc
+
+fn json_sum(v: json.Json) -> Int =
+  match v with
+  | json.JsonNull -> 1
+  | json.JsonBool b -> if b then 2 else 3
+  | json.JsonInt n -> mix(4, n)
+  | json.JsonFloat x -> mix(5, double_to_bits(x))
+  | json.JsonString s -> bytes_hash(s, 0, 6)
+  | json.JsonArray arr -> sum_array(arr, 7)
+  | json.JsonObject obj -> sum_object(obj, 8)
+
+fn sum_array(arr: json.JsonArray, acc: Int) -> Int =
+  match arr with
+  | json.JsonArrayNil -> acc
+  | json.JsonArrayCons head tail -> sum_array(tail, mix(acc, json_sum(head)))
+
+fn sum_object(obj: json.JsonObject, acc: Int) -> Int =
+  match obj with
+  | json.JsonObjectNil -> acc
+  | json.JsonObjectCons key value rest ->
+      sum_object(rest, mix(mix(acc, bytes_hash(key, 0, 9)), json_sum(value)))
+
+fn parsed_sum(raw: String) -> Int =
+  match json.json_parse(raw) with
+  | Ok v -> json_sum(v)
+  | Err _ -> 0 - 1
+
+# --- json inputs ----------------------------------------------------------------------------------
+
+fn int_elem(k: Int) -> String =
+  int_to_string(rem(k * 7919, 200000) - 100000)
+
+fn dec_elem(k: Int) -> String =
+  let a = rem(k * 104729, 10000)
+      b = rem(k * 31, 1000)
+  in if rem(k, 5) == 3 then `${a}.${frac3(b)}e-${rem(k, 7) + 1}`
+     else if rem(k, 5) == 4 then `-${a}.${frac3(b)}E+${rem(k, 3) + 1}`
+     else `${a}.${frac3(b)}`
+
+fn num_elem(k: Int) -> String =
+  if rem(k, 3) == 0 then dec_elem(k) else int_elem(k)
+
+let str_plain = "\"plain text of moderate length abcdefghijklmnopqrstuvwxyz 0123456789\""
+let str_escapes = "\"line\\nbreak\\t\\\"quoted\\\" \\\\ back \\/ slash \\r\\b\\f\""
+let str_unicode = "\"caf\\u00e9 \\ud83d\\ude00 \\u00E9\\uABCD x\""
+let str_wide = "\"é日本語🌱 mixed bytes\""
+
+fn str_elem(k: Int) -> String =
+  let r = rem(k, 6)
+  in if r == 0 then "\"hello world\""
+     else if r == 1 then str_escapes
+     else if r == 2 then str_unicode
+     else if r == 3 then str_plain
+     else if r == 4 then str_wide
+     else `"id-${k}"`
+
+fn obj_elem(k: Int) -> String =
+  let sep = if rem(k, 2) == 0 then " , " else ",\n\t"
+  in `{ "id" : ${k}${sep}"name" : "item${k}"${sep}"ok" : true${sep}"tags" : [ 1 , 2.5 , null ]${sep}"nested" : { "a" : false } }`
+
+fn array_parts(elem: Int -> String, k: Int, bytes: Int, target: Int, acc: List String) -> List String =
+  if bytes >= target then acc
+  else
+    let e = elem(k)
+    in array_parts(elem, k + 1, bytes + str_byte_len(e) + 1, target, Cons(e, acc))
+
+# About 64 KB of elements; `seed` starts the generator so two inputs differ.
+fn build_array(elem: Int -> String, seed: Int) -> String =
+  "[" ++ string.join(",", list_reverse(array_parts(elem, seed, 0, 65536, Nil))) ++ "]"
+
+fn pick(a: String, b: String, rep: Int) -> String =
+  if rem(rep, 2) == 0 then a else b
+
+fn ok_flag(r: Result json.JsonError json.Json) -> Int =
+  match r with
+  | Ok _ -> 1
+  | Err _ -> 0
+
+fn json_loop(a: String, b: String, rep: Int, reps: Int, oks: Int) -> Int =
+  if rep >= reps then oks
+  else json_loop(a, b, rep + 1, reps, oks + ok_flag(json.json_parse(pick(a, b, rep))))
+
+# --- parse_int / parse_double / uuid inputs -------------------------------------------------------
+
+let int_inputs = vec_from_list(["0", "7", "-42", "123456789", "-9223372036854775808",
+                                "9223372036854775807", "99999999999999999999", "12a", "", "-",
+                                "+5", "007", "-0", "1234567890123", "abc", "12 ", "é", "1é2"])
+
+let double_inputs = vec_from_list(["0", "1.5", "-2.25", "123456.789", "1e10", "1.5e-3", "-0.0",
+                                   "3.14159265358979", "12345678901234567890.5", "1e400", "1e",
+                                   "abc", ".5", "5.", "0.1e", "+1", "1.2.3", "2.5E+2", "", "é1",
+                                   "0.000001234", "98765432109876543210"])
+
+let uuid_inputs = vec_from_list(["a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+                                 "A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11",
+                                 "00000000-0000-0000-0000-000000000000",
+                                 "ffffffff-ffff-ffff-ffff-ffffffffffff",
+                                 "a0eebc999c0b4ef8bb6d6bb9bd380a11",
+                                 "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a1",
+                                 "g0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+                                 "a0eebc99_9c0b-4ef8-bb6d-6bb9bd380a11",
+                                 "a0eebc99-9c0b-4ef8-bb6d_6bb9bd380a11",
+                                 "éeebc99-9c0b-4ef8-bb6d-6bb9bd380a11", ""])
+
+fn input_at(inputs: Vec String, k: Int) -> String =
+  vec_get_or(k, "", inputs)
+
+fn int_fold(m: Maybe Int) -> Int =
+  match m with
+  | Just n -> n
+  | Nothing -> 0 - 1
+
+fn double_fold(m: Maybe Double) -> Int =
+  match m with
+  | Just x -> double_to_bits(x)
+  | Nothing -> 0 - 1
+
+fn uuid_flag(m: Maybe uuid.Uuid) -> Int =
+  match m with
+  | Just _ -> 1
+  | Nothing -> 0
+
+fn uuid_text_sum(m: Maybe uuid.Uuid) -> Int =
+  match m with
+  | Just id -> bytes_hash(to_string(id), 0, 11)
+  | Nothing -> 0
+
+fn int_loop(i: Int, k: Int, acc: Int) -> Int =
+  if i <= 0 then acc
+  else int_loop(i - 1, rem(k + 1, vec_length(int_inputs)),
+                mix(acc, int_fold(parse_int(input_at(int_inputs, k)))))
+
+fn double_loop(i: Int, k: Int, acc: Int) -> Int =
+  if i <= 0 then acc
+  else double_loop(i - 1, rem(k + 1, vec_length(double_inputs)),
+                   mix(acc, double_fold(parse_double(input_at(double_inputs, k)))))
+
+fn uuid_loop(i: Int, k: Int, acc: Int) -> Int =
+  if i <= 0 then acc
+  else uuid_loop(i - 1, rem(k + 1, vec_length(uuid_inputs)),
+                 acc + uuid_flag(uuid.parse(input_at(uuid_inputs, k))))
+
+fn uuid_texts(k: Int, acc: Int) -> Int =
+  if k >= vec_length(uuid_inputs) then acc
+  else uuid_texts(k + 1, mix(acc, uuid_text_sum(uuid.parse(input_at(uuid_inputs, k)))))
+
+# --- driver ---------------------------------------------------------------------------------------
+
+# `f` is timed; `g` runs after the clock stops and adds what the scanner returned to the checksum.
+fn timed(row: String, iters: Int, units: Int, f: Unit -> Int, g: Unit -> Int) -> Unit !{IO} =
+  do
+    t0 <- time.now_micros()
+    let out = f(())
+    t1 <- time.now_micros()
+    report(row, iters, out + g(()), units, t0, t1)
+
+fn run_json(row: String, iters: Int, a: String, b: String) -> Unit !{IO} =
+  timed(row, iters, (str_byte_len(a) + str_byte_len(b)) / 2 * iters,
+        \_ -> json_loop(a, b, 0, iters, 0), \_ -> parsed_sum(a) + parsed_sum(b))
+
+let usage = "usage: byte_probes_bench <json_num|json_str|json_obj|parse_int|parse_double|uuid> <iterations>"
+
+fn main() -> Unit !{IO} =
+  do
+    let Ok([row, iters_text]) = argv.all() else print(usage)
+    let Just iters = parse_int(iters_text) else print(usage)
+    match row with
+    | "json_num" -> run_json(row, iters, build_array(num_elem, 1), build_array(num_elem, 2))
+    | "json_str" -> run_json(row, iters, build_array(str_elem, 1), build_array(str_elem, 2))
+    | "json_obj" -> run_json(row, iters, build_array(obj_elem, 1), build_array(obj_elem, 2))
+    | "parse_int" -> timed(row, iters, iters, \_ -> int_loop(iters, 0, 0), \_ -> 0)
+    | "parse_double" -> timed(row, iters, iters, \_ -> double_loop(iters, 0, 0), \_ -> 0)
+    | "uuid" -> timed(row, iters, iters, \_ -> uuid_loop(iters, 0, 0), \_ -> uuid_texts(0, 0))
+    | _ -> print(usage)

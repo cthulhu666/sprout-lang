@@ -1,0 +1,283 @@
+import stdlib.test (TestCase, check_eq, check_true, check_approx, run_suite)
+import stdlib.json as json
+import stdlib.uuid as uuid
+import stdlib.string as string
+
+# Byte-classifier edges for the scanners that read a String by byte offset: the prelude's
+# `parse_int` and `parse_double`, `stdlib.json`'s parser, and `stdlib.uuid.parse`. Each classifier
+# is probed at its range boundaries ('/' and ':' around the digits, '@' 'G' '`' 'g' around the hex
+# letters), with non-ASCII bytes at every position, and at every end-of-input.
+
+# --- parse_int --------------------------------------------------------------------------------
+
+let int_cases: List (String, Maybe Int) = [
+  ("0", Just(0)), ("9", Just(9)), ("-0", Just(0)), ("-9", Just(-9)), ("09", Just(9)),
+  ("-09", Just(-9)), ("1234567890", Just(1234567890)), ("-1234567890", Just(-1234567890)),
+  ("/", Nothing), (":", Nothing), ("@", Nothing), ("`", Nothing), ("a", Nothing),
+  ("/1", Nothing), (":1", Nothing), ("1/", Nothing), ("1:", Nothing), ("0/", Nothing),
+  ("9:", Nothing), ("-/", Nothing), ("-:", Nothing), ("-1/", Nothing),
+  ("-1:", Nothing), ("1/1", Nothing), ("1:1", Nothing), (" 1", Nothing),
+  ("1 ", Nothing), ("- 1", Nothing), ("-+1", Nothing), ("1-", Nothing),
+  ("1-1", Nothing), ("0x1", Nothing), ("1e3", Nothing), ("1.0", Nothing),
+  ("é", Nothing), ("1é", Nothing), ("-é", Nothing), ("é1", Nothing),
+  ("-é1", Nothing), ("1é1", Nothing), ("", Nothing), ("-", Nothing), ("--", Nothing)
+]
+
+# --- parse_double -----------------------------------------------------------------------------
+
+let double_none = [
+  "", "-", "/", ":", "@", "`", "1/", "1:", "/1", ":1", "-/", "-:", "1.5/", "1.5:", ".5/",
+  ".5:", "1.:", "1e/", "1e:", "1e+/", "1e-:", "1e5/", "1e5:", "1E5/", "1E5:", "1..5", "1.5.5",
+  "e", "e5", "E5", ".e5", ".", "-.", "-e5", "1e", "1E", "1e+", "1E+", "1e-", "1e5e5", "1e--1",
+  "1e-+1", "--1", "-+1", "+1", " 1", "1 ", "1,5", "1_0", "0x10", "é", "-é", "1é", "1.é", "1.5é",
+  ".é", "é.5", "1eé", "1e+é", "1e5é", "1e5é5", "é1.5"
+]
+
+let double_some = [
+  ("0", 0.0), ("9", 9.0), ("-9", -9.0), ("0.5", 0.5), (".5", 0.5), ("5.", 5.0), ("1.5", 1.5),
+  ("-1.5", -1.5), ("1.50", 1.5), ("1e0", 1.0), ("1E0", 1.0), ("1e5", 100000.0),
+  ("1E5", 100000.0), ("1e+5", 100000.0), ("1E+5", 100000.0), ("1e-2", 0.01), ("12.5e1", 125.0),
+  ("0.0", 0.0), ("007", 7.0), ("9.9", 9.9), ("1.5e0", 1.5), ("1.5E-1", 0.15)
+]
+
+fn double_near(raw: String, want: Double) -> TestCase =
+  match parse_double(raw) with
+  | Just x -> check_approx(`parse_double ${raw}`, x, want, 0.0001)
+  | Nothing -> check_true(`parse_double ${raw} is Just`, false)
+
+# --- json helpers -----------------------------------------------------------------------------
+
+fn good_json(raw: String) -> TestCase =
+  check_true(`json accepts ${raw}`, is_ok(json.parse(raw)))
+
+fn bad_json(raw: String) -> TestCase =
+  check_true(`json rejects ${raw}`, is_err(json.parse(raw)))
+
+fn stringified(value: json.Json) -> String =
+  let Ok text = json.stringify(value) else "<unwritable>"
+  in text
+
+fn canon(raw: String) -> String =
+  match json.parse(raw) with
+  | Ok v -> stringified(v)
+  | Err _ -> "<parse error>"
+
+fn same_doc(spaced: String, compact: String) -> TestCase =
+  check_true(`json ${spaced} reads as ${compact}`,
+             is_ok(json.parse(compact)) && (canon(spaced) == canon(compact)))
+
+fn top_string(raw: String) -> String =
+  match json.parse(raw) with
+  | Ok (json.JsonString s) -> s
+  | _ -> "<not a string>"
+
+fn kind(raw: String) -> String =
+  match json.parse(raw) with
+  | Ok (json.JsonInt n) -> "int " ++ int_to_string(n)
+  | Ok (json.JsonFloat _) -> "float"
+  | Ok _ -> "other"
+  | Err _ -> "err"
+
+fn decodes(literal: String, want: String) -> TestCase =
+  check_eq(`json string ${literal}`, top_string(literal), want)
+
+fn is_kind(raw: String, want: String) -> TestCase =
+  check_eq(`json number ${raw}`, kind(raw), want)
+
+fn bad_ws_byte(code: Int) -> TestCase =
+  check_true(`json rejects byte ${code} before a number`,
+             is_err(json.parse(char_to_str(code) ++ "1")))
+
+let json_good = [
+  "0", "-0", "9", "-9", "1.5", "-1.5", "1e5", "1E5", "1e+5", "1e-5", "[1]", "[1,2]", "[-1,-2]",
+  "[1.5,2e3]", "[]", "{}", "[ ]", "{ }", "\"\"", "\"a\"", "true", "false", "null", " null ",
+  "\tnull\n", "\rnull ", "[[]]", "[{}]", "{\"a\":[]}", "{\"a\":{}}", "[1,[2,[3]]]",
+  "{\"a\":1,\"b\":2}", "[true,false,null]", "[\"a\",\"b\"]", "{\"a\":\"b\",\"c\":\"d\"}"
+]
+
+let json_bad_structure = [
+  "]", "}", ",", ":", "[}", "{]", "[1}", "{\"a\":1]", "{\"a\",1}", "{\"a\"::1}", "{'a':1}",
+  "[1 2]", "[,]", "[1,]", "{,}", "{\"a\":1,}", "{1:2}", "{\"a\" 1}", "[1;2]", "{\"a\":}",
+  "{\"a\"}", "[1,,2]", "[[]", "[]]", "{}}", "{{}}", "{\"a\":1 \"b\":2}", "[\"a\" \"b\"]",
+  "{\"a\":1,,\"b\":2}", "[\"a\":1]", "{\"a\":1:2}", "{\"a\"\"b\":1}", "{\"a\":\"b\":1}"
+]
+
+let json_bad_eof = [
+  "", "-", "1e", "1e+", "[", "[1", "[1,", "[ ", "{", "{ ", "{\"a\"", "{\"a\":", "{\"a\":1",
+  "{\"a\":1,", "{\"a\" ", "{\"a\" :", "{\"a\":1 ", "\"abc", "\"", "\"\\", "\"\\u", "\"\\u1",
+  "\"\\u12", "\"\\u123", "\"\\u1234", "\"\\ud83d", "\"\\ud83d\\", "\"\\ud83d\\u",
+  "\"\\ud83d\\ude0", "\"\\ud83d\\ude00", "t", "tr", "tru", "f", "fals", "n", "nul", "[tru",
+  "[nul", "[fals", "{\"a\":tru", "[\"abc", "[\"abc\\", "{\"a", "{\"a\\"
+]
+
+let json_bad_ascii_neighbours = [
+  "trux", "nulll", "truee", "falsee", "[1d]", "[1f]", "[1D]", "[1F]", "[1*]", "[1/]", "[1:]",
+  "1+2", "1-2", "[1+]", "[1-]", "[.5]", ".5", "[-]", "[--1]", "- 1", "e5", "E5", "[e5]",
+  "[+1]", "[1e5d]", "[1e5/]", "[1.]x", "1.2.3", "[1.2.3]", "[1e5e5]", "!1", "#1", "[!1]",
+  "[1!]", "[1#]", "[1,!2]", "{!}", "{\"a\"!:1}", "{\"a\":!1}", "{\"a\":1!}", "{\"a\":1,!\"b\":2}",
+  "{#\"a\":1}", "'a'", "`a`", "(1)", "<1>", "\\", "/", "@"
+]
+
+let json_bad_non_ascii = [
+  "é", "[é]", "[1é]", "[1,é]", "[1,é2]", "[é1]", "{é}", "{\"a\"é:1}", "{\"a\":é}",
+  "{\"a\":é1}", "{\"a\":1é}", "{\"a\":1,é}", "{\"a\":1,é\"b\":2}", "{é\"a\":1}", "1é", "-é",
+  "1.é", "[1.é]", "1eé", "1e+é", "é1", " é", "é ", "1 é", "[1 é]", "[1é,2]", "trué", "[trué]",
+  "truéfalse", "nulé", "\"abc\" é", "\"abc\"é", "[\"a\"é]", "{\"a\"é}", "日", "🌱",
+  "[日]", "[🌱]", "{\"a\":日}", "{日:1}"
+]
+
+let json_whitespace_pairs = [
+  ("[ 1 , 2 ]", "[1,2]"),
+  (" \t\r\n[ \t\r\n1 \t\r\n, \t\r\n2 \t\r\n] \t\r\n", "[1,2]"),
+  ("{ \"a\" : 1 , \"b\" : [ ] , \"c\" : { } }", "{\"a\":1,\"b\":[],\"c\":{}}"),
+  ("{\t\"a\"\t:\t1\t,\t\"b\"\t:\t2\t}", "{\"a\":1,\"b\":2}"),
+  ("{\n\"a\"\n:\n1\n,\n\"b\"\n:\n2\n}", "{\"a\":1,\"b\":2}"),
+  ("{\r\"a\"\r:\r1\r,\r\"b\"\r:\r2\r}", "{\"a\":1,\"b\":2}"),
+  ("[ true , false , null ]", "[true,false,null]"),
+  ("[ \"a\" , \"b\" ]", "[\"a\",\"b\"]"),
+  ("[ [ ] , [ 1 ] , { } ]", "[[],[1],{}]"),
+  ("[\t-1\t,\t1.5\t,\t2e3\t]", "[-1,1.5,2e3]"),
+  ("[\n-1\n,\n1.5\n,\n2e3\n]", "[-1,1.5,2e3]"),
+  ("\r\n42\r\n", "42")
+]
+
+# Whitespace is exactly space, tab, LF and CR: the bytes next to each, and a non-ASCII one, are not.
+let ws_bad_codes = [1, 8, 11, 12, 14, 31, 33, 127, 160, 233]
+
+let json_numbers = [
+  ("0", "int 0"), ("-0", "int 0"), ("7", "int 7"), ("-7", "int -7"), ("1234567890", "int 1234567890"),
+  ("-1234567890", "int -1234567890"), ("1.5", "float"), ("-1.5", "float"), ("1e5", "float"),
+  ("1E5", "float"), ("1e+5", "float"), ("1e-5", "float"), ("-1.5e-5", "float"),
+  ("123456789012345678901", "float"), ("[1]", "other"), ("1/", "err"), ("1:", "err"),
+  ("/1", "err"), (":1", "err"), ("-/", "err"), ("-:", "err")
+]
+
+# The one-character escapes, then the decoded text around them. The escape letter and the plain
+# bytes just outside `"` and `\` (`!` `#` `[` `]`) must pass through verbatim.
+let json_strings = [
+  ("\"\"", ""), ("\"abc\"", "abc"), ("\"\\\"\"", "\""), ("\"\\\\\"", "\\"), ("\"\\/\"", "/"),
+  ("\"\\n\"", "\n"), ("\"\\t\"", "\t"), ("\"\\r\"", "\r"), ("\"\\b\"", char_to_str(8)),
+  ("\"\\f\"", char_to_str(12)), ("\"a\\nb\\\\c\\\"d\"", "a\nb\\c\"d"), ("\"!#[]\"", "!#[]"),
+  ("\"/ ~\"", "/ ~"), ("\"é\"", "é"), ("\"é\\né\"", "é\né"), ("\"日本\\t語\"", "日本\t語"),
+  ("\"\\n\\n\"", "\n\n"), ("\"\\\\\\\\\"", "\\\\"), ("\"a\\/b\"", "a/b"), ("\"\\\"\\\"\"", "\"\"")
+]
+
+let escape_bad = [
+  "\"\\a\"", "\"\\x\"", "\"\\0\"", "\"\\1\"", "\"\\N\"", "\"\\T\"", "\"\\R\"", "\"\\B\"",
+  "\"\\F\"", "\"\\U0041\"", "\"\\'\"", "\"\\ \"", "\"\\é\"", "\"\\日\"", "\"\\!\"", "\"\\.\"",
+  "\"\\m\"", "\"\\o\"", "\"\\s\"", "\"\\g\"", "\"\\c\"", "\"\\e\"", "\"\\a"
+]
+
+# `\u` takes four hex digits of either case.
+let unicode_ok = [
+  ("\"\\u0041\"", "A"), ("\"\\u00e9\"", "é"), ("\"\\u00E9\"", "é"), ("\"\\u0001\"", char_to_str(1)),
+  ("\"\\u000a\"", char_to_str(10)), ("\"\\u000b\"", char_to_str(11)),
+  ("\"\\u000c\"", char_to_str(12)), ("\"\\u000d\"", char_to_str(13)),
+  ("\"\\u000e\"", char_to_str(14)), ("\"\\u000f\"", char_to_str(15)),
+  ("\"\\u000A\"", char_to_str(10)), ("\"\\u000B\"", char_to_str(11)),
+  ("\"\\u000C\"", char_to_str(12)), ("\"\\u000D\"", char_to_str(13)),
+  ("\"\\u000E\"", char_to_str(14)), ("\"\\u000F\"", char_to_str(15)),
+  ("\"\\u0123\"", char_to_str(291)),
+  ("\"\\u4567\"", char_to_str(17767)), ("\"\\u89ab\"", char_to_str(35243)),
+  ("\"\\uabcd\"", char_to_str(43981)), ("\"\\uABCD\"", char_to_str(43981)),
+  ("\"\\ucdef\"", char_to_str(52719)), ("\"\\uCDEF\"", char_to_str(52719)),
+  ("\"\\u1000\"", char_to_str(4096)), ("\"\\u0100\"", char_to_str(256)),
+  ("\"\\u0010\"", char_to_str(16)), ("\"\\u00a0\"", char_to_str(160)),
+  ("\"\\ud7ff\"", char_to_str(55295)), ("\"\\ue000\"", char_to_str(57344)),
+  ("\"\\u0041b\"", "Ab"), ("\"a\\u0041\"", "aA"), ("\"\\u0041\\u0042\"", "AB"),
+  ("\"\\u0041\\n\"", "A\n"), ("\"\\ud83d\\ude00\"", char_to_str(128512)),
+  ("\"\\uD83D\\uDE00\"", char_to_str(128512)), ("\"\\ud83d\\ude00x\"", char_to_str(128512) ++ "x"),
+  ("\"\\ud800\\udc00\"", char_to_str(65536)), ("\"\\udbff\\udfff\"", char_to_str(1114111)),
+  ("\"\\ud83D\\uDe00\"", char_to_str(128512))
+]
+
+let unicode_bad = [
+  "\"\\ud800\"", "\"\\udc00\"", "\"\\udbff\"", "\"\\udfff\"", "\"\\ud800\\ud800\"",
+  "\"\\ud800\\u0041\"", "\"\\ud800\\udbff\"", "\"\\ud800x\"", "\"\\ud800\\n\"",
+  "\"\\ud83d\\uzzzz\"", "\"\\ud83d\\ude0g\"", "\"\\ud83d\\ude0/\"", "\"\\ud83d\\ude0é\"",
+  "\"\\ud83d\\ude\"", "\"\\ud83d\\ude0\"", "\"\\ud83d\\u\"", "\"\\u\"", "\"\\u1\"", "\"\\u12\"",
+  "\"\\u123\"", "\"\\u 123\"", "\"\\u+123\"", "\"\\u-123\"", "\"\\u0x41\""
+]
+
+# One bad byte at each of the four hex positions. '/' 47 and ':' 58 bracket the digits, '@' 64 and
+# 'G' 71 the upper-case letters, '`' 96 and 'g' 103 the lower-case, 'é' is two bytes.
+let hex_outside = ["/", ":", "@", "G", "`", "g", "é", " ", "-", "+", "x", "z", "Z"]
+
+fn hex_bad_at(prefix: String, x: String, suffix: String) -> TestCase =
+  bad_json("\"\\u" ++ prefix ++ x ++ suffix ++ "\"")
+
+fn hex_bad_all(x: String) -> List TestCase =
+  [hex_bad_at("", x, "000"), hex_bad_at("0", x, "00"), hex_bad_at("00", x, "0"),
+   hex_bad_at("000", x, ""), hex_bad_at("00", x, "é")]
+
+# --- uuid -------------------------------------------------------------------------------------
+
+let canonical = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+
+fn uuid_text(raw: String) -> String =
+  match uuid.parse(raw) with
+  | Just id -> to_string(id)
+  | Nothing -> "none"
+
+fn uuid_none(label: String, raw: String) -> TestCase =
+  check_eq(`uuid ${label}`, uuid_text(raw), "none")
+
+# `canonical` with the ASCII byte at `at` replaced.
+fn uuid_with(at: Int, c: String) -> String =
+  str_slice_bytes(canonical, 0, at) ++ c ++ str_slice_bytes(canonical, at + 1, 35 - at)
+
+let dash_positions = [8, 13, 18, 23]
+let not_dash = ["0", "a", "_", ".", ",", "/", ":", " ", "+", "=", "x"]
+
+fn dash_bad(at: Int) -> List TestCase =
+  [uuid_none(`byte ${at} is ${c}`, uuid_with(at, c)) for c in not_dash]
+
+fn hex_pos_bad(c: String) -> List TestCase =
+  [uuid_none(`${c} at byte 0`, uuid_with(0, c)), uuid_none(`${c} at byte 35`, uuid_with(35, c)),
+   uuid_none(`${c} at byte 9`, uuid_with(9, c)), uuid_none(`${c} at byte 24`, uuid_with(24, c))]
+
+fn hex_pos_ok(c: String) -> List TestCase =
+  [check_true(`uuid accepts ${c} at byte 0`, is_just(uuid.parse(uuid_with(0, c)))),
+   check_true(`uuid accepts ${c} at byte 35`, is_just(uuid.parse(uuid_with(35, c))))]
+
+let uuid_non_ascii = [
+  # 36 bytes each: a two-byte character on a dash and its neighbour.
+  ("é over the first dash", "a0eebc99éc0b-4ef8-bb6d-6bb9bd380a11"),
+  ("é over the second dash", "a0eebc99-9c0bé" ++ "ef8-bb6d-6bb9bd380a11"),
+  ("é over the third dash", "a0eebc99-9c0b-4ef8é" ++ "b6d-6bb9bd380a11"),
+  ("é over the fourth dash", "a0eebc99-9c0b-4ef8-bb6dé" ++ "bb9bd380a11"),
+  ("é ending before the first dash", "a0eebc9é9c0b-4ef8-bb6d-6bb9bd380a11"),
+  ("é ending before the second dash", "a0eebc99-9c0éc0b" ++ "4ef8-bb6d-6bb9bd380a11"),
+  ("é at the start", "éeebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
+  ("é at the end", "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380aé"),
+  ("日 over the first dash", "a0eebc9日c0b-4ef8-bb6d-6bb9bd380a11"),
+  ("36 bytes of é", "éééééééééééééééééé"),
+  ("dash moved to byte 7", "a0eebc9-99c0b-4ef8-bb6d-6bb9bd380a11"),
+  ("dash moved to byte 12", "a0eebc99-9c0-b4ef8-bb6d-6bb9bd380a11"),
+  ("extra dash at the end", "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a1-")
+]
+
+fn main() -> Unit !{IO} =
+  run_suite("byte_probes", vec_from_list(list_flat_map(identity, [
+    [check_eq(`parse_int ${s}`, parse_int(s), want) for (s, want) in int_cases],
+    [check_true(`parse_double ${s} is Nothing`, is_nothing(parse_double(s))) for s in double_none],
+    [double_near(s, want) for (s, want) in double_some],
+    [good_json(s) for s in json_good],
+    [bad_json(s) for s in json_bad_structure],
+    [bad_json(s) for s in json_bad_eof],
+    [bad_json(s) for s in json_bad_ascii_neighbours],
+    [bad_json(s) for s in json_bad_non_ascii],
+    [same_doc(a, b) for (a, b) in json_whitespace_pairs],
+    [bad_ws_byte(c) for c in ws_bad_codes],
+    [is_kind(s, want) for (s, want) in json_numbers],
+    [decodes(s, want) for (s, want) in json_strings],
+    [bad_json(s) for s in escape_bad],
+    [decodes(s, want) for (s, want) in unicode_ok],
+    [bad_json(s) for s in unicode_bad],
+    list_flat_map(hex_bad_all, hex_outside),
+    list_flat_map(dash_bad, dash_positions),
+    list_flat_map(hex_pos_bad, ["/", ":", "@", "G", "`", "g", "é"]),
+    list_flat_map(hex_pos_ok, ["0", "9", "a", "f", "A", "F"]),
+    [uuid_none(label, raw) for (label, raw) in uuid_non_ascii],
+    [check_eq("uuid accepts the canonical id", uuid_text(canonical), canonical)]
+  ])))

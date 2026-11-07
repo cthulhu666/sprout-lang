@@ -2321,12 +2321,10 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   perft, so it is workload-dependent and unmeasured elsewhere. Not a candidate for the
   416-binary test path — a binary that runs once cannot repay any extra link.
   `docs/cross-tu-inlining-v0.md` §5.2.
-- [ ] `P2` **Move one-byte `str_starts_with_at_byte` probes and byte-scan copies to `str_byte_at`.**
-  json.sprout (66 probes), the prelude's `parse_int` and `parse_double` (11), uuid.sprout (4) and
-  compiler/source.sprout (4 probes, 5 `bytes_from_utf8` copies, one decoding a single codepoint
-  near line 173). Measured 4-30x on json and `parse_int`
-  (`bench/results-2026-11-02-str-byte-at.md`); scans of a whole String gain less, so measure
-  each site. `docs/string-byte-read-v0.md` §7.
+- [ ] `P2` **Move compiler/source.sprout's byte-scan copies to `str_byte_at`.** Five
+  `bytes_from_utf8` copies (one decodes a single codepoint) feed a `Bytes` UTF-8 decoder, and
+  `SourceCursor` holds the copy; its one-byte probes ("\n", "#", "\r") go with them. Measure
+  self-compile time under separate units. `docs/string-byte-read-v0.md` §7.
 - [ ] `P2` **Alias tags (TBAA) on inlined runtime-object access.** Every Sprout value is an `i64`,
   so LLVM assumes an element store may hit a vector or `Bytes` header and reloads `len` and
   `data` after it. Tags that keep headers, elements and bytes apart: 2.6× → 1.6× C on base64.

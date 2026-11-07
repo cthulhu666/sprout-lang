@@ -40,9 +40,10 @@ export fn v4() -> Result crypto.CryptoError Uuid !{IO} =
       | Just id -> Ok(id)
       | Nothing -> Err(crypto.CryptoUnavailable("random_bytes(16) did not return 16 bytes"))
 
+fn is_dash_at(raw: String, i: Int) -> Bool = str_byte_at(raw, i) == Just(45)  # '-'
+
 fn has_dashes(raw: String) -> Bool =
-  str_starts_with_at_byte(raw, 8, "-") && str_starts_with_at_byte(raw, 13, "-")
-    && str_starts_with_at_byte(raw, 18, "-") && str_starts_with_at_byte(raw, 23, "-")
+  is_dash_at(raw, 8) && is_dash_at(raw, 13) && is_dash_at(raw, 18) && is_dash_at(raw, 23)
 
 # Every cut sits next to a checked '-' or at an end, so each is a codepoint boundary
 # even when a group holds a multibyte character; `hex.decode` then rejects it.

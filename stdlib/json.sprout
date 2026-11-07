@@ -47,8 +47,8 @@ export fn string(value: String) -> Json =
 export extern fn json_stringify(value: Json) -> String
 
 # ---- Pure-Sprout JSON parser (replaces the former C `json_parse` extern) ---------------------
-# Byte-cursor recursive descent, O(n): a structural peek (str_starts_with_at_byte) and a token
-# slice (str_slice_bytes) are both O(1)/O(len) at a byte OFFSET, so one left-to-right pass over
+# Byte-cursor recursive descent, O(n): a byte read (str_byte_at) and a token slice
+# (str_slice_bytes) are both O(1)/O(len) at a byte OFFSET, so one left-to-right pass over
 # the UTF-8 bytes is linear. A codepoint-index parser would be O(n^2) — char_at re-walks from the
 # start each call (the trap that made string_lines grind). Each parser threads a byte cursor and
 # returns Maybe (value, nextByte); Nothing means malformed, which the public parser maps to Err.
@@ -56,16 +56,15 @@ export extern fn json_stringify(value: Json) -> String
 # only nesting depth uses the stack.
 
 # DISPATCH READS MUST NOT SLICE THE INPUT. `str_slice_bytes` calls `sprout_fail` — the process-fatal
-# path — when a cut splits a UTF-8 codepoint, so the former `byte1(s, i) = str_slice_bytes(s, i, 1)`
-# aborted the whole program whenever the cursor reached the LEAD byte of a multi-byte character:
-# `json.parse("{\"a\":\"café\"}")` did not return `Err`, it killed the process. Reachable from the LSP
-# server and from any HTTP server parsing a JSON body, i.e. an unauthenticated remote process kill.
+# path — when a cut splits a UTF-8 codepoint, and the cursor can sit on the LEAD byte of a
+# multi-byte character: `json.parse("{\"a\":\"café\"}")` would kill the process, reachable from
+# any server parsing a JSON body.
 #
-# So every dispatch below is a byte COMPARISON at an offset (`str_starts_with_at_byte`), which reads
-# in place and cannot abort. Verbose, but it is the idiom `is_ws_at` already used here, and it also
-# removed an allocation per inspected byte — `byte1` built a GC-managed 1-byte String for every byte
-# the scanner looked at and then searched a set for it, which `num_end` did once per byte of every
-# numeric literal.
+# So every dispatch below is one `str_byte_at` read: an Int 0-255, Nothing past the end. It reads in
+# place, cannot abort, and allocates nothing. Bytes are written as integer literals, as in
+# stdlib.log, with the character named in a comment where it is not obvious. Classifiers take the
+# byte (`is_ws_byte`), so a site that tests several bytes reads once. The multi-byte probes
+# (`true`, `false`, `null`, `\u`) stay `str_starts_with_at_byte`, which also reads in place.
 #
 # `str_char_at` is not an option: it is codepoint-indexed and O(n) per call, which would make the
 # parser quadratic — the trap this module's byte cursor exists to avoid.
@@ -74,39 +73,35 @@ export extern fn json_stringify(value: Json) -> String
 # provably codepoint-aligned at both ends: a run stops at an ASCII delimiter or at end-of-input, and
 # starts where the previous one stopped. Slicing an ASCII-delimited span is safe; probing an
 # attacker-chosen offset was not.
-#
-# The parser carries the input's byte length as `len`, read once by `json_parse`. Under
-# SPROUT_GC_HDRCHECK `str_byte_len` is O(n), so reading it per byte made a parse quadratic on CI.
 
-fn is_ws_at(s: String, i: Int) -> Bool =
-  str_starts_with_at_byte(s, i, " ") || str_starts_with_at_byte(s, i, "\t")
-    || str_starts_with_at_byte(s, i, "\n") || str_starts_with_at_byte(s, i, "\r")
+# JSON whitespace: space, tab, LF, CR.
+fn is_ws_byte(b: Int) -> Bool =
+  b == 32 || b == 9 || b == 10 || b == 13
 
 fn skip_ws(s: String, i: Int) -> Int =
-  if is_ws_at(s, i) then skip_ws(s, i + 1) else i
+  match str_byte_at(s, i) with
+  | Just b -> if is_ws_byte(b) then skip_ws(s, i + 1) else i
+  | Nothing -> i
 
-fn is_digit_at(s: String, i: Int) -> Bool =
-  str_starts_with_at_byte(s, i, "0") || str_starts_with_at_byte(s, i, "1")
-    || str_starts_with_at_byte(s, i, "2") || str_starts_with_at_byte(s, i, "3")
-    || str_starts_with_at_byte(s, i, "4") || str_starts_with_at_byte(s, i, "5")
-    || str_starts_with_at_byte(s, i, "6") || str_starts_with_at_byte(s, i, "7")
-    || str_starts_with_at_byte(s, i, "8") || str_starts_with_at_byte(s, i, "9")
+fn is_digit_byte(b: Int) -> Bool =
+  b >= 48 && b <= 57
 
 # Digits first: they dominate a numeric literal, so the short-circuit usually stops early.
-fn is_num_byte_at(s: String, i: Int) -> Bool =
-  is_digit_at(s, i)
-    || str_starts_with_at_byte(s, i, "-") || str_starts_with_at_byte(s, i, "+")
-    || str_starts_with_at_byte(s, i, ".") || str_starts_with_at_byte(s, i, "e")
-    || str_starts_with_at_byte(s, i, "E")
+# The rest are '-' '+' '.' 'e' 'E'.
+fn is_num_byte(b: Int) -> Bool =
+  is_digit_byte(b) || b == 45 || b == 43 || b == 46 || b == 101 || b == 69
 
-fn is_num_start(s: String, i: Int) -> Bool =
-  str_starts_with_at_byte(s, i, "-") || is_digit_at(s, i)
+# A number starts with a digit or '-'.
+fn is_num_start(b: Int) -> Bool =
+  b == 45 || is_digit_byte(b)
 
 # --- number ---------------------------------------------------------------------------------
 # Consume the maximal run of number characters, then let parse_int/parse_double validate it: any
 # structurally bad literal (e.g. "1.2.3", "1e") is rejected there. A '.'/'e'/'E' selects JsonFloat.
 fn num_end(s: String, i: Int) -> Int =
-  if is_num_byte_at(s, i) then num_end(s, i + 1) else i
+  match str_byte_at(s, i) with
+  | Just b -> if is_num_byte(b) then num_end(s, i + 1) else i
+  | Nothing -> i
 
 fn p_number(s: String, i: Int) -> Maybe (Json, Int) =
   let j = num_end(s, i)
@@ -141,27 +136,17 @@ fn p_float(tok: String, j: Int) -> Maybe (Json, Int) =
 # --- string (with escapes, incl. \uXXXX and surrogate pairs) --------------------------------
 # The value of the hex digit at byte `i`, or -1 if that byte is not a hex digit. A non-ASCII byte
 # here means malformed input (a \u escape is always four ASCII hex digits), so it must yield -1 and
-# a clean Nothing — which is precisely what the old `hexval(byte1(...))` could not do, because it
-# aborted before it could judge the byte. The linear probe costs up to 22 comparisons, which is
-# irrelevant: \u escapes are rare, and the hot path is plain_end.
-fn hex_at(s: String, i: Int) -> Int =
-  if str_starts_with_at_byte(s, i, "0") then 0
-  else if str_starts_with_at_byte(s, i, "1") then 1
-  else if str_starts_with_at_byte(s, i, "2") then 2
-  else if str_starts_with_at_byte(s, i, "3") then 3
-  else if str_starts_with_at_byte(s, i, "4") then 4
-  else if str_starts_with_at_byte(s, i, "5") then 5
-  else if str_starts_with_at_byte(s, i, "6") then 6
-  else if str_starts_with_at_byte(s, i, "7") then 7
-  else if str_starts_with_at_byte(s, i, "8") then 8
-  else if str_starts_with_at_byte(s, i, "9") then 9
-  else if str_starts_with_at_byte(s, i, "a") || str_starts_with_at_byte(s, i, "A") then 10
-  else if str_starts_with_at_byte(s, i, "b") || str_starts_with_at_byte(s, i, "B") then 11
-  else if str_starts_with_at_byte(s, i, "c") || str_starts_with_at_byte(s, i, "C") then 12
-  else if str_starts_with_at_byte(s, i, "d") || str_starts_with_at_byte(s, i, "D") then 13
-  else if str_starts_with_at_byte(s, i, "e") || str_starts_with_at_byte(s, i, "E") then 14
-  else if str_starts_with_at_byte(s, i, "f") || str_starts_with_at_byte(s, i, "F") then 15
+# a clean Nothing.
+fn hex_value(b: Int) -> Int =
+  if b >= 48 && b <= 57 then b - 48
+  else if b >= 97 && b <= 102 then b - 87
+  else if b >= 65 && b <= 70 then b - 55
   else 0 - 1
+
+fn hex_at(s: String, i: Int) -> Int =
+  match str_byte_at(s, i) with
+  | Just b -> hex_value(b)
+  | Nothing -> 0 - 1
 
 fn hex4(s: String, i: Int) -> Int =
   let a = hex_at(s, i)
@@ -178,58 +163,62 @@ fn hex4(s: String, i: Int) -> Int =
 # for the closing quote or an escape. The run therefore ends on an ASCII delimiter or at end-of-input,
 # which is what makes the caller's token slice codepoint-aligned and the character bytes pass through
 # verbatim.
-fn plain_end(s: String, len: Int, i: Int) -> Int =
-  if i >= len then i
-  else if str_starts_with_at_byte(s, i, "\"") || str_starts_with_at_byte(s, i, "\\") then i
-  else plain_end(s, len, i + 1)
+fn plain_end(s: String, i: Int) -> Int =
+  match str_byte_at(s, i) with
+  | Just b -> if b == 34 || b == 92 then i else plain_end(s, i + 1)  # '"' '\'
+  | Nothing -> i
 
 # A decoded code point of 0 fails the document: a Sprout String holds no NUL (spec-v0 §4), so
 # the value is not representable, and dropping or substituting it would change the data silently.
-fn p_unicode(s: String, len: Int, i: Int, parts: List String) -> Maybe (String, Int) =
+fn p_unicode(s: String, i: Int, parts: List String) -> Maybe (String, Int) =
   let cp = hex4(s, i)
   in if cp <= 0 then Nothing
      else if (cp >= 55296) && (cp <= 56319) then
        if str_starts_with_at_byte(s, i + 4, "\\u") then
          let lo = hex4(s, i + 6)
          in if (lo >= 56320) && (lo <= 57343)
-            then p_string_run(s, len, i + 10,
+            then p_string_run(s, i + 10,
                               Cons(char_to_str(65536 + ((cp - 55296) * 1024) + (lo - 56320)), parts))
             else Nothing
        else Nothing
      else if (cp >= 56320) && (cp <= 57343) then Nothing
-     else p_string_run(s, len, i + 4, Cons(char_to_str(cp), parts))
+     else p_string_run(s, i + 4, Cons(char_to_str(cp), parts))
 
-fn p_escape(s: String, len: Int, i: Int, parts: List String) -> Maybe (String, Int) =
-  if str_starts_with_at_byte(s, i, "u") then p_unicode(s, len, i + 1, parts)
-  else
-    let Just piece = escape_char(s, i) else Nothing
-    in p_string_run(s, len, i + 1, Cons(piece, parts))
+fn p_escape(s: String, i: Int, parts: List String) -> Maybe (String, Int) =
+  match str_byte_at(s, i) with
+  | Just 117 -> p_unicode(s, i + 1, parts)  # 'u'
+  | Just b ->
+      let Just piece = escape_char(b) else Nothing
+      in p_string_run(s, i + 1, Cons(piece, parts))
+  | Nothing -> Nothing
 
-# The decoded text of a one-character escape whose letter is at `i`.
-fn escape_char(s: String, i: Int) -> Maybe String =
-  if str_starts_with_at_byte(s, i, "\"") then Just("\"")
-  else if str_starts_with_at_byte(s, i, "\\") then Just("\\")
-  else if str_starts_with_at_byte(s, i, "/") then Just("/")
-  else if str_starts_with_at_byte(s, i, "n") then Just("\n")
-  else if str_starts_with_at_byte(s, i, "t") then Just("\t")
-  else if str_starts_with_at_byte(s, i, "r") then Just("\r")
-  else if str_starts_with_at_byte(s, i, "b") then Just(char_to_str(8))
-  else if str_starts_with_at_byte(s, i, "f") then Just(char_to_str(12))
-  else Nothing
+# The decoded text of a one-character escape whose letter is the byte `b`.
+fn escape_char(b: Int) -> Maybe String =
+  match b with
+  | 34 -> Just("\"")  # '"'
+  | 92 -> Just("\\")  # '\'
+  | 47 -> Just("/")
+  | 110 -> Just("\n")  # 'n'
+  | 116 -> Just("\t")  # 't'
+  | 114 -> Just("\r")  # 'r'
+  | 98 -> Just(char_to_str(8))  # 'b'
+  | 102 -> Just(char_to_str(12))  # 'f'
+  | _ -> Nothing
 
 # i points into the string body (after the opening quote). Returns (decoded, indexAfterCloseQuote).
 # `parts` holds the decoded pieces newest-first and is joined once at the closing quote: appending
 # each piece to the decoded string copied everything decoded so far.
-fn p_string_run(s: String, len: Int, i: Int, parts: List String) -> Maybe (String, Int) =
-  if i >= len then Nothing
-  else if str_starts_with_at_byte(s, i, "\"") then Just((string_concat_many(list_reverse(parts)), i + 1))
-  else if str_starts_with_at_byte(s, i, "\\") then p_escape(s, len, i + 1, parts)
-  else
-    let j = plain_end(s, len, i)
-    in p_string_run(s, len, j, Cons(str_slice_bytes(s, i, j - i), parts))
+fn p_string_run(s: String, i: Int, parts: List String) -> Maybe (String, Int) =
+  match str_byte_at(s, i) with
+  | Just 34 -> Just((string_concat_many(list_reverse(parts)), i + 1))  # '"'
+  | Just 92 -> p_escape(s, i + 1, parts)  # '\'
+  | Just _ ->
+      let j = plain_end(s, i)
+      in p_string_run(s, j, Cons(str_slice_bytes(s, i, j - i), parts))
+  | Nothing -> Nothing
 
 # i at the opening quote.
-fn p_string(s: String, len: Int, i: Int) -> Maybe (String, Int) = p_string_run(s, len, i + 1, Nil)
+fn p_string(s: String, i: Int) -> Maybe (String, Int) = p_string_run(s, i + 1, Nil)
 
 # Deepest array/object nesting `parse` accepts; deeper input fails like any other invalid JSON. The
 # parser recurses once per level and a task stack is fixed (1 MiB). The smallest measured crash
@@ -238,21 +227,21 @@ fn p_string(s: String, len: Int, i: Int) -> Maybe (String, Int) = p_string_run(s
 let max_depth = 128
 
 # --- array ----------------------------------------------------------------------------------
-fn p_array_items(s: String, len: Int, depth: Int, i: Int, acc: List Json) -> Maybe (Json, Int) =
-  match p_value(s, len, depth, i) with
+fn p_array_items(s: String, depth: Int, i: Int, acc: List Json) -> Maybe (Json, Int) =
+  match p_value(s, depth, i) with
   | Nothing -> Nothing
   | Just (v, j) ->
       let k = skip_ws(s, j)
-      in if str_starts_with_at_byte(s, k, "]")
-         then Just((JsonArray(json_array_from_reversed(Cons(v, acc), JsonArrayNil)), k + 1))
-         else if str_starts_with_at_byte(s, k, ",") then p_array_items(s, len, depth, skip_ws(s, k + 1), Cons(v, acc))
-         else Nothing
+      in match str_byte_at(s, k) with
+         | Just 93 -> Just((JsonArray(json_array_from_reversed(Cons(v, acc), JsonArrayNil)), k + 1))  # ']'
+         | Just 44 -> p_array_items(s, depth, skip_ws(s, k + 1), Cons(v, acc))  # ','
+         | _ -> Nothing
 
-fn p_array(s: String, len: Int, depth: Int, i: Int) -> Maybe (Json, Int) =
+fn p_array(s: String, depth: Int, i: Int) -> Maybe (Json, Int) =
   let j = skip_ws(s, i + 1)
-  in if str_starts_with_at_byte(s, j, "]")
-     then Just((JsonArray (JsonArrayNil), j + 1))
-     else p_array_items(s, len, depth, j, Nil)
+  in match str_byte_at(s, j) with
+     | Just 93 -> Just((JsonArray (JsonArrayNil), j + 1))  # ']'
+     | _ -> p_array_items(s, depth, j, Nil)
 
 # --- object ---------------------------------------------------------------------------------
 # `seen` holds the DECODED keys of this object, so a repeated key fails the document and
@@ -260,24 +249,19 @@ fn p_array(s: String, len: Int, depth: Int, i: Int) -> Maybe (Json, Int) =
 # names SHOULD be unique and that a reader's behaviour on a repeat is unpredictable; RFC 7493
 # §2.3 makes it MUST NOT. Rejecting is the one rule on which every other reader agrees about any
 # document it accepts. The set is per object: sibling and nested objects start empty.
-fn p_object_members(s: String, len: Int, depth: Int, i: Int, acc: List (String, Json), seen: Set) -> Maybe (Json, Int) =
-  if str_starts_with_at_byte(s, i, "\"") then
-    match p_string(s, len, i) with
-    | Nothing -> Nothing
-    | Just (key, j) ->
-        let k = skip_ws(s, j)
-            Just seen2 = note_key(key, seen) else Nothing
-        in if str_starts_with_at_byte(s, k, ":") then
-             match p_value(s, len, depth, k + 1) with
-             | Nothing -> Nothing
-             | Just (v, m) ->
-                 let n = skip_ws(s, m)
-                 in if str_starts_with_at_byte(s, n, "}")
-                    then Just((JsonObject(json_object_from_reversed(Cons((key, v), acc), JsonObjectNil)), n + 1))
-                    else if str_starts_with_at_byte(s, n, ",") then p_object_members(s, len, depth, skip_ws(s, n + 1), Cons((key, v), acc), seen2)
-                    else Nothing
-           else Nothing
-  else Nothing
+fn p_object_members(s: String, depth: Int, i: Int, acc: List (String, Json), seen: Set) -> Maybe (Json, Int) =
+  let Just 34 = str_byte_at(s, i) else Nothing  # '"'
+      Just(key, j) = p_string(s, i) else Nothing
+      k = skip_ws(s, j)
+      Just seen2 = note_key(key, seen) else Nothing
+      Just 58 = str_byte_at(s, k) else Nothing  # ':'
+      Just(v, m) = p_value(s, depth, k + 1) else Nothing
+      n = skip_ws(s, m)
+      pairs = Cons((key, v), acc)
+  in match str_byte_at(s, n) with
+     | Just 125 -> Just((JsonObject(json_object_from_reversed(pairs, JsonObjectNil)), n + 1))  # '}'
+     | Just 44 -> p_object_members(s, depth, skip_ws(s, n + 1), pairs, seen2)  # ','
+     | _ -> Nothing
 
 # `seen` with `key` added, or Nothing when `key` was already in it. A repeat leaves the size
 # unchanged, so there is no separate `set_member` walk (`set_size` is O(1)). Shared by the parser
@@ -286,36 +270,38 @@ fn note_key(key: String, seen: Set) -> Maybe Set =
   let seen2 = set_insert(key, seen)
   in if set_size(seen2) == set_size(seen) then Nothing else Just(seen2)
 
-fn p_object(s: String, len: Int, depth: Int, i: Int) -> Maybe (Json, Int) =
+fn p_object(s: String, depth: Int, i: Int) -> Maybe (Json, Int) =
   let j = skip_ws(s, i + 1)
-  in if str_starts_with_at_byte(s, j, "}")
-     then Just((JsonObject (JsonObjectNil), j + 1))
-     else p_object_members(s, len, depth, j, Nil, set_empty())
+  in match str_byte_at(s, j) with
+     | Just 125 -> Just((JsonObject (JsonObjectNil), j + 1))  # '}'
+     | _ -> p_object_members(s, depth, j, Nil, set_empty())
 
 # --- value dispatch ---------------------------------------------------------------------------
-fn p_value(s: String, len: Int, depth: Int, i0: Int) -> Maybe (Json, Int) =
+# `true`, `false` and `null` are the multi-byte probes; none starts like a number.
+fn p_keyword(s: String, i: Int) -> Maybe (Json, Int) =
+  if str_starts_with_at_byte(s, i, "true") then Just((JsonBool(true), i + 4))
+  else if str_starts_with_at_byte(s, i, "false") then Just((JsonBool(false), i + 5))
+  else if str_starts_with_at_byte(s, i, "null") then Just((JsonNull, i + 4))
+  else Nothing
+
+fn p_value(s: String, depth: Int, i0: Int) -> Maybe (Json, Int) =
   let i = skip_ws(s, i0)
-  in if str_starts_with_at_byte(s, i, "\"") then
-       match p_string(s, len, i) with
-       | Nothing -> Nothing
-       | Just (str, j) -> Just((JsonString(str), j))
-     else if str_starts_with_at_byte(s, i, "{") then (if depth >= max_depth then Nothing else p_object(s, len, depth + 1, i))
-     else if str_starts_with_at_byte(s, i, "[") then (if depth >= max_depth then Nothing else p_array(s, len, depth + 1, i))
-     else if str_starts_with_at_byte(s, i, "true") then Just((JsonBool(true), i + 4))
-     else if str_starts_with_at_byte(s, i, "false") then Just((JsonBool(false), i + 5))
-     else if str_starts_with_at_byte(s, i, "null") then Just((JsonNull, i + 4))
-     else if is_num_start(s, i) then p_number(s, i)
-     else Nothing
+  in match str_byte_at(s, i) with
+     | Just 34 ->  # '"'
+         let Just(str, j) = p_string(s, i) else Nothing
+         in Just((JsonString(str), j))
+     | Just 123 -> if depth >= max_depth then Nothing else p_object(s, depth + 1, i)  # '{'
+     | Just 91 -> if depth >= max_depth then Nothing else p_array(s, depth + 1, i)  # '['
+     | Just b -> if is_num_start(b) then p_number(s, i) else p_keyword(s, i)
+     | Nothing -> Nothing
 
 # Parse a complete JSON document. Trailing non-whitespace after the top-level value is an error.
 export fn json_parse(raw: String) -> Result JsonError Json =
-  match p_value(raw, len, 0, 0) with
+  match p_value(raw, 0, 0) with
   | Nothing -> Err(JsonDecode("invalid JSON"))
   | Just (v, j) ->
-      if skip_ws(raw, j) >= len then Ok(v)
+      if is_nothing(str_byte_at(raw, skip_ws(raw, j))) then Ok(v)
       else Err(JsonDecode("trailing characters after JSON value"))
-where
-  len = str_byte_len(raw)
 
 export fn encode(value: a) -> Json where JsonEncode a =
   encode_json(value)
