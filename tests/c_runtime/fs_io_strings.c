@@ -100,6 +100,15 @@ int main(int argc, char** argv) {
    * 47-bit address space holds) makes malloc fail: the out-of-memory Err must name the path like
    * every other fs_* Err. Skipped where the filesystem refuses a file that large (ext4 caps files
    * at 16 TiB, so this runs on APFS and tmpfs). */
+  /* Not under ASan: its allocator aborts on a request this large instead of returning NULL. */
+#if defined(__SANITIZE_ADDRESS__)
+#define SPROUT_TEST_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define SPROUT_TEST_ASAN 1
+#endif
+#endif
+#ifndef SPROUT_TEST_ASAN
   snprintf(path, sizeof path, "%s/huge.sparse", dir);
   FILE* huge = fopen(path, "wb");
   if (huge != NULL) {
@@ -114,6 +123,7 @@ int main(int argc, char** argv) {
     }
     unlink(path);
   }
+#endif
 
   /* read_int_lines: a vector of the parsed lines. */
   snprintf(path, sizeof path, "%s/ints.txt", dir);
