@@ -1,4 +1,6 @@
-# Verifies that `++` (Semigroup `append`) lowers correctly via --use-ir-codegen
+import stdlib.test (check_eq, run_suite)
+
+# Verifies that `++` (Semigroup `append`) lowers correctly
 # (M3 PR 16 — last IR-codegen parity gap).
 #
 # Before PR 16: the parser desugars `a ++ b` into CallExpr("append", [a, b]).
@@ -10,8 +12,10 @@
 #
 # After PR 16: translate_direct_call recognises fname == "append", peels the
 # optional TDict witness arg, inspects the operand types, and routes to either
-# IRStrConcat (String) or IRCall "list_append" (List), mirroring the special
-# case in codegen.sprout emit_append_call / emit_append_operands.
+# IRStrConcat (String) or IRCall "list_append" (List).
+#
+# Each function is called from main and its result asserted: a compile-only
+# main lets dead-code elimination strip every function under test.
 
 # T1: String ++ String — the primary gap (tests/smoke_shapes/03_strconcat.spr).
 fn t1() -> String = "hello" ++ " " ++ "world"
@@ -25,4 +29,11 @@ fn t3() -> String = "" ++ "world"
 # T4: String ++ with a function argument.
 fn t4(s: String) -> String = "prefix_" ++ s
 
-fn main() -> Unit !{IO} = ()
+fn main() -> Unit !{IO} =
+  run_suite("ir_codegen_append_parity", [
+    check_eq("t1 literal chain", t1(), "hello world"),
+    check_eq("t2 three operands", t2("a", "b", "c"), "abc"),
+    check_eq("t3 empty left", t3(), "world"),
+    check_eq("t4 prefix", t4("x"), "prefix_x"),
+    check_eq("t4 empty arg", t4(""), "prefix_")
+  ])

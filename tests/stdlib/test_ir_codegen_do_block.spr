@@ -1,17 +1,17 @@
+import stdlib.test (new_state, assert_eq, summary)
+
 # M3 PR 11 — do-block + IO effects + main body lowering.
 #
-# No imports: self-contained Sprout functions with do-blocks that use only
-# pure arithmetic steps.  This keeps the emitted IR free of undeclared
-# extern references so `opt --passes=verify` passes.
+# Self-contained Sprout functions with do-blocks that use only pure arithmetic
+# steps; stdlib.test is imported only to assert their results.
 #
 # Do-blocks here are IO-typed functions (fn f() -> T !{IO}) but the steps
 # contain only let-bindings and pure arithmetic expressions.  The IO effect
 # annotation is an upper bound in Sprout — pure-body do-blocks are valid.
 #
-# The IR runner checks: compile exit-0 AND `opt --passes=verify` passes.
+# main calls each function and asserts its result.
 # Behavioral correctness for do-blocks with real IO effects is exercised by
-# the broader stdlib test suite (test_ir_codegen_basic.spr, etc.) which now
-# compile successfully after this PR's TDo translation lands.
+# the broader stdlib test suite (test_ir_codegen_basic.spr, etc.).
 
 # TDoExprStep (last-step value):
 # A do-block whose only step is an expression returns that expression's value.
@@ -58,13 +58,19 @@ fn do_mixed(n: Int) -> Int !{IO} =
     v * 3
 
 # main with a TDo body: proves validate_main_body accepts TDo.
-# Uses a TUnit-returning do-block (all effects discarded).
 fn main() -> Unit !{IO} =
   do
-    do_single_expr()
-    do_let_bind(3)
-    do_two_exprs(2, 5)
-    do_bind_plain_io(7)
-    do_nested_binds(4, 6)
-    _ <- do_mixed(2)
-    ()
+    state <- new_state()
+    r1 <- do_single_expr()
+    assert_eq(state, "do_single_expr", r1, 42)
+    r2 <- do_let_bind(3)
+    assert_eq(state, "do_let_bind", r2, 7)
+    r3 <- do_two_exprs(2, 5)
+    assert_eq(state, "do_two_exprs", r3, 10)
+    r4 <- do_bind_plain_io(7)
+    assert_eq(state, "do_bind_plain_io", r4, 14)
+    r5 <- do_nested_binds(4, 6)
+    assert_eq(state, "do_nested_binds", r5, 10)
+    r6 <- do_mixed(2)
+    assert_eq(state, "do_mixed", r6, 36)
+    summary(state)

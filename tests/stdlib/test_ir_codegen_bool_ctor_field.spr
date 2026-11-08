@@ -1,11 +1,15 @@
+import stdlib.test (check_true, check_false, run_suite)
+
 # Verifies that Bool-typed constructor field arguments are correctly handled
-# by --use-ir-codegen (M3 PR 15a — Bool ctor field zext wiring).
+# (M3 PR 15a — Bool ctor field zext wiring).
 #
-# Before PR 15a: --use-ir-codegen errors with
+# Before PR 15a: ast_to_ir errors with
 #   ERROR: ast_to_ir: Bool ctor field not yet supported (requires zext i1 to i64 — deferred to follow-up PR)
 # After PR 15a: emits LLVM with `zext i1 %tN to i64` in the ctor field path.
 #
 # Locally-defined types only (no fictional externs — link-time safe).
+# main calls each function and asserts its result, so dead-code elimination
+# cannot strip them.
 
 # A simple ADT carrying a Bool field.
 type Wrap =
@@ -39,5 +43,17 @@ fn snd_pair(p: Pair) -> Bool =
   match p with
   | P _ b -> b
 
-# Trivial main.
-fn main() -> Unit !{IO} = ()
+fn main() -> Unit !{IO} =
+  run_suite("ir_codegen_bool_ctor_field", [
+    check_true("unwrap(make(true))", unwrap(make(true))),
+    check_false("unwrap(make(false))", unwrap(make(false))),
+    check_true("make_gt 3 > 2", unwrap(make_gt(3, 2))),
+    check_false("make_gt 2 > 3", unwrap(make_gt(2, 3))),
+    check_false("make_gt 2 > 2", unwrap(make_gt(2, 2))),
+    check_true("roundtrip true", roundtrip(true)),
+    check_false("roundtrip false", roundtrip(false)),
+    check_true("pair fst true", fst_pair(make_pair(true, false))),
+    check_false("pair snd false", snd_pair(make_pair(true, false))),
+    check_false("pair fst false", fst_pair(make_pair(false, true))),
+    check_true("pair snd true", snd_pair(make_pair(false, true)))
+  ])

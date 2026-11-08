@@ -1,4 +1,6 @@
-# Verifies top-level `let` binding resolution via --use-ir-codegen (M3 PR 5).
+import stdlib.test (check_eq, check_true, run_suite)
+
+# Verifies top-level `let` binding resolution (M3 PR 5).
 #
 # Rebase-merge regression marker: translate_user_fn takes `params: List ast.Param`
 # (not `param_names(params): List String`). The call site at translate_decl_with_idx
@@ -54,5 +56,11 @@ fn exceeds() -> Bool = exceeds_threshold
 # Composition: read multiple lets in one expression.
 fn answer_plus_computed() -> Int = answer + computed
 
-# Trivial main — IR path requires `() : Unit` until PR 6 lands do/IO.
-fn main() -> Unit !{IO} = ()
+fn main() -> Unit !{IO} =
+  run_suite("ir_codegen_top_level_let", [
+    check_eq("const Int let", get_answer(), 42),
+    check_eq("runtime Int let", get_computed(), 300),
+    check_true("const Bool let", get_ready()),
+    check_true("runtime Bool let", exceeds()),
+    check_eq("two lets in one expression", answer_plus_computed(), 342)
+  ])

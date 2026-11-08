@@ -1,7 +1,9 @@
+import stdlib.test (check_eq, check_true, check_false, run_suite)
+
 # Verifies that Bool and Unit values lower correctly as call arguments
-# via --use-ir-codegen (M3 PR 10).
+# (M3 PR 10).
 #
-# Before PR 10: --use-ir-codegen errors with
+# Before PR 10: ast_to_ir errors with
 #   ERROR: ast_to_ir: call argument type not supported (Bool and Unit cannot be passed as i64)
 # whenever a call site passes a Bool or Unit-typed expression.
 # This blocked the entire stdlib test harness because assert_true(state, msg, cond)
@@ -11,8 +13,7 @@
 # - Bool: translate_args accepts Bool; TBool already emits IRConst (i64 0/1)
 #   via the /code-review fix #2 path, so Bool call args flow as i64 with no new IR ops.
 # - Unit: translate_args accepts Unit; TUnit now emits IRConst(name, 0)
-#   (i64 0 sentinel), mirroring direct codegen's val_make(ll_i64(), "0") convention
-#   (codegen.sprout line 1776-1777).
+#   (i64 0 sentinel).
 
 # Bool passed as a call argument.
 fn negate(b: Bool) -> Bool = if b then false else true
@@ -28,6 +29,13 @@ fn caller() -> Int =
 # i64-valued zext path flows into call args correctly.
 fn negate_cmp(x: Int, y: Int) -> Bool = negate(x == y)
 
-# Trivial main — required by the compiler; no IO until do-block support
-# lands in the IR path.
-fn main() -> Unit !{IO} = ()
+fn main() -> Unit !{IO} =
+  run_suite("ir_codegen_bool_unit_args", [
+    check_false("negate true", negate(true)),
+    check_true("negate false", negate(false)),
+    check_eq("drop_unit", drop_unit(()), 42),
+    # negate(true) is false, so caller takes the else branch.
+    check_eq("caller", caller(), 0),
+    check_true("negate_cmp unequal", negate_cmp(1, 2)),
+    check_false("negate_cmp equal", negate_cmp(2, 2))
+  ])

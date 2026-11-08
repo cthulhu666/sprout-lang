@@ -1,3 +1,5 @@
+import stdlib.test (new_state, assert_eq, summary)
+
 # M3 PR 15f — thread eblocks through translate_do's three non-last-step branches.
 #
 # Each branch (TDoExprStep non-last, TDoLetStep, TDoBindStep plain-IO) previously
@@ -5,7 +7,8 @@
 # multi-block form (match, if, &&/||) the sealed sub-blocks were dropped while
 # the phi node still referenced their labels → use of undefined value errors.
 #
-# No imports: self-contained Sprout.  IR verified by opt --passes=verify.
+# main calls each function and asserts its result; the IR is also verified by
+# opt --passes=verify in the runner.
 
 # T1: TDoExprStep non-last — match-expression as a discarded non-last step.
 # The match emits two sealed arm blocks + a phi in the continuation; dropping
@@ -35,4 +38,17 @@ fn t3(b: Bool) -> Int !{IO} =
     x <- if b then helper_io() else helper_io()
     x + 1
 
-fn main() -> Unit !{IO} = ()
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    r1 <- t1()
+    assert_eq(state, "t1 match as discarded step", r1, 3)
+    r2t <- t2(true)
+    assert_eq(state, "t2 if then", r2t, 11)
+    r2f <- t2(false)
+    assert_eq(state, "t2 if else", r2f, 21)
+    r3t <- t3(true)
+    assert_eq(state, "t3 bind if then", r3t, 43)
+    r3f <- t3(false)
+    assert_eq(state, "t3 bind if else", r3f, 43)
+    summary(state)
