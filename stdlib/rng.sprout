@@ -64,11 +64,11 @@ let rng_hash_pz = 19349663
 #
 # Coordinates may be any Int; negatives are handled. O(1).
 #
-# Every operand of a multiply or add is below 2^31 (`rng_next` reduces its own input), so each
-# product stays below 2^62 and nothing here can leave i64. That is a pure guard, not a change of
-# function: reducing a factor or an addend leaves the result's residue alone, so no hash value
-# moves — `tests/stdlib/test_rng.spr` pins the same reference hashes across this change. The
-# reduced coordinate term is at most 2^31 * 73856093 < 2^58.
+# Every factor of a multiply is below 2^31 (`rng_next` reduces its own input), so each
+# product stays below 2^62 and nothing here can leave i64. That is a pure guard, not a change
+# of function: reducing a factor or an addend leaves the result's residue alone, so no hash
+# value moves — `tests/stdlib/test_rng.spr` pins the same reference hashes across this change.
+# The reduced coordinate term is at most 2^31 * 73856093 < 2^58.
 #
 # Reducing afterwards was enough while overflow wrapped, because the wrap was itself a mod
 # 2^64 and the residue survived it. Under trapping arithmetic (bigint-v0 Stage 1) it is not:
