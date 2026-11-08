@@ -1,0 +1,41 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.scram as scram
+
+# The server-supplied iteration count is bounded at parse time, and again in `hi` for a
+# hand-built `ScramServerFirst` that never went through the parser.
+
+fn first_with(count: String) -> String =
+  `r=clientnonceserver,s=W22ZaJ0SNY7soEsUEjb6gQ==,i=${count}`
+
+fn parsed(count: String) -> String =
+  match scram.parse_server_first(first_with(count)) with
+  | Ok _ -> "ok"
+  | Err err -> `err:${scram.error_message(err)}`
+
+# The cap is far too large to hash, so this must fail before any PBKDF2 round runs.
+fn final_with_count(count: Int) -> String =
+  match scram.client_final("pencil", "n=user,r=clientnonce",
+    scram.ScramServerFirst("r=clientnonceserver", "clientnonceserver", "W22ZaJ0SNY7soEsUEjb6gQ==", count),
+    scram.no_channel_binding) with
+  | Ok _ -> "ok"
+  | Err err -> `err:${scram.error_message(err)}`
+
+fn main() -> Unit !{IO} =
+  run_suite("scram iteration count bound", [
+    check_eq("4096 is accepted", parsed("4096"), "ok"),
+    check_eq("1 is accepted", parsed("1"), "ok"),
+    check_eq("the cap itself is accepted", parsed("1000000"), "ok"),
+    check_eq("one over the cap is rejected", parsed("1000001"),
+      "err:SCRAM iteration count 1000001 exceeds the limit 1000000"),
+    check_eq("a huge count is rejected", parsed("9000000000000000000"),
+      "err:SCRAM iteration count 9000000000000000000 exceeds the limit 1000000"),
+    check_eq("zero is rejected at parse", parsed("0"), "err:SCRAM iteration count must be positive"),
+    check_eq("a count past Int range is rejected", parsed("99999999999999999999"),
+      "err:SCRAM iteration count must be decimal digits"),
+    check_eq("empty count is rejected", parsed(""), "err:SCRAM iteration count cannot be empty"),
+    check_eq("non-digits are rejected", parsed("12x"), "err:SCRAM iteration count must be decimal digits"),
+    check_eq("client_final rejects a hand-built count over the cap", final_with_count(1000001),
+      "err:SCRAM iteration count 1000001 exceeds the limit 1000000"),
+    check_eq("client_final rejects a hand-built zero count", final_with_count(0),
+      "err:SCRAM iteration count must be positive")
+  ])
