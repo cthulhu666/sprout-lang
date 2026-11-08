@@ -262,6 +262,9 @@ strings and are counted in `cstr`; they used to be interned too, which is why th
 census read `cstr=111(9.2KB)` while the program held 75,640 Dict keys
 ([gc-generational-v0.md](gc-generational-v0.md) §13.6). A flat number is a boot-time load.
 
+For wall time on a quiet machine, `just bench-vm` runs a compiler A/B on a throwaway cloud VM and
+prints these counters beside the timings: [bench-vm.md](bench-vm.md).
+
 ## `just llvm-where <ll_file> <line>` — map an error line to its Sprout function
 
 When `opt --passes=verify` (or clang) reports a malformed-IR error at line N of a large `.ll` file, this tool walks the file up from line N to the nearest enclosing `define` and prints the Sprout qualified name.

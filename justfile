@@ -84,6 +84,13 @@ bench-opt pass="dle": bootstrap-from-seed
 bench-keep-alive: bootstrap-from-seed
   bash bench/http_keep_alive/bench.sh
 
+# Quiet-machine compiler A/B on a throwaway GCE VM: `just bench-vm <base-ref> <head-ref>`.
+# Creates a VM, runs scripts/bench_vm_remote.sh on it, always deletes it. NOT a gate (wall-clock
+# numbers, bills the cloud). Needs BENCH_PROJECT, BENCH_ACCOUNT, BENCH_ZONE: docs/bench-vm.md.
+[group('dev')]
+bench-vm base head:
+  bash scripts/bench_vm.sh {{quote(base)}} {{quote(head)}}
+
 # Launch the interactive Sprout REPL via sproutd (self-configuring).
 # Prerequisites: just build-sproutd
 [group('dev')]
@@ -816,6 +823,12 @@ test-review-ledger:
 [group('test')]
 test-pr-rebase:
   bash scripts/test_pr_rebase.sh
+
+# Exercise `bench-vm` against a stub `gcloud`: the VM is deleted on every exit path, by name only.
+# Also covers the parsing helpers in scripts/bench_vm_remote.sh. No network, no cloud calls.
+[group('test')]
+test-bench-vm:
+  bash scripts/test_bench_vm.sh
 
 # Validate and test the `/prs` pane plugin. Local only: CI has no `claude` CLI.
 [group('test')]
@@ -4574,6 +4587,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "shell-hooks|test-shell-hooks"
     "review-ledger|test-review-ledger"
     "pr-rebase|test-pr-rebase"
+    "bench-vm|test-bench-vm"
     "error-line-marker|test-error-line-marker"
     "review-script|test-review-script"
     "setup-dev|test-setup-dev"
