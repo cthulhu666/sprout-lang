@@ -15,7 +15,7 @@ bad() { echo "FAIL: $*" >&2; fail=1; }
 run() {
   local dir="$1"; shift
   RC=0
-  OUT="$(env "$@" "$JUST" _test-stdlib "$STAGE" "$FIX/$dir" 2>&1)" || RC=$?
+  OUT="$(env -u SPROUT_TEST_SHARD -u SPROUT_TEST_TIMEOUT "$@" "$JUST" _test-stdlib "$STAGE" "$FIX/$dir" 2>&1)" || RC=$?
 }
 
 run no_verdict
@@ -25,6 +25,10 @@ elif ! grep -q "NO VERDICT" <<<"$OUT"; then bad "no_verdict: exit $RC but no NO 
 run hang SPROUT_TEST_TIMEOUT=3
 if [[ "$RC" -eq 0 ]]; then bad "hang: runner exited 0 for a hung suite"
 elif ! grep -q "TIMEOUT" <<<"$OUT"; then bad "hang: exit $RC but no TIMEOUT label: $OUT"; fi
+
+run pass SPROUT_TEST_TIMEOUT=0
+if [[ "$RC" -eq 0 ]]; then bad "bad timeout: runner exited 0 for SPROUT_TEST_TIMEOUT=0"
+elif ! grep -q "must be a positive integer" <<<"$OUT"; then bad "bad timeout: exit $RC but no error message: $OUT"; fi
 
 run pass
 [[ "$RC" -eq 0 ]] || bad "pass: runner exited $RC for a passing suite: $OUT"
