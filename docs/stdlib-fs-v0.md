@@ -3,6 +3,12 @@
 Status: **implemented**. Supporting design doc; `docs/spec-v0.md` is unaffected — this adds a
 stdlib module and seven builtins, no language semantics. Milestone M1 of the TUI/IDE arc.
 
+Later change: the `read_file` / `write_file` builtins this document describes are gone.
+`fs.read_text` and `fs.write_text` are written in Sprout over `fs_read_bytes` / `fs_write_bytes`,
+so the text pair's `Err` is now `"<path>: <reason>"`, and the path `"-"` is an ordinary path, no
+longer stdin (`terminal.read_stdin_text` reads stdin). Text below that names `read_file` describes
+the module as it was when written.
+
 Two things in this document were **wrong when first written and are corrected in place**, both
 caught by running something rather than by review: `stat` was specified as `lstat` with no
 following variant (§3.3), and the seed was predicted not to move (§8). Where a claim was later
@@ -162,8 +168,8 @@ performance-motivated (rule 6).
 |---|---|---|
 | `fs_list_dir(path) -> Result FsError (List String)` | `opendir`/`readdir`/`closedir` | no directory-stream primitive exists |
 | `fs_stat_path(path, follow) -> Result FsError Entry` | `stat` / `lstat` | no inode metadata primitive exists |
-| `fs_read_bytes(path) -> Result FsError Bytes` | `open`/`read`/`close` | `read_file` validates UTF-8 and cannot return raw bytes |
-| `fs_write_bytes(path, Bytes) -> Result FsError Unit` | `open`/`write`/`close` | `write_file` takes `String`, which is always valid UTF-8 with no NUL |
+| `fs_read_bytes(path) -> Result FsError Bytes` | `open`/`read`/`close` | a `String` return would have to be valid UTF-8; `read_text` is built on this one |
+| `fs_write_bytes(path, Bytes) -> Result FsError Unit` | `open`/`write`/`close` | a `String` is always valid UTF-8 with no NUL; `write_text` is built on this one |
 | `fs_make_dir(path, mode) -> Result FsError Unit` | `mkdir` | `mode` is the create mode, set at creation; there is no `chmod` |
 | `fs_remove(path) -> Result FsError Unit` | `remove(3)` (`unlink`/`rmdir`) | — |
 | `fs_rename(from, to) -> Result FsError Unit` | `rename` | — |

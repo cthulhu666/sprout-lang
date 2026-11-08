@@ -43,13 +43,22 @@ fn size_of(r: Result fs.FsError fs.Entry) -> Int =
   | Err _ -> -1
   | Ok entry -> fs.entry_size(entry)
 
-# read_text/write_text keep their old unmatchable-String error, so they need
-# their own reducer. That the two cannot share one is the clearest statement of
-# what this change adds.
+# read_text/write_text answer with an unmatchable String error, so they need
+# their own reducer.
 fn text_outcome(r: Result String a) -> String =
   match r with
   | Ok _ -> "ok"
   | Err msg -> "err: " ++ msg
+
+fn text_value(r: Result String String) -> String =
+  match r with
+  | Ok text -> text
+  | Err msg -> "err: " ++ msg
+
+fn text_error(r: Result String a) -> String =
+  match r with
+  | Ok _ -> ""
+  | Err msg -> msg
 
 fn names_of(r: Result fs.FsError (List String)) -> List String =
   match r with
@@ -85,16 +94,11 @@ fn byte_count(r: Result fs.FsError Bytes) -> Int =
   | Err _ -> -1
   | Ok b -> bytes.length(b)
 
-# `read_file` / `write_file` had NO direct test coverage: both were exercised only
-# incidentally, as setup helpers inside compiler tests that assert something else
-# entirely (tests/stdlib/compiler/test_wrap_codegen.spr writes a fixture, then
-# checks codegen). This is the first test that treats them as the subject.
-#
-# It lands together with their move out of the prelude into stdlib.fs, so it also
-# serves as the reachability check for that move: externs are invisible to the
-# module system (bundler.sprout:597 drops ExternFnDecl), so a wrong import graph
-# does not produce a scoping diagnostic — it produces `Unknown variable` from the
-# typechecker or an undefined symbol at link time.
+# `read_text` / `write_text` are written in Sprout over `fs_read_bytes` / `fs_write_bytes`; the
+# round trip below and the "text pair" block at the end are the direct tests of that layer. The
+# externs they sit on are invisible to the module system (bundler.sprout:597 drops ExternFnDecl),
+# so a wrong import graph does not produce a scoping diagnostic: it produces `Unknown variable`
+# from the typechecker or an undefined symbol at link time.
 
 # First line of `ls -ld <dir>`: the file type and permission bits, e.g. "drwx------".
 fn long_listing(dir: String) -> String !{IO} =
@@ -318,5 +322,42 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "remove_dir_all clears the empty-prefix temp dir",
       outcome(fs.remove_dir_all(temp_c)), "ok")
     assert_eq(state, "a removed temp dir is gone", outcome(fs.stat(temp_a)), "not_found")
+
+    # --- the text pair, built on the byte pair ------------------------------
+    #
+    # An Err is "<path>: <reason>", so each failure below must name the path it was given.
+
+    let text_dir = result_with_default("", fs.make_temp_dir("sprout-fs-text-"))
+    let text_file = text_dir ++ "/t.txt"
+    assert_true(state, "a temp dir for the text pair", text_dir != "")
+
+    # CR, a blank line, no trailing newline and multi-byte text: nothing is translated.
+    let exact = "x\r\n\ncafé 日本"
+    assert_eq(state, "write_text writes the text", text_outcome(fs.write_text(text_file, exact)), "ok")
+    assert_eq(state, "read_text returns exactly what write_text wrote",
+      text_value(fs.read_text(text_file)), exact)
+    assert_eq(state, "write_text replaces what was there",
+      text_outcome(fs.write_text(text_file, "")), "ok")
+    assert_eq(state, "an empty file reads as the empty text", text_value(fs.read_text(text_file)), "")
+
+    let absent = text_dir ++ "/absent.txt"
+    assert_true(state, "read_text of a missing file is an Err naming the path",
+      string.contains(text_error(fs.read_text(absent)), absent))
+    assert_true(state, "read_text of a directory is an Err naming the path",
+      string.contains(text_error(fs.read_text(text_dir)), text_dir))
+    assert_true(state, "read_text of the path \"-\" is an ordinary lookup",
+      string.contains(text_error(fs.read_text(text_dir ++ "/-")), text_dir ++ "/-"))
+
+    let not_text = text_dir ++ "/bad.dat"
+    assert_eq(state, "a non-UTF-8 file is written for the next check",
+      outcome(fs.write_bytes(not_text, bytes.singleton(255))), "ok")
+    assert_true(state, "read_text of a non-UTF-8 file is an Err naming the path",
+      string.contains(text_error(fs.read_text(not_text)), not_text))
+
+    let no_parent = text_dir ++ "/no/such/dir/f.txt"
+    assert_true(state, "write_text into a missing directory is an Err naming the path",
+      string.contains(text_error(fs.write_text(no_parent, "x")), no_parent))
+
+    assert_eq(state, "remove_dir_all clears the text-pair dir", outcome(fs.remove_dir_all(text_dir)), "ok")
 
     summary(state)

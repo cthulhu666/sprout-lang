@@ -1,5 +1,6 @@
 module stdlib.fs
 
+import stdlib.bytes as bytes
 import stdlib.fs.path as path
 import stdlib.crypto as crypto
 import stdlib.env as env
@@ -20,24 +21,27 @@ import stdlib.string as string
 # a `type` here would have dropped stdlib.fs out of the REPL. That constraint is GONE — Fix A of
 # docs/repl-env-type-vocabulary-v0.md (`@type:` env markers) landed and retired it. Re-measured with
 # that document's own Appendix A probe: stdlib.fs loads clean with the declarations below.
-extern fn read_file(path: String) -> Result String String !{IO}
-extern fn write_file(path: String, content: String) -> Result String Unit !{IO}
-
-# The names say `text`, not `file`, because that is the real contract. `read_file` runs
-# `utf8_validate` over the whole buffer before it hands anything back (sprout_runtime.c) and
-# reports the decode failure as `Err` — so this pair genuinely cannot read a binary file, and the
-# name should say so rather than implying a general reader. It also leaves honest room for a
-# bytes-valued pair later; stdlib.process reached exactly that point with subprocess output (see
-# its header comment) once holding binary data in a `String` proved unusable.
+# The names say `text`, not `file`, because that is the real contract: `read_text` decodes the
+# whole file as UTF-8 and answers `Err` for a file that is not text, so this pair cannot read a
+# binary file. `read_bytes`/`write_bytes` below are the byte pair. Both are written over
+# `fs_read_bytes` / `fs_write_bytes`; the runtime has no String-valued file builtin.
 #
-# `Err` is a human-readable message, not a matchable code: `strerror(errno)` for an I/O failure,
-# the utf8_validate reason for a non-text file, or `"null path"` / `"out of memory"`. Do not
-# pattern-match its content.
+# `Err` is a human-readable message, not a matchable code: "<path>: <reason>" for an I/O failure
+# and for a file that is not valid UTF-8 text. Do not pattern-match its content. The
+# classified error is what `read_bytes` / `write_bytes` return. No path is special: "-" names a
+# file called `-`, and `terminal.read_stdin_text` reads stdin.
 export fn read_text(path: String) -> Result String String !{IO} =
-  read_file(path)
+  match fs_read_bytes(path) with
+  | Err e -> Err(fs_error_message(e))
+  | Ok raw ->
+      match bytes.to_string(raw) with
+      | Ok text -> Ok(text)
+      | Err (bytes.Utf8DecodeError reason) -> Err(path ++ ": " ++ reason)
 
 export fn write_text(path: String, content: String) -> Result String Unit !{IO} =
-  write_file(path, content)
+  match fs_write_bytes(path, bytes.from_string(content)) with
+  | Err e -> Err(fs_error_message(e))
+  | Ok _ -> Ok(())
 
 # ---------------------------------------------------------------------------
 # Listing, metadata, binary I/O, mutation

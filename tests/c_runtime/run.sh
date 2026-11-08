@@ -56,11 +56,11 @@ compile_sanitized() {
   fi
 }
 
-echo "==> c runtime: read_file keeps Ok payload alive under stress GC"
+echo "==> c runtime: fs_read_bytes keeps Ok payload alive under stress GC"
 printf "abcdef" > "$TMP_DIR/input.txt"
-compile_sanitized read_file_gc.c "$TMP_DIR/read_file_gc"
-ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$TMP_DIR/read_file_gc" "$TMP_DIR/input.txt" > "$TMP_DIR/read_file_gc.out"
-test "$(cat "$TMP_DIR/read_file_gc.out")" = "6"
+compile_sanitized fs_read_bytes_gc.c "$TMP_DIR/fs_read_bytes_gc"
+ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$TMP_DIR/fs_read_bytes_gc" "$TMP_DIR/input.txt" > "$TMP_DIR/fs_read_bytes_gc.out"
+test "$(cat "$TMP_DIR/fs_read_bytes_gc.out")" = "6"
 
 echo "==> c runtime: fs / io Strings leave headered (HDRCHECK)"
 mkdir "$TMP_DIR/fs_io"
@@ -105,13 +105,6 @@ if grep -q 'b->data = (unsigned char\*)realloc' "$ROOT/runtime/sprout_runtime.c"
   echo "proc_buf_append overwrites b->data with unchecked realloc" >&2
   exit 1
 fi
-
-echo "==> c runtime: read_file rejects invalid UTF-8 with Err"
-printf 'hello world\n' > "$TMP_DIR/utf8_good.txt"
-printf 'ab\xf0' > "$TMP_DIR/utf8_bad.txt"   # trailing truncated 4-byte lead
-compile read_file_utf8_validate.c "$TMP_DIR/read_file_utf8_validate" -O0 -g
-"$TMP_DIR/read_file_utf8_validate" "$TMP_DIR/utf8_good.txt" "$TMP_DIR/utf8_bad.txt" > "$TMP_DIR/read_file_utf8_validate.out"
-test "$(cat "$TMP_DIR/read_file_utf8_validate.out")" = "read_file-utf8-validated"
 
 echo "==> c runtime: SIGPIPE is ignored so broken-pipe writes return EPIPE"
 compile sigpipe_ignored.c "$TMP_DIR/sigpipe_ignored" -O0 -g

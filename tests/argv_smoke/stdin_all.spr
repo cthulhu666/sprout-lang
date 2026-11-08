@@ -1,0 +1,44 @@
+module main
+
+import stdlib.argv as argv
+import stdlib.terminal as terminal
+import stdlib.bytes as bytes
+
+# Reads all of stdin to EOF and prints the result. Run via `just argv-smoke`, which pipes the input
+# and picks the mode with argument 0.
+#
+#   bytes    terminal.read_stdin_bytes: `Ok <hex of every byte, 2 digits each>`, or `Err <message>`.
+#   text     terminal.read_stdin_text: `Ok <text>` or `Err <message>`.
+
+fn hex_digit(n: Int) -> String =
+  if n < 10 then int_to_string(n) else match n with
+    | 10 -> "a"
+    | 11 -> "b"
+    | 12 -> "c"
+    | 13 -> "d"
+    | 14 -> "e"
+    | _ -> "f"
+
+fn hex_byte(b: Int) -> String =
+  hex_digit(b / 16) ++ hex_digit(b - b / 16 * 16)
+
+fn hex(raw: Bytes, i: Int) -> String =
+  if i >= bytes.length(raw) then ""
+  else hex_byte(bytes.get_or(raw, i, 0)) ++ hex(raw, i + 1)
+
+fn mode_of(raw: Result bytes.Utf8Error (Maybe String)) -> String =
+  match raw with
+  | Ok (Just mode) -> mode
+  | _ -> "bytes"
+
+fn main() -> Unit !{IO} =
+  do
+    mode <- mode_of(argv.get(0))
+    if mode == "text" then
+      match terminal.read_stdin_text() with
+      | Ok text -> print("Ok " ++ text)
+      | Err msg -> print("Err " ++ msg)
+    else
+      match terminal.read_stdin_bytes() with
+      | Ok raw -> print("Ok " ++ hex(raw, 0))
+      | Err msg -> print("Err " ++ msg)

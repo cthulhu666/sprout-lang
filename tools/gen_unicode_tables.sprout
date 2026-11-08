@@ -283,7 +283,7 @@ fn write_conformance(repo: String, gbt: String) -> Unit !{IO} =
 fn write_file(path: String, text: String) -> Unit !{IO} =
   match fs.write_text(path, text) with
   | Ok _ -> ()
-  | Err msg -> panic(`gen_unicode_tables: cannot write ${path}: ${msg}`)
+  | Err msg -> panic(`gen_unicode_tables: cannot write ${msg}`)
 
 fn conformance_header() -> String =
   string.join("\n", [
@@ -359,7 +359,7 @@ fn conformance_body() -> String =
 fn read_or_die(dir: String, name: String) -> String !{IO} =
   match fs.read_text(dir ++ "/" ++ name) with
   | Ok text -> text
-  | Err e -> panic(`gen_unicode_tables: cannot read ${dir}/${name}: ${e}`)
+  | Err e -> panic(`gen_unicode_tables: cannot read ${e}`)
 
 fn write_tables(repo: String, eaw: String, dgc: String, gbp: String,
                 emo: String, dcp: String) -> Unit !{IO} =

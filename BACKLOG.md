@@ -1275,7 +1275,8 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   compile the session source with `fn main() -> Unit !{IO} = print(to_string(t2))` standalone.
 - [ ] `P3` **REPL completion reads modules relative to the cwd.** `repl.module_path` builds
   `stdlib/<m>.sprout` or `a/b/c.sprout` from the current directory, so a REPL started outside the
-  repo root panics on the first TAB (`prelude_completion_names`: "read_file: prelude"), while the
+  repo root panics on the first TAB (`prelude_completion_names`: "cannot read stdlib/prelude…"),
+  while the
   other two reads (`globals_of_module`, `dotted_completion_candidates`) silently offer nothing.
   Fix: resolve through the same stdlib root and `--package-root` the compiler session uses.
 - [ ] `P3` **A CRLF file reports every line number doubled.** `source.starts_line` says both `\r`
@@ -1645,6 +1646,11 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   cross-compiles to clean Win64 COFF, gated by `just windows-ir-gate`. `docs/windows-port-v0.md` is
   the authority: §5.1 is the resume point, §6 the measured W3 surface inventory, §4.3.1 the
   `WSAPoll` decision with the AFD/wepoll and IOCP re-open triggers.
+- [ ] `P3` **Windows stdin is text mode.** On Windows fd 0 starts in text mode: CRLF reads as LF
+  and ^Z ends input, unless `_setmode(_fileno(stdin), _O_BINARY)` runs first. Every stdin reader is
+  affected: `terminal.read_stdin_bytes`, `stdin_read_bytes` (LSP framing) and `term_read_avail`, so
+  "exact bytes" does not hold there. Fix once at startup in the runtime, with a test when W3 can
+  run a binary. Design: `docs/windows-port-v0.md` (stdin is not covered there yet).
 - [ ] `P2` **POSIX `<regex.h>` has no MSVC equivalent.** `sprout_runtime.c` stops on this include,
   so W3 waits on **A regex engine in Sprout**, which deletes it.
 - [ ] `P2` **`proc_run` on Windows via `CreateProcess`.** `fork`/`execv`/`pipe`, the helper thread

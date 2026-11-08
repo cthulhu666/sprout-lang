@@ -517,7 +517,7 @@ export fn resolve_instances(src: String, query: String, stdlib_root: source.Stdl
     | Err msg -> InstancesErr(msg)
     | Ok query_display_te ->
         match fs.write_text(probe_source_path, augment_probe_source(src, query)) with
-        | Err msg -> InstancesErr("instances_in_source: write_file: " ++ msg)
+        | Err msg -> InstancesErr("instances_in_source: cannot write " ++ msg)
         | Ok _ ->
             do
               result <- bundler.bundle_file(source.FilePath(probe_source_path), stdlib_root)
@@ -1016,7 +1016,7 @@ fn link_and_run_eval(ir_result: compiler.IrFullResult, state: StartupState) -> j
       ir_path = fspath.join(scratch.dir, "eval.ll")
       bin_path = fspath.join(scratch.dir, "eval_bin")
       Ok _ = fs.write_text(ir_path, ir_text)
-        else Err msg -> error_response("eval_expr_in_source: write_file: eval.ll: " ++ msg)
+        else Err msg -> error_response("eval_expr_in_source: cannot write " ++ msg)
       Ok use_darwin = use_darwin_frameworks(state_intake_ref(state))
         else Err msg -> error_response("eval_expr_in_source: " ++ msg)
       Ok _ = compile_runtime_and_link_eval(

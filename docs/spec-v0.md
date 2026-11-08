@@ -462,7 +462,7 @@ Built-in types:
 
 `Int` is a machine word integer; `Double` is an IEEE 754 double-precision float
 (§4.1). A `String` value is always valid UTF-8 and contains no NUL byte. Builtins
-that construct a `String` from raw external bytes (e.g. `read_file`) validate the
+that construct a `String` from raw external bytes (e.g. `bytes.to_string`) validate the
 input and report malformed content through their error channel rather than
 producing an invalid `String`. The process arguments, the environment and a
 terminal line arrive as `Bytes` (`argv_get_bytes`, `env_get_bytes`,

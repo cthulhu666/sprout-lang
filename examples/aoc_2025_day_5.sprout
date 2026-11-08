@@ -1,6 +1,6 @@
 module examples.aoc_2025_day_5
 import stdlib.string (split_once, string_lines, trim)
-import stdlib.fs as fs
+import stdlib.terminal as terminal
 import stdlib.sort (sort_by)
 
 # Advent of Code 2025 Day 5: Cafeteria
@@ -77,9 +77,9 @@ where
   fresh = normalized_ranges(db.ranges)
 
 export fn solve_stdin() -> Answers !{IO} =
-  match fs.read_text("-") with
+  match terminal.read_stdin_text() with
   | Ok content -> content |> parse_database |> solve_database
-  | Err msg -> panic("read_file: " ++ msg)
+  | Err msg -> panic("stdin: " ++ msg)
 
 fn main() -> Unit !{IO} =
   print(solve_stdin())

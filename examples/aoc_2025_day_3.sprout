@@ -1,6 +1,6 @@
 module examples.aoc_2025_day_3
 import stdlib.string (string_digits, string_lines)
-import stdlib.fs as fs
+import stdlib.terminal as terminal
 
 # Advent of Code 2025 Day 3: Battery Boost
 # For each bank line, pick digits in order to maximize the resulting number.
@@ -64,9 +64,9 @@ fn solve_banks(banks: Vec (Vec Int)) -> Answers =
   Answers(sum_for_count(2, banks), sum_for_count(12, banks))
 
 export fn solve_stdin() -> Answers !{IO} =
-  match fs.read_text("-") with
+  match terminal.read_stdin_text() with
   | Ok content -> content |> parse_banks |> solve_banks
-  | Err msg -> panic("read_file: " ++ msg)
+  | Err msg -> panic("stdin: " ++ msg)
 
 fn main() -> Unit !{IO} =
   print(solve_stdin())

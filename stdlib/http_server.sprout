@@ -867,7 +867,7 @@ export fn request_body_bytes(req: HttpRequest) -> Bytes =
 # This rejects rather than substituting U+FFFD, unlike `term_read_key`: there the value is a keypress
 # with no error channel and no possible recovery, while here the caller has both, and silently
 # mangling a body a handler may persist or forward is worse than making it decide. Consistent with
-# `bytes.to_string` and `read_file`, which also reject.
+# `bytes.to_string` and `fs.read_text`, which also reject.
 export fn request_body(req: HttpRequest) -> Result bytes.Utf8Error String =
   bytes.to_string(request_body_bytes(req))
 

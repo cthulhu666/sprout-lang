@@ -4137,90 +4137,6 @@ long long argv_get_bytes(long long index) {
   const char* arg = g_sprout_argv[index + 1];
   return sprout_just_bytes((const unsigned char*)arg, strlen(arg), "argv_get_bytes: out of memory");
 }
-/* Err(<String detail>) from a C string, copied to a managed String and rooted across the
- * make1. A caller that cleans up first saves errno before it and passes strerror(saved). */
-static long long sprout_err_text(const char* detail, const char* oom_ctx) {
-  long long msg = sprout_str_word(sprout_str_dup(detail, oom_ctx));
-  SPROUT_GC_PUSH_I64_LOCAL(msg);
-  long long out = sprout_make1(SPROUT_TAG(Err), msg);
-  SPROUT_GC_POP_LOCALS(1);
-  return out;
-}
-long long read_file(long long path_i) {
-  const char* path = (const char*)(uintptr_t)path_i;
-  if (path == NULL) return sprout_err_text("null path", "read_file: out of memory");
-  FILE* f = NULL;
-  int close_after = 0;
-  if (strcmp(path, "-") == 0) {
-    f = stdin;
-  } else {
-    f = cloexec_fopen(path, "rb");
-    if (f == NULL) return sprout_err_text(strerror(errno), "read_file: out of memory");
-    close_after = 1;
-  }
-  size_t cap = 4096;
-  size_t len = 0;
-  sprout_gc_maybe_collect_threshold();
-  char* out = (char*)malloc(cap);
-  if (out == NULL) {
-    if (close_after) fclose(f);
-    return sprout_err_text("out of memory", "read_file: out of memory");
-  }
-  char buf[4096];
-  while (1) {
-    size_t n = fread(buf, 1, sizeof(buf), f);
-    if (n > 0) {
-      while (len + n + 1 > cap) {
-        size_t new_cap = cap * 2;
-        char* grown = (char*)realloc(out, new_cap);
-        if (grown == NULL) {
-          if (close_after) fclose(f);
-          free(out);
-          return sprout_err_text("out of memory", "read_file: out of memory");
-        }
-        out = grown;
-        cap = new_cap;
-      }
-      memcpy(out + len, buf, n);
-      len += n;
-    }
-    if (n < sizeof(buf)) {
-      if (feof(f)) break;
-      if (ferror(f)) {
-        int e = errno;
-        if (close_after) fclose(f);
-        free(out);
-        return sprout_err_text(strerror(e), "read_file: out of memory");
-      }
-    }
-  }
-  if (close_after) fclose(f);
-  out[len] = '\0';
-  const char* utf8_reason = NULL;
-  if (!utf8_validate((const unsigned char*)out, len, &utf8_reason)) {
-    free(out);
-    return sprout_err_text(utf8_reason, "read_file: out of memory");
-  }
-  SproutStr text = sprout_str_adopt(out, len, "read_file: out of memory");
-  SPROUT_HANDLE(h_out, sprout_str_word(text));
-  return sprout_make1(SPROUT_TAG(Ok), sprout_handle_get(h_out));
-}
-long long write_file(long long path_i, long long content_i) {
-  const char *path    = (const char *)(uintptr_t)path_i;
-  const char *content = (const char *)(uintptr_t)content_i;
-  if (path == NULL) return sprout_err_text("null path", "write_file: out of memory");
-  if (content == NULL) return sprout_err_text("null content", "write_file: out of memory");
-  FILE *f = cloexec_fopen(path, "wb");
-  if (!f) return sprout_err_text(strerror(errno), "write_file: out of memory");
-  size_t len = strlen(content);
-  if (fwrite(content, 1, len, f) != len) {
-    int e = errno;
-    fclose(f);
-    return sprout_err_text(strerror(e), "write_file: out of memory");
-  }
-  fclose(f);
-  return sprout_make1(SPROUT_TAG(Ok), 0LL);
-}
 /* ---------------------------------------------------------------------------
  * stdlib.fs — directory listing, metadata, binary file I/O, and mutation.
  *
@@ -4229,9 +4145,8 @@ long long write_file(long long path_i, long long content_i) {
  * of names with metadata — is written in Sprout in stdlib/fs.sprout, where it is
  * testable. See docs/stdlib-fs-v0.md §4.1.
  *
- * `read_file` / `write_file` above stay as they are: they are the TEXT surface,
- * they validate UTF-8, and their error is an unmatchable String. The pair below
- * is the byte surface with a classified error, and the two coexist.
+ * `fs.read_text` / `fs.write_text` are written in Sprout over `fs_read_bytes` /
+ * `fs_write_bytes`; the runtime has no String-valued file builtin.
  * ------------------------------------------------------------------------- */
 
 /* errno -> the stdlib.fs.FsError constructor that classifies it.
@@ -4461,10 +4376,9 @@ long long fs_read_bytes(long long path_i) {
   return fs_ok(payload);
 }
 
-/* Result FsError Unit. The counterpart read_bytes cannot ship without: a String
- * is always valid UTF-8 with no NUL (spec-v0.md §64), so write_file cannot
- * express an arbitrary byte sequence and nothing else in the language can put
- * one in a file. */
+/* Result FsError Unit. A String is always valid UTF-8 with no NUL (spec-v0.md
+ * §64), so no String can carry an arbitrary byte sequence; this is how one gets
+ * into a file. fs.write_text is built on it. */
 long long fs_write_bytes(long long path_i, long long bytes_h) {
   const char* path = (const char*)(uintptr_t)path_i;
   long long rejected;
@@ -5169,7 +5083,7 @@ long long term_show_cursor(void) {
  * The invariant the abort protected — every returned String is valid UTF-8 — still
  * holds, but by construction (utf8_validate on the assembled bytes) rather than by
  * refusing to proceed. Note this is the OPPOSITE of the choice made for
- * bytes_to_utf8 / read_file / the http_server body, which reject; those return a
+ * bytes_to_utf8 (and so fs.read_text) / the http_server body, which reject; those return a
  * Result to a caller that can act on it, and this does not. */
 static int g_term_pending_byte = -1;
 

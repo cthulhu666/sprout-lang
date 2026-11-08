@@ -174,7 +174,7 @@ export fn stdlib_module_completion_names() -> Vec String =
 # `panic`, `int_to_string`, `str_len` and 40 others.
 export fn prelude_completion_names() -> Vec String !{IO} =
   match fs.read_text(module_path("stdlib.prelude")) with
-  | Err msg -> panic("read_file: prelude: " ++ msg)
+  | Err msg -> panic("cannot read " ++ msg)
   | Ok content ->
       match module_surface_names(content) with
       | (public, globals) -> append_names_from_vec(public, globals, 0)
