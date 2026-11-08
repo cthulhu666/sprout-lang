@@ -2,11 +2,9 @@
 # Shared helpers for the golden-IR scripts. Sourced, never executed.
 # Sourced by: ir_golden_diff.sh, ir_golden_snapshot.sh, spec_gate.sh, spec_corpus_check.sh.
 
-# <seconds> <command...>: run with a wall-clock limit; exit status 142 means it timed out.
-limited() {
-  local secs="$1"; shift
-  perl -e 'alarm shift; exec @ARGV or exit 127' "$secs" "$@"
-}
+# `limited` (wall-clock limit, exit 142 on timeout) lives in test_lib.sh.
+# shellcheck source=scripts/test_lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/test_lib.sh"
 
 # <path> -> golden file name. Strips $REPO_ROOT/ (only when set and non-empty) and a leading ./,
 # then joins every directory part with "__":
