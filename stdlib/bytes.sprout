@@ -3,6 +3,11 @@ module stdlib.bytes
 export type Utf8Error (..) =
   | Utf8DecodeError String
 
+# The decode failure's reason, as text.
+export fn utf8_error_message(err: Utf8Error) -> String =
+  match err with
+  | Utf8DecodeError msg -> msg
+
 extern fn bytes_singleton(val: Int) -> Bytes
 export extern fn bytes_length(b: Bytes) -> Int
 export extern fn bytes_get(b: Bytes, i: Int) -> Maybe Int

@@ -158,7 +158,7 @@ declare i64 @fs_rename(i64, i64)
 @.str.30 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1968, column 58)\00" }
 @.str.31 = private unnamed_addr constant { i64, [24 x i8] } { i64 376842, [24 x i8] c"str_byte_at: null input\00" }
 @.str.32 = private unnamed_addr constant { i64, [34 x i8] } { i64 540682, [34 x i8] c"str_byte_at: String has no header\00" }
-@.str.33 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 70, column 30)\00" }
+@.str.33 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 75, column 30)\00" }
 @__sprout_sclo.__sprout_ir_lambda_8 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_8 }
 @.str.34 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.35 = private unnamed_addr constant { i64, [45 x i8] } { i64 720906, [45 x i8] c"Int overflow in unary - (line 74, column 18)\00" }
@@ -12156,6 +12156,20 @@ define i64 @str_starts_with(i64 %p$s, i64 %p$prefix) {
 entry:
   %t$0 = add i64 0, 0
   %t$1 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %t$0, i64 %p$prefix)
+  ret i64 %t$1
+}
+
+define i64 @stdlib.bytes.utf8_error_message(i64 %p$err) {
+entry:
+  br label %arm_0_0
+arm_0_0:
+  %t$2 = call i64 @sprout_field(i64 %p$err, i64 0)
+  br label %join_0
+arm_1_0:
+  call void @sprout_abort_match()
+  unreachable
+join_0:
+  %t$1 = phi i64 [%t$2, %arm_0_0]
   ret i64 %t$1
 }
 
@@ -219379,7 +219393,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$3 = call i64 @__tc_Semigroup_String_append(i64 %t$0, i64 %t$2)
   %t$12 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$4 = call i64 @stdlib.fs.decode_reason(i64 %p$e)
+  %t$4 = call i64 @stdlib.bytes.utf8_error_message(i64 %p$e)
   %t$13 = alloca i64
   store i64 %t$3, ptr %t$13
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
@@ -219447,20 +219461,6 @@ join_2:
   %t$3 = phi i64 [%t$8, %body_0_2], [%t$12, %body_1_2]
   %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$3
-}
-
-define i64 @stdlib.fs.decode_reason(i64 %p$e) {
-entry:
-  br label %arm_0_0
-arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$e, i64 0)
-  br label %join_0
-arm_1_0:
-  call void @sprout_abort_match()
-  unreachable
-join_0:
-  %t$1 = phi i64 [%t$2, %arm_0_0]
-  ret i64 %t$1
 }
 
 define i64 @stdlib.fs.entry_kind(i64 %p$e) {
@@ -481995,7 +481995,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$3 = call i64 @__tc_Semigroup_String_append(i64 %t$0, i64 %t$2)
   %t$12 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$4 = call i64 @stdlib.fs.decode_reason(i64 %p$e)
+  %t$4 = call i64 @stdlib.bytes.utf8_error_message(i64 %p$e)
   %t$13 = alloca i64
   store i64 %t$3, ptr %t$13
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)

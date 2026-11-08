@@ -4188,19 +4188,18 @@ static long long fs_err_ctor_msg(long long ctor_tag, const char* detail) {
  * reaches a log line the caller's own path variable is usually long gone, and
  * "No such file or directory" on its own names nothing. */
 static long long fs_err_text(long long ctor_tag, const char* path, const char* what) {
-  char detail[1024];
-  int n = snprintf(detail, sizeof(detail), "%s: %s", path ? path : "(null path)", what);
-  if (n >= (int)sizeof(detail)) {
-    /* Truncated: drop a codepoint cut in half, as the text must stay valid UTF-8. */
-    size_t kept = sizeof(detail) - 1;
-    size_t lead = kept;
-    while (lead > 0 && ((unsigned char)detail[lead - 1] & 0xC0) == 0x80) lead--;
-    if (lead > 0) {
-      lead--;
-      if (!utf8_valid((const unsigned char*)detail + lead, kept - lead)) detail[lead] = '\0';
-    }
-  }
-  return fs_err_ctor_msg(ctor_tag, detail);
+  /* Sized to fit, so a long path never costs the reason. `path` is a Sprout String and `what`
+   * is strerror text or a literal, both valid UTF-8, so the joined text is too. The text is
+   * built before any GC allocation, and fs_err_ctor_msg copies it into a managed String. */
+  const char* shown = path ? path : "(null path)";
+  size_t need = strlen(shown) + 2 + strlen(what) + 1;
+  char* detail = (char*)malloc(need);
+  /* No memory for the joined text: the reason alone, rather than a trap. */
+  if (detail == NULL) return fs_err_ctor_msg(ctor_tag, what);
+  snprintf(detail, need, "%s: %s", shown, what);
+  long long out = fs_err_ctor_msg(ctor_tag, detail);
+  free(detail);
+  return out;
 }
 
 static long long fs_err(int err, const char* path) {
