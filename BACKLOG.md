@@ -1275,10 +1275,9 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   but a run is manual and gated by nothing, so the numbers drift. 2026-11-08, `just test` inputs
   only: compiler 96.7% of functions (4291/4437), stdlib 87.0% (2594/2980), C runtime 66.5% of
   lines (was 95.7%, 86.9%, 65.9% on 2026-11-01). Least covered: `http_server`'s serve loop and
-  `net` (only `task-io-smoke` runs them), `repl`, the scheduler's fd-timeout parks, 50
-  poller/net runtime functions (`http_request*`, `tcp_accept`), `infer.concrete_typeexpr`
-  (reachable, never entered). Fix: tests for the gaps; decide whether to run `just coverage` on a
-  schedule.
+  `net` (only `task-io-smoke` runs them), `repl`, 50 poller/net runtime functions
+  (`http_request*`, `tcp_accept`), `infer.concrete_typeexpr` (reachable, never entered). Fix:
+  tests for the gaps; decide whether to run `just coverage` on a schedule.
 - [ ] `P3` **Suite headers cite machinery that is gone.** 24 suites describe the retired IR
   migration (`--use-ir-codegen`, `IR_XFAIL`, "direct codegen") and 9 cite the deleted
   `codegen.sprout`. A reader trusts a header to say what the suite guards. Fix: rewrite or drop
