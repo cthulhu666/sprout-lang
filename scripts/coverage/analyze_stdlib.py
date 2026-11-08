@@ -1,29 +1,13 @@
 """Stdlib coverage from the sancov-instrumented test binaries (stdlib/compiler/ide unit tests + conformance/run)."""
-import sys, os, glob, json, collections, struct
+import sys, os, glob, json, collections
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from covlib import *
 
 C = COV
 R = f"{C}/stdlib_run"
 OUT = f"{C}/results"; os.makedirs(OUT, exist_ok=True)
-
-def decode_bits(pcs_path, nm_path, flags):
-    raw = open(pcs_path, "rb").read()
-    n = len(raw) // 16
-    recs = struct.unpack(f"<{2*n}Q", raw)
-    addr2name = {}
-    for line in open(nm_path):
-        parts = line.split(None, 2)
-        if len(parts) == 3:
-            nm = parts[2].strip(); nm = nm[1:] if nm.startswith("_") else nm
-            addr2name.setdefault(int(parts[0], 16), nm)
-    out = {}; cur = None
-    for i in range(n):
-        pc, fl = recs[2*i], recs[2*i+1]
-        if fl & 1:
-            cur = addr2name.get(pc, f"?0x{pc:x}"); out[cur] = []
-        out[cur].append(1 if flags[i] else 0)
-    return out
+# --names-only: write stdlib_executed_names.json (which analyze_compiler.py reads) and stop; skips the .ll parse and the report.
+NAMES_ONLY = "--names-only" in sys.argv[1:]
 
 status = {}
 for st in glob.glob(f"{R}/work/*/status"):
@@ -48,7 +32,7 @@ for idx, (kind, s, f) in sorted(status.items(), key=lambda kv: int(kv[0])):
     if not fl:
         nodata.append((f, s))
     bits = decode_bits(f"{W}/t.pcs", f"{W}/t.nm", acc)
-    funcs, _ = parse_ll(f"{W}/t.ll")
+    funcs = {} if NAMES_ONLY else parse_ll(f"{W}/t.ll")[0]
     for name, bl in bits.items():
         if name.startswith("main.") or name.startswith("?"):
             continue
@@ -64,6 +48,8 @@ print(f"test inputs {len(status)}; no binary/pcs {len(nobin)}; ran but no flags 
 for f, s in nobin: print("  no-binary", s, f)
 for f, s in nodata: print("  no-data", s, f)
 json.dump(sorted(entered), open(f"{OUT}/stdlib_executed_names.json", "w"))
+if NAMES_ONLY:
+    sys.exit(0)
 
 src = all_source_fns(compiler=False)
 ir_names = set(blocks)
@@ -82,8 +68,7 @@ for name in blocks:
     e["entered"] |= bool(entered.get(name))
     e["tests"] |= entered.get(name, set())
     e["instrs"] += instrs.get(name, 0)
-    nb, bl = max(blocks[name].items(), key=lambda kv: kv[0])  # largest variant shape
-    # use the shape seen in the most binaries is not tracked; take the OR within the largest shape
+    nb, bl = max(blocks[name].items(), key=lambda kv: kv[0])  # the largest variant shape is used
     e["nb"] += nb; e["nbc"] += sum(bl)
 for q, v in src.items():
     if q not in fn:
@@ -108,7 +93,6 @@ for b, e in fn.items():
     p["srcl_cov"] += src.get(b, (0, 0, 0))[2] if e["entered"] else 0
 T = collections.Counter()
 for p in per.values(): T.update(p)
-def pct(a, b): return f"{100*a/b:5.1f}%" if b else "  n/a"
 L = []
 L.append("STDLIB (non-compiler stdlib/**/*.sprout incl. prelude; executed by test binaries)")
 L.append(f"  function-level: {T['cov']}/{T['fns']} = {pct(T['cov'],T['fns'])}   (denominator = source top-level fns + emitted instance methods; {T['ne']} never emitted in any test binary)")

@@ -118,7 +118,6 @@ for r in rows:
 T = collections.Counter()
 for p in per.values(): T.update(p)
 
-def pct(a, b): return f"{100*a/b:5.1f}%" if b else "  n/a"
 lines = []
 lines.append(f"COMPILER (instrumented compiler process, all `just test` invocations)")
 lines.append(f"  function-level (emitted named fns+instance methods, variants collapsed): {T['cov']}/{T['fns']} = {pct(T['cov'],T['fns'])}")
