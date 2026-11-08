@@ -1166,7 +1166,8 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   followed by `SUITE PASSED` — an apparent pass that executed no assertions. Only the full
   `just test` runner sets the variable, so the trap is specific to fast iteration, which is exactly
   when a green is trusted. Fix: set it in `_test-file`, or make the guard fail loudly. A skip that
-  reports success is the worst of the three options.
+  reports success is the worst of the three options. `_test-file` also skips `opt --passes=verify`,
+  which `_test-stdlib` runs, so it can pass IR that `just test` rejects.
 - [ ] `P3` **IR tests — the lex→parse→check→lower→compile helper is pasted into 13 suites.**
   `translate_source` is defined in 8 of the `tests/stdlib/test_ir_codegen_*.spr` files and 5 under
   `tests/stdlib/compiler/` (`test_ir_*.spr`, `test_scalar_global_no_root.spr`); 7 of them also
@@ -1270,13 +1271,14 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 - [ ] `P3` **`tests/stdlib/test_stamped.spr:33` asserts nothing.** Its "two chains from the start
   agree" check is `check_eq(..., v.origin, v.origin)`, a value compared with itself. Compare the
   two chains' origins, as the label says.
-- [ ] `P3` **No coverage tooling.** Measured once (2026-11-01, `just test` only): compiler 95.7% of
-  functions, stdlib 86.9%, C runtime 65.9% of lines. Method: instrument the compiler's IR with
-  `opt -passes=sancov-module,pgo-instr-gen,instrprof` and swap it in for stage 1; the same per
-  test binary; the runtime with `-fprofile-instr-generate -fcoverage-mapping`. Least covered:
-  `http_server`'s serve loop and `net` (only `task-io-smoke` runs them), `repl`, the scheduler's
-  fd-timeout parks, 41 poller/net runtime functions, `infer.concrete_typeexpr` (reachable, never
-  entered). Fix: a `just coverage` recipe, then tests for the gaps.
+- [ ] `P3` **Coverage gaps from `just coverage`.** The tool exists (`scripts/coverage/README.md`)
+  but a run is manual and gated by nothing, so the numbers drift. 2026-11-08, `just test` inputs
+  only: compiler 96.7% of functions (4291/4437), stdlib 87.0% (2594/2980), C runtime 66.5% of
+  lines (was 95.7%, 86.9%, 65.9% on 2026-11-01). Least covered: `http_server`'s serve loop and
+  `net` (only `task-io-smoke` runs them), `repl`, the scheduler's fd-timeout parks, 50
+  poller/net runtime functions (`http_request*`, `tcp_accept`), `infer.concrete_typeexpr`
+  (reachable, never entered). Fix: tests for the gaps; decide whether to run `just coverage` on a
+  schedule.
 - [ ] `P3` **Suite headers cite machinery that is gone.** 24 suites describe the retired IR
   migration (`--use-ir-codegen`, `IR_XFAIL`, "direct codegen") and 9 cite the deleted
   `codegen.sprout`. A reader trusts a header to say what the suite guards. Fix: rewrite or drop
