@@ -11,7 +11,7 @@ export type ScramError (..) =
   | ScramBase64Error String
   | ScramBytesError String
 
-export type ScramServerFirst (..) =
+export type ScramServerFirst =
   | ScramServerFirst String String String Int
 
 type alias ScramResult a = Result ScramError a
@@ -68,30 +68,29 @@ fn attr_value(raw: String, key: String) -> Maybe String =
 # through the `ScramInvalidIterationCount` message.
 let scram_max_iterations: Int = 1000000
 
-# The one place the bound is stated. Used at parse and again in `hi`, which a hand-built
-# `ScramServerFirst` reaches without parsing.
+# The one place the bound is stated. `parse_server_first` is the only way to build a
+# `ScramServerFirst`, so the bound normally holds by construction; `hi` checks again as a
+# backstop, because it is where the hashing happens.
 fn check_iteration_count(n: Int) -> ScramResult Int =
   if n <= 0 then Err(ScramInvalidIterationCount("SCRAM iteration count must be positive"))
   else if n > scram_max_iterations then
     Err(ScramInvalidIterationCount(`SCRAM iteration count ${to_string(n)} exceeds the limit ${to_string(scram_max_iterations)}`))
   else Ok(n)
 
-# parse_int is total (Maybe Int): non-digits, negatives and digit runs past Int range are Nothing.
-fn parse_positive_int(raw: String) -> ScramResult Int =
+# parse_int is total (Maybe Int): non-digits and digit runs past Int range are Nothing.
+# It accepts a leading '-', so negatives and zero are rejected by `check_iteration_count`.
+fn parse_iteration_count(raw: String) -> ScramResult Int =
   if string.is_empty(raw) then Err(ScramInvalidIterationCount("SCRAM iteration count cannot be empty"))
-  else scram_int_result(parse_int(raw))
-
-fn scram_int_result(m: Maybe Int) -> ScramResult Int =
-  match m with
-  | Just n -> check_iteration_count(n)
-  | Nothing -> Err(ScramInvalidIterationCount("SCRAM iteration count must be decimal digits"))
+  else
+    let Just n = parse_int(raw) else Err(ScramInvalidIterationCount("SCRAM iteration count must be decimal digits"))
+    in check_iteration_count(n)
 
 export fn parse_server_first(raw: String) -> ScramResult ScramServerFirst =
   let Just nonce = attr_value(raw, "r") else Err(ScramInvalidMessage("SCRAM server-first message missing nonce"))
       Just salt_b64 = attr_value(raw, "s") else Err(ScramInvalidMessage("SCRAM server-first message missing salt"))
       Just iterations_raw = attr_value(raw, "i") else Err(ScramInvalidMessage("SCRAM server-first message missing iteration count"))
   in
-    match parse_positive_int(iterations_raw) with
+    match parse_iteration_count(iterations_raw) with
     | Err err -> Err(err)
     | Ok iterations -> Ok(ScramServerFirst(raw, nonce, salt_b64, iterations))
 
@@ -148,9 +147,8 @@ where
   current = crypto.hmac_sha256(password, previous)
 
 fn hi(password: Bytes, salt: Bytes, iterations: Int) -> ScramResult Bytes =
-  match check_iteration_count(iterations) with
-  | Err err -> Err(err)
-  | Ok _ -> hi_loop(password, first, iterations - 1, first)
+  let _ = try check_iteration_count(iterations)
+  in hi_loop(password, first, iterations - 1, first)
 where
   first = crypto.hmac_sha256(password, bytes.append(salt, bytes.u32_be(1)))
 
