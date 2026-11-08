@@ -2,10 +2,13 @@
 # Runs ON the benchmark VM (Ubuntu, normal user with passwordless sudo); started by bench_vm.sh.
 #
 #   BENCH_ROUNDS=9 bash bench_vm_remote.sh base.tar head.tar <base-sha> <head-sha>
+#   bash bench_vm_remote.sh --gc tree.tar <sha> <arms> [ab.sh args...]
 #
-# Builds A from base's committed seed and runtime and B from head's: each tree's own compiler,
-# codegen and runtime ABI, as that tree ships them. Then checks their IR, times both compiling
-# base's compiler, and writes ~/results.txt.
+# Compiler mode builds A from base's committed seed and runtime and B from head's: each tree's own
+# compiler, codegen and runtime ABI, as that tree ships them. Then checks their IR, times both
+# compiling base's compiler, and writes ~/results.txt.
+# --gc builds the one tree's compiler from its seed and runs its bench/gc_minor/ab.sh with
+# `-a <arms>`, writing ~/gc_out.tgz (results.tsv, runs/, build.log, env.txt; no binaries).
 set -euo pipefail
 
 # ── parsing helpers (unit-tested by scripts/test_bench_vm.sh) ───────────────
@@ -50,9 +53,81 @@ alloc_table() {
     END { for (i = 1; i <= n; i++) printf "%-16s %14s %14s\n", order[i], v[1, order[i]], v[2, order[i]] }' "$1" "$2"
 }
 
+install_packages() { # install_packages [extra apt packages...]
+  echo "==> installing packages"
+  # A fresh image runs apt jobs in the background: they hold the dpkg lock and load the machine.
+  sudo systemctl stop unattended-upgrades.service apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+  sudo apt-get -o DPkg::Lock::Timeout=300 update -qq
+  sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -qq clang llvm time "$@"
+  LLVM_BINDIR="$(ls -d /usr/lib/llvm-*/bin 2>/dev/null | sort -V | tail -n1 || true)"
+  if [ -n "$LLVM_BINDIR" ]; then PATH="$LLVM_BINDIR:$PATH"; fi
+  export PATH
+}
+
+# Emitted IR needs a clang that lowers __int128 returns as i128; without it the results skew.
+check_clang() { # check_clang <tree>
+  echo "==> checking clang"
+  (cd "$1" && bash scripts/check_clang_cpr.sh)
+}
+
+# A tree's compiler from its committed seed and its runtime, as that tree ships them.
+build_seed_compiler() { # build_seed_compiler <tree> <out>
+  clang "$1/bootstrap/compile_driver.ll" "$1"/runtime/*.c -O2 -o "$2"
+}
+
+# The builds load the machine themselves; let the 1-minute average settle before timing.
+wait_load_settle() {
+  echo "==> waiting for load to settle"
+  for _ in $(seq 1 24); do
+    if awk '{ exit !($1 <= 0.5) }' /proc/loadavg; then break; fi
+    sleep 5
+  done
+}
+
+# ── --gc: one tree, bench/gc_minor/ab.sh with named env arms ─────────────────
+# galaxy_client needs raylib and a display: UNSUNS and CATALOG point nowhere, so ab.sh drops it.
+gc_main() { # gc_main <tree.tar> <sha> <arms> [ab.sh args...]
+  local tar="$1" sha="$2" arms="$3" out="$HOME/gc_out" rc=0
+  shift 3
+  cd "$HOME"
+  install_packages python3 perl
+  echo "==> extracting"
+  rm -rf tree "$out" gc_out.tgz
+  mkdir tree "$out"
+  tar -xf "$tar" -C tree
+  check_clang tree
+  echo "==> building the compiler from the seed"
+  mkdir -p tree/build
+  build_seed_compiler tree tree/build/compile_driver_bin_stage1
+  wait_load_settle
+  {
+    echo "sha   $sha"
+    echo "cpus  $(nproc)"
+    echo "model $(lscpu | awk -F: '/Model name/ { gsub(/^ +/, "", $2); print $2; exit }')"
+    echo "uname $(uname -r)"
+    echo "clang $(clang --version | head -n1)"
+    echo "load before $(cut -d' ' -f1-3 /proc/loadavg)"
+    echo "arms  $arms"
+    echo "args  $*"
+  } > "$out/env.txt"
+  echo "==> ab.sh"
+  (cd tree && UNSUNS=/nonexistent CATALOG=/nonexistent bash bench/gc_minor/ab.sh -a "$arms" -o "$out" "$@") || rc=$?
+  echo "load after  $(cut -d' ' -f1-3 /proc/loadavg)" >> "$out/env.txt"
+  tar -C "$out" --exclude=./bin -czf "$HOME/gc_out.tgz" .
+  echo "==> wrote $HOME/gc_out.tgz (ab.sh exit $rc)"
+  return "$rc"
+}
+
 if [ -n "${BENCH_REMOTE_LIB_ONLY:-}" ]; then return 0; fi
 
 # ── main ─────────────────────────────────────────────────────────────────────
+if [ "${1:-}" = "--gc" ]; then
+  shift
+  : "${1:?tree tarball}" "${2:?sha}" "${3:?arms}"
+  gc_main "$@"
+  exit $?
+fi
+
 BASE_TAR="${1:?base tarball}"
 HEAD_TAR="${2:?head tarball}"
 BASE_SHA="${3:?base sha}"
@@ -60,14 +135,7 @@ HEAD_SHA="${4:?head sha}"
 ROUNDS="${BENCH_ROUNDS:-9}"
 
 cd "$HOME"
-echo "==> installing packages"
-# A fresh image runs apt jobs in the background: they hold the dpkg lock and load the machine.
-sudo systemctl stop unattended-upgrades.service apt-daily.timer apt-daily-upgrade.timer apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
-sudo apt-get -o DPkg::Lock::Timeout=300 update -qq
-sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -qq clang llvm time
-LLVM_BINDIR="$(ls -d /usr/lib/llvm-*/bin 2>/dev/null | sort -V | tail -n1 || true)"
-if [ -n "$LLVM_BINDIR" ]; then PATH="$LLVM_BINDIR:$PATH"; fi
-export PATH
+install_packages
 
 echo "==> extracting"
 rm -rf base head
@@ -75,13 +143,11 @@ mkdir base head
 tar -xf "$BASE_TAR" -C base
 tar -xf "$HEAD_TAR" -C head
 
-# Emitted IR needs a clang that lowers __int128 returns as i128; without it both sides skew.
-echo "==> checking clang"
-(cd base && bash scripts/check_clang_cpr.sh)
+check_clang base
 
 echo "==> building A (base's seed and runtime) and B (head's)"
-clang base/bootstrap/compile_driver.ll base/runtime/*.c -O2 -o A
-clang head/bootstrap/compile_driver.ll head/runtime/*.c -O2 -o B
+build_seed_compiler base A
+build_seed_compiler head B
 
 echo "==> IR identity"
 IR_LINES=""
@@ -103,12 +169,7 @@ run_timed() { # run_timed <A|B> <time-file>
   fi
 }
 
-# The builds above load the machine themselves; let the 1-minute average settle before timing.
-echo "==> waiting for load to settle"
-for _ in $(seq 1 24); do
-  if awk '{ exit !($1 <= 0.5) }' /proc/loadavg; then break; fi
-  sleep 5
-done
+wait_load_settle
 
 echo "==> timing ($ROUNDS interleaved rounds)"
 LOAD_BEFORE="$(cut -d' ' -f1-3 /proc/loadavg)"

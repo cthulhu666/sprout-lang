@@ -2,7 +2,8 @@
 
 `just bench-vm <base-ref> <head-ref>` compares two commits of the compiler on a throwaway GCE VM,
 where nothing else runs. It is for wall-clock questions a laptop cannot answer. It is not a gate:
-the numbers are timings, and the run costs money.
+the numbers are timings, and the run costs money. `just bench-vm-gc` runs the GC A/B harness on
+the same kind of VM for one ref: see [GC A/B mode](#gc-ab-mode-just-bench-vm-gc).
 
 ## What it measures
 
@@ -73,3 +74,48 @@ The report goes to `build/bench-vm/<vm-name>/results.txt` and is printed. Plain 
   use min and max to judge the spread, and rerun with more `BENCH_ROUNDS` when they overlap.
 - The allocation table, A against B. Counts are exact and repeat; a counter that moves is real
   whatever the timings say.
+
+## GC A/B mode (`just bench-vm-gc`)
+
+```
+just bench-vm-gc <ref> "<arms>" [<ab.sh args>...]
+scripts/bench_vm.sh --gc <ref> "<arms>" [<ab.sh args>...]
+```
+
+Runs `bench/gc_minor/ab.sh` of **one** ref on the VM. `<arms>` is ab.sh's `-a` syntax,
+`"<label>:ENV=V[,ENV=V...];<label>:..."`; ab.sh adds a minor-off baseline to every round. The
+other args go to ab.sh as they are (`-n 6 -w selfcompile,mutvec_int`, `-s`, `-e`). Example:
+
+```
+just bench-vm-gc HEAD "s50:SPROUT_GC_NURSERY_SHARE=0.5,SPROUT_GC_REGION_LISTS=1;rl:SPROUT_GC_REGION_LISTS=1" -n 6
+```
+
+Config, VM flags, TTL, trap and leftover check are the compiler mode's. Differences:
+
+- **Shipped from the ref's commit:** the seed, `runtime/`, `stdlib/`, `testsupport/`,
+  `scripts/check_clang_cpr.sh`, `scripts/link_whole_program.sh`, `bench/gc_minor`, `bench/gc_roots`,
+  `bench/http_log_middleware`, `bench/math_transcendental`, `examples/{nqueens,astar}.sprout`,
+  `examples/digit_recognizer` (it reads its data files) and
+  `tests/stdlib/test_ir_codegen_match.spr`. `scripts/test_bench_vm.sh` checks that every `W_SRC` in
+  ab.sh is in that list.
+- **On the VM:** apt installs `clang llvm time python3 perl`; the stage-1 compiler is built from
+  the ref's seed by the same steps as the compiler mode (`scripts/bench_vm_remote.sh --gc`). No
+  `just` or `mise`: ab.sh builds each workload with the stage-1 compiler and
+  `scripts/link_whole_program.sh` directly, which is what `just compile-native` does.
+- **ab.sh runs on Linux** (`/usr/bin/time -v`, `/proc/loadavg`, `sha1sum` when there is no
+  `shasum`). The ref must contain that version: a ref whose ab.sh still says "macOS only" is
+  refused before any `gcloud` call.
+- **galaxy_client is not run:** it needs raylib and a display. `-w` naming it is refused before any
+  `gcloud` call. Without `-w`, ab.sh's default set reaches the VM and drops it with a warning
+  (`UNSUNS` and `CATALOG` point nowhere there).
+- **Not accepted:** `-a` (the arms are the second argument), `-o` and `-B` (the output dir is
+  fixed, the VM is fresh), and a malformed arm or `-n`: exit 2 before any `gcloud` call.
+- **TTL:** 120 minutes by default (about 20 for packages and builds, the rest for the runs, which
+  scale with arms x workloads x `-n`); `BENCH_TTL` overrides it. `BENCH_ROUNDS` does not apply.
+
+Results land in `build/bench-vm/<vm-name>/` (`BENCH_OUT_DIR`): `results.tsv`, `runs/` (each run's
+stdout, GC log and `time` report), `build.log`, `env.txt` (SHA, CPU, kernel, clang, load before and
+after, the arms and args), and `summary.md`, which the script makes by running the ref's
+`bench/gc_minor/summarize.py` on `results.tsv` locally. It prints the path of `summary.md`. The
+workload binaries are not copied back. If ab.sh fails on the VM, what it wrote is still fetched
+(no `summary.md`) and the script exits with ab.sh's status.

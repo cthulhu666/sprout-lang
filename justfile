@@ -91,6 +91,13 @@ bench-keep-alive: bootstrap-from-seed
 bench-vm base head:
   bash scripts/bench_vm.sh {{quote(base)}} {{quote(head)}}
 
+# GC A/B (bench/gc_minor/ab.sh) of ONE ref on the same kind of VM, with named env arms:
+# `just bench-vm-gc <ref> "s50:SPROUT_GC_NURSERY_SHARE=0.5;rl:SPROUT_GC_REGION_LISTS=1" -n 6 -w nqueens`.
+# Extra args go to ab.sh. Same config and cleanup as bench-vm; docs/bench-vm.md.
+[group('dev')]
+bench-vm-gc ref arms *args:
+  bash scripts/bench_vm.sh --gc {{quote(ref)}} {{quote(arms)}} {{args}}
+
 # Launch the interactive Sprout REPL via sproutd (self-configuring).
 # Prerequisites: just build-sproutd
 [group('dev')]
