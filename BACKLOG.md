@@ -1053,11 +1053,8 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 
 ### 6.5) OS and Process Primitives
 
-- [ ] `P2` **Relocate `read_file`/`write_file` out of the prelude.** They are
-  globally available but belong in a namespaced module; `stdlib.fs` settled where the namespace goes
-  (`list_dir`/`path_join`/`path_exists`/`delete_file` already landed there, so they are off this
-  list). Migration touches every stdlib and example caller, needs a stage-0/stage-1 rebuild, and
-  needs a call on whether to keep prelude re-exports. Also the home for `make_temp_file`.
+- [ ] `P3` **`fs.make_temp_file`.** `make_temp_dir` exists; a temp file is made today by creating
+  a temp dir and writing into it. A file-level call would hold the same exclusive-create rule.
 - [ ] `P2` **`proc_shell(cmd: String) -> ProcResult !{IO}`** in `stdlib.process`, when a concrete
   use case requires pipes, redirects or glob. `proc_run` covers all current needs. Implementation is
   `argv = ["/bin/sh", "-c", cmd]` through `proc_run_with`.
@@ -1646,6 +1643,11 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   cross-compiles to clean Win64 COFF, gated by `just windows-ir-gate`. `docs/windows-port-v0.md` is
   the authority: §5.1 is the resume point, §6 the measured W3 surface inventory, §4.3.1 the
   `WSAPoll` decision with the AFD/wepoll and IOCP re-open triggers.
+- [ ] `P3` **Open fds 0-2 at startup.** A program started with stdin, stdout or stderr closed
+  hands the next fd the runtime opens (kqueue/epoll, a socket) that number, so code that treats
+  fd 0 as stdin acts on it: `terminal.read_stdin_bytes` aborts in `sprout_poll_add`. Prior art:
+  Rust std's unix `init` reopens a closed fd 0-2 on /dev/null (`sanitize_standard_fds`). Fix in
+  runtime startup, with a smoke that runs a stdin reader under `<&-`.
 - [ ] `P3` **Windows stdin is text mode.** On Windows fd 0 starts in text mode: CRLF reads as LF
   and ^Z ends input, unless `_setmode(_fileno(stdin), _O_BINARY)` runs first. Every stdin reader is
   affected: `terminal.read_stdin_bytes`, `stdin_read_bytes` (LSP framing) and `term_read_avail`, so

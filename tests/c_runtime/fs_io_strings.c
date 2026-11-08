@@ -29,7 +29,7 @@ long long vector_length(long long vec);
 long long vector_get(long long vec, long long index);
 
 enum { ERR = 1, OK = 2, JUST = 3, NOTHING = 4, CONS = 5, NIL = 6, FS_NOT_FOUND = 7,
-       FS_INVALID_PATH = 8 };
+       FS_INVALID_PATH = 8, FS_IO_ERROR = 9 };
 
 static long long W(const char* p) { return (long long)(uintptr_t)p; }
 
@@ -60,6 +60,7 @@ int main(int argc, char** argv) {
   sprout_register_ctor(NIL, "Nil", 0, "");
   sprout_register_ctor(FS_NOT_FOUND, "stdlib.fs.FsNotFound", 1, "s");
   sprout_register_ctor(FS_INVALID_PATH, "stdlib.fs.FsInvalidPath", 1, "s");
+  sprout_register_ctor(FS_IO_ERROR, "stdlib.fs.FsIoError", 1, "s");
 
   char path[1024];
   const char* dir = argv[1];
@@ -94,6 +95,25 @@ int main(int argc, char** argv) {
   long long bytes = fs_read_bytes(W(path));
   if (sprout_tag(bytes) != OK || bytes_length(sprout_field(bytes, 0)) != 7)
     return fail("fs_read_bytes did not return the 7 bytes");
+
+  /* fs_read_bytes sizes its buffer from st_size, so a sparse file of 2^50 bytes (more than any
+   * 47-bit address space holds) makes malloc fail: the out-of-memory Err must name the path like
+   * every other fs_* Err. Skipped where the filesystem refuses a file that large (ext4 caps files
+   * at 16 TiB, so this runs on APFS and tmpfs). */
+  snprintf(path, sizeof path, "%s/huge.sparse", dir);
+  FILE* huge = fopen(path, "wb");
+  if (huge != NULL) {
+    int sized = ftruncate(fileno(huge), (off_t)1 << 50) == 0;
+    fclose(huge);
+    if (sized) {
+      char want[1100];
+      snprintf(want, sizeof want, "%s: out of memory", path);
+      long long r = fs_read_bytes(W(path));
+      if (!is_fs_err(r, FS_IO_ERROR, want))
+        return fail("fs_read_bytes out-of-memory Err does not name the path");
+    }
+    unlink(path);
+  }
 
   /* read_int_lines: a vector of the parsed lines. */
   snprintf(path, sizeof path, "%s/ints.txt", dir);

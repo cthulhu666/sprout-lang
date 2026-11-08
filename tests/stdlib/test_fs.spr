@@ -96,9 +96,10 @@ fn byte_count(r: Result fs.FsError Bytes) -> Int =
 
 # `read_text` / `write_text` are written in Sprout over `fs_read_bytes` / `fs_write_bytes`; the
 # round trip below and the "text pair" block at the end are the direct tests of that layer. The
-# externs they sit on are invisible to the module system (bundler.sprout:597 drops ExternFnDecl),
-# so a wrong import graph does not produce a scoping diagnostic: it produces `Unknown variable`
-# from the typechecker or an undefined symbol at link time.
+# externs they sit on are invisible to the module system: in `bundler.add_decl_to_symbols` the
+# `ast.ExternFnDecl` arm contributes no module symbol and only records the name in
+# `extern_names`. So a wrong import graph does not produce a scoping diagnostic: it produces
+# `Unknown variable` from the typechecker or an undefined symbol at link time.
 
 # First line of `ls -ld <dir>`: the file type and permission bits, e.g. "drwx------".
 fn long_listing(dir: String) -> String !{IO} =

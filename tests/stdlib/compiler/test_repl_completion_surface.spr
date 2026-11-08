@@ -29,7 +29,7 @@ fn stdlib_root() -> String !{IO} =
 
 fn read_module(root: String, leaf: String) -> String !{IO} =
   match fs.read_text(root ++ "/" ++ leaf ++ ".sprout") with
-  | Err msg -> panic("read_file: " ++ leaf ++ ": " ++ msg)
+  | Err msg -> panic("cannot read " ++ msg)
   | Ok content -> content
 
 fn offered(name: String, names: Vec String) -> Bool =

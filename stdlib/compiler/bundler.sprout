@@ -405,8 +405,8 @@ fn unresolved_issue(importer: String, spec: module_loader.ImportSpec, stdlib_roo
 # A module that resolved to a path but could not be read. The entry has no import to blame.
 fn unreadable_issue(path: String, edge: Maybe ImportEdge, msg: String, stdlib_root: String) -> LoadIssue !{IO} =
   match edge with
-  | Nothing -> LoadIssue(path, no_pos(), `cannot read ${path}: ${msg}`)
-  | Just e -> import_issue(e.importer, e.spec, `cannot read ${path}: ${msg}`, stdlib_root)
+  | Nothing -> LoadIssue(path, no_pos(), `cannot read ${msg}`)
+  | Just e -> import_issue(e.importer, e.spec, `cannot read ${msg}`, stdlib_root)
 
 fn remove_str_from_list(s: String, lst: List String) -> List String =
   match lst with
@@ -782,7 +782,7 @@ fn prelude_module(stdlib_root: String, load_env: LoadEnv) -> (Maybe LoadIssue, M
   do
     let path = prelude_path(stdlib_root)
     match module_source(path, load_env) with
-    | Err msg -> (Just(LoadIssue(path, no_pos(), `cannot read the prelude ${path}: ${msg}`)), Nothing)
+    | Err msg -> (Just(LoadIssue(path, no_pos(), `cannot read the prelude ${msg}`)), Nothing)
     | Ok src ->
         match memoised_module(path, src, load_env) with
         | Just mod -> (Nothing, Just(mod))

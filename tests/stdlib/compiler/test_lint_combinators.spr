@@ -22,7 +22,7 @@ fn stdlib_root() -> String !{IO} =
 
 fn read_prelude(root: String) -> String !{IO} =
   match fs.read_text(root ++ "/prelude.sprout") with
-  | Err msg -> panic("read_file: prelude.sprout: " ++ msg)
+  | Err msg -> panic("cannot read " ++ msg)
   | Ok content -> content
 
 fn named(name: String, cs: List lint_rules.Combinator) -> Maybe lint_rules.Combinator =

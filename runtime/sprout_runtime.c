@@ -4347,7 +4347,10 @@ long long fs_read_bytes(long long path_i) {
   size_t cap = (S_ISREG(st.st_mode) && st.st_size > 0) ? (size_t)st.st_size + 1 : 4096;
   size_t len = 0;
   unsigned char* buf = (unsigned char*)malloc(cap);
-  if (buf == NULL) { close(fd); return fs_err_ctor_msg(SPROUT_TAG(stdlib$fs$FsIoError), "out of memory"); }
+  if (buf == NULL) {
+    close(fd);
+    return fs_err_text(SPROUT_TAG(stdlib$fs$FsIoError), path, "out of memory");
+  }
 
   while (1) {
     if (len == cap) {
@@ -4355,7 +4358,7 @@ long long fs_read_bytes(long long path_i) {
       unsigned char* grown = (unsigned char*)realloc(buf, grown_cap);
       if (grown == NULL) {
         free(buf); close(fd);
-        return fs_err_ctor_msg(SPROUT_TAG(stdlib$fs$FsIoError), "out of memory");
+        return fs_err_text(SPROUT_TAG(stdlib$fs$FsIoError), path, "out of memory");
       }
       buf = grown;
       cap = grown_cap;
