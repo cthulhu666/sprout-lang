@@ -601,8 +601,9 @@ for sel in walked_young free_count no_double_list region_release large_young lin
 done
 
 echo "==> c runtime: promotion age, the remembered rule and the nursery rule, and GENCHECK aborts on an unremembered old->young edge"
-# promote_age.c includes sprout_runtime.c (like young_sweep.c). The corrupting cases and the bad
-# switch values must abort with their message: a check that tests nothing fails here.
+# promote_age.c includes sprout_runtime.c (like young_sweep.c). The corrupting cases, the retired
+# switches and the bad share values must abort with their message: a check that tests nothing
+# fails here.
 PA="$TMP_DIR/promote_age"
 clang "$ROOT/tests/c_runtime/promote_age.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
   "${CLANG_EXTRA[@]}" -O0 -g ${SAN[@]+"${SAN[@]}"} -o "$PA"
@@ -628,11 +629,16 @@ grep -q "owner: kind=REF .* field=0" "$TMP_DIR/pa_unremembered_edge.err" || {
 expect_abort major_bit13 "GENCHECK: remembered bit set before a major" bad_major_bit13
 expect_abort major_set "GENCHECK: remembered set not empty before a major" bad_major_set
 expect_abort stray_bit13 "GENCHECK: remembered bits differ from the remembered set" bad_stray_bit13
-expect_abort bad_k0 "SPROUT_GC_PROMOTE_AGE: expected integer in \[1, 15\]" bad_env SPROUT_GC_PROMOTE_AGE 0
-expect_abort bad_k16 "SPROUT_GC_PROMOTE_AGE: expected integer in \[1, 15\]" bad_env SPROUT_GC_PROMOTE_AGE 16
-expect_abort bad_kx "SPROUT_GC_PROMOTE_AGE: expected integer in \[1, 15\]" bad_env SPROUT_GC_PROMOTE_AGE x
-expect_abort bad_nursery "SPROUT_GC_NURSERY: expected 0 or 1" bad_env SPROUT_GC_NURSERY 2
-for sel in age2 age3 age_large major_age remember set_before_major major_rule nursery_sizing nursery_pinned nursery_floor_before_major nursery_floor_binds census_age; do
+# A retired switch aborts at startup with a removal message, at any value and with minors off too.
+expect_abort retired_age "SPROUT_GC_PROMOTE_AGE was removed: promotion age is fixed at 3" bad_env SPROUT_GC_PROMOTE_AGE 2
+expect_abort retired_nursery "SPROUT_GC_NURSERY was removed: .*SPROUT_GC_NURSERY_SHARE" bad_env SPROUT_GC_NURSERY 1
+expect_abort retired_survive "SPROUT_GC_NURSERY_SURVIVE was removed: the survivor floor is fixed at 2" bad_env SPROUT_GC_NURSERY_SURVIVE 4
+expect_abort retired_minors_off "SPROUT_GC_PROMOTE_AGE was removed" bad_env SPROUT_GC_MINOR 0 SPROUT_GC_PROMOTE_AGE 2
+SHARE_MSG="SPROUT_GC_NURSERY_SHARE: expected a number in (0, 4]"
+expect_abort bad_share_abc "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE abc
+expect_abort bad_share_0 "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE 0
+expect_abort bad_share_5 "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE 5
+for sel in age2 age3 age_large major_age remember set_before_major major_rule defaults nursery_sizing nursery_share_half nursery_small_heap nursery_min_binds nursery_pinned nursery_floor_before_major nursery_floor_binds nursery_survive nursery_survive_major nursery_survive_off minors_off share_read share_ignored_minors_off census_age; do
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$PA" "$sel" > "$TMP_DIR/pa_$sel.out" 2> "$TMP_DIR/pa_$sel.err" || {
     echo "  promote_age '$sel' failed:" >&2
     cat "$TMP_DIR/pa_$sel.out" "$TMP_DIR/pa_$sel.err" >&2

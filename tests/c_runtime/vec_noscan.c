@@ -147,13 +147,13 @@ static int push_out(void) {
   return g_failed;
 }
 
-/* Make a rooted vector old: the first collection is a major, which keeps the colour bit. */
+/* Make a rooted vector old: majors keep the colour bit, so promote_age of them promote it. */
 static long long make_old_vec(int flag) {
   long long v = make_vec(4, 0, flag);
   g_a = (void*)(uintptr_t)v;
   root(&g_a);
-  collect_major();
-  check(is_old(v), "a survivor of a major is old");
+  age_to_old(v, collect_major);
+  check(is_old(v), "a survivor of promote_age majors is old");
   check(g_gen.remembered.len == 0, "nothing is remembered yet");
   return v;
 }

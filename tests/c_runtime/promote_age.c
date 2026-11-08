@@ -1,14 +1,14 @@
-/* Promotion age, the remembered rule and the nursery rule (docs/gc-stage2-v0.md §5.1, §5.2, §6),
+/* Promotion age, the remembered rule and the nursery rule (docs/gc-stage2-v0.md §5.1, §5.5, §6),
  * driven directly with minor collections on and SPROUT_GC_GENCHECK=1, which adds the young-bitmap,
  * count, premise-3 and live-prediction checks after every sweep.
  *
  * Collection is explicit: the threshold is zeroed after each one (the trigger's result is kept in
- * g_thr and g_heap first), so only `collect` runs the collector.  With SPROUT_GC_PROMOTE_AGE=K
- * the first collection is a major, which keeps colour; a survivor stays young until its age
- * before a sweep is at least K-1.
+ * g_thr and g_heap first), so only `collect` runs the collector.  The promotion age K is
+ * g_gen.promote_age (default 3); a case sets it directly.  The first collection is a major, which
+ * keeps colour; a survivor stays young until its age before a sweep is at least K-1.
  *
  *   age_seq        — a rooted Ref is young after the first K-1 collections and old after the Kth:
- *                    colour, youngmap bit, region counts.  Run at K = 2 and 3.
+ *                    colour, youngmap bit, region counts.  Run at K = 2 and the default 3.
  *   age_large      — the same for a large object.
  *   major_age      — a major's colour-keeping sweep promotes only at age >= K-1.
  *   remember       — a store into a young Ref (no barrier), whose parent is then promoted while
@@ -17,9 +17,12 @@
  *   set_before_major — when the next collection is a major the set is empty and no header
  *                    carries bit 13, and the child is still alive after that major.
  *   major_rule     — the 2x rule reads the heap count: young survivors count toward a major.
- *   nursery_*      — the next collection runs heap + max(base, baseline x 2) allocations on; a
- *                    pinned threshold turns the rule off; the footprint floor is a lower bound before a major
- *                    and at the major.
+ *   defaults       — the shipped defaults: K=3, share 1.0, survivor floor 2.0, nursery rule on.
+ *   nursery_*      — with minors on the target is max(base, heap + max(s x heap, c x m, base /
+ *                    factor)); a pinned threshold turns the rule off; the footprint floor is a
+ *                    lower bound before a major and at the major (§5.5).  Run at K=1.
+ *   minors_off     — SPROUT_GC_MINOR=0 ignores the nursery rule: heap x factor, as before.
+ *   share_*        — SPROUT_GC_NURSERY_SHARE is read with minors on and ignored with them off.
  *   census_age     — at K=3 the live census counts a young survivor once and drops one that dies.
  *   bad_*          — each aborts with a message the caller checks.
  *
@@ -37,7 +40,7 @@ static void* g_keep2;
 static void* g_doom;      /* permanent root: a chain that census_age drops */
 static long long g_thr;   /* the threshold the last collection chose */
 static long long g_heap;  /* the heap count after it */
-static int g_k = 1;       /* the case's promotion age */
+static int g_k;           /* the case's promotion age */
 
 static void collect(void) {
   sprout_gc_collect_with_reason("threshold");
@@ -192,29 +195,165 @@ static int major_rule(void) {
 
 static long long imax(long long a, long long b) { return a > b ? a : b; }
 
-/* N=1, K=1.  3000 survive the major; a minor that keeps 1500 more picks heap + 2 x baseline. */
+/* The floor on the nursery is base / factor; the target is floored at the base (§5.5 cause 2). */
+static long long nursery_min(void) { return (long long)((double)g_gc_threshold_base / g_gc_adapt_factor); }
+
+/* The target the nursery rule picks after a collection: the nursery is the larger of s x heap and
+ * c x m, floored at nursery_min; the target is floored at the base.  Before the footprint floor
+ * and the cap. */
+static long long nursery_target(void) {
+  double raw = g_gen.nursery_share * (double)g_heap;
+  double surv = g_gen.nursery_survive * (double)g_gen.last_minor_marked;
+  if (surv > raw) raw = surv;
+  return imax(g_gc_threshold_base, g_heap + imax((long long)raw, nursery_min()));
+}
+
+static long long footprint_floor(void) { return g_heap + (g_heap + g_gc_freelist_len) / g_gc_footprint_k; }
+
+/* The shipped defaults, at the default K=3: minors on, s = 1.0, c = 2.0, and the rule is live. */
+static int defaults(void) {
+  register_roots();
+  check(g_gen.on == 1, "minor collections are on");
+  check(g_gen.promote_age == 3, "the promotion age is 3");
+  check(g_gen.nursery_share == 1.0 && g_gen.nursery_survive == 2.0, "s = 1.0 and c = 2.0");
+  extend_chain(3000);
+  collect();
+  extend_chain(1500);
+  collect();
+  check(g_gen.n_minor == 1, "the second collection is a minor");
+  check(g_thr == nursery_target(), "the threshold is the nursery rule's target");
+  check(g_thr > 2 * g_heap, "c x m (young survivors at K=3) raised the nursery above the share");
+  return g_failed;
+}
+
+/* N=1, K=1.  3000 survive the major, a minor keeps 1500 more: heap 4500, nursery 4500 x share.
+ * With c = 0 and s = 1 the next threshold is twice the heap; s = 0.5 gives 1.5 times. */
 static int nursery_sizing(void) {
   register_roots();
   extend_chain(3000);
   collect();
-  check(g_gen.baseline == 3000, "the baseline is the live count after the major");
   extend_chain(1500);
   garbage_refs(500);
   collect();
   check(g_gen.n_minor == 1, "the second collection is a minor");
   check(g_heap == 4500, "the heap holds the old and the young survivors");
-  check(g_thr == g_heap + imax(g_gc_threshold_base, 3000 * 2),
-        "the next collection runs heap + baseline x (factor - 1) allocations on");
-  /* A small baseline: the floor is g_gc_threshold_base. */
-  g_chain = NULL;
-  sprout_gc_collect_with_reason("atexit");  /* a major: the chain dies */
+  check(g_gen.nursery_survive * (double)g_gen.last_minor_marked <= g_gen.nursery_share * (double)g_heap,
+        "the share is the larger term here");
+  check(g_thr == g_heap + (long long)(g_gen.nursery_share * (double)g_heap),
+        "the nursery is the share of the heap");
+  check(g_thr == nursery_target(), "that is the rule's target");
+  check(g_gen.baseline == 3000, "the baseline does not enter");
+  return g_failed;
+}
+
+/* A small live set: the target is floored at the threshold base, not the nursery, so the next
+ * collection does not run heap + base allocations on (§5.5 cause 2). */
+static int nursery_small_heap(void) {
+  register_roots();
   extend_chain(100);
-  sprout_gc_collect_with_reason("atexit");  /* a major: baseline 100 */
-  g_gc_threshold = 0;
+  collect();                               /* the major */
+  check(g_gen.baseline == 100 && g_heap == 100, "100 objects are live");
+  check(g_thr == g_gc_threshold_base, "a small heap gets exactly the threshold base");
+  check(g_thr == nursery_target(), "that is the rule's target");
   garbage_refs(10);
+  collect();                               /* a minor */
+  check(g_gen.n_minor == 1, "the second collection is a minor");
+  check(g_thr == g_gc_threshold_base, "and so does the minor");
+  return g_failed;
+}
+
+/* The nursery is floored at base / factor: 100 live at the major, then a minor keeps 3400 more.
+ * A 10% share (350) falls below 1365; c = 0 here. */
+static int nursery_min_binds(void) {
+  register_roots();
+  extend_chain(100);
+  collect();                               /* the major: baseline 100 */
+  extend_chain(3400);
+  collect();                               /* a minor; the heap is past 2 x baseline: a major is next */
+  check(g_gen.n_minor == 1 && g_heap == 3500, "a minor kept 3400 young survivors");
+  check(footprint_floor() < g_heap + nursery_min(), "the footprint floor is below the target here");
+  check(g_thr == g_heap + 1365, "the nursery is floored at base / factor");
+  check(g_thr > g_gc_threshold_base, "and the target is above the base");
+  return g_failed;
+}
+
+/* The survivor floor (§5.5): 3000 survive the major, a minor keeps 1500 young survivors (m).
+ * With s = 0.5 and c = 4, c x m beats s x heap (6000 > 2250): the next threshold is
+ * heap + c x m.  With c = 0 (nursery_survive_off) the rule is the share alone. */
+static int nursery_survive(void) {
+  register_roots();
+  extend_chain(3000);
   collect();
-  check(g_gen.baseline == 100, "the baseline follows the last major");
-  check(g_thr == g_heap + g_gc_threshold_base, "a small baseline sizes the nursery at the threshold base");
+  check(g_gen.last_minor_marked == 0, "a major leaves m at 0");
+  extend_chain(1500);
+  garbage_refs(500);
+  collect();
+  check(g_gen.n_minor == 1, "the second collection is a minor");
+  check(g_gen.last_minor_marked == g_gc_marked_count && g_gen.last_minor_marked > 0,
+        "m is the marked count of the minor that just finished");
+  if (g_gen.nursery_survive > 0.0) {
+    check(g_gen.nursery_survive * (double)g_gen.last_minor_marked > g_gen.nursery_share * (double)g_heap,
+          "c x m beats s x heap here");
+    check(g_thr == imax(g_gc_threshold_base,
+                        g_heap + (long long)(g_gen.nursery_survive * (double)g_gen.last_minor_marked)),
+          "the threshold is heap + c x m");
+  } else {
+    check(g_thr == g_heap + (long long)(g_gen.nursery_share * (double)g_heap), "c = 0: the share alone");
+  }
+  check(g_thr == nursery_target(), "that is the rule's target");
+  return g_failed;
+}
+
+/* A major leaves m alone: the threshold after a major uses the last minor's count, not the
+ * major's (the whole live set).  EVERY=1: major, minor, major. */
+static int nursery_survive_major(void) {
+  register_roots();
+  extend_chain(3000);
+  collect();                               /* the major */
+  extend_chain(1500);
+  collect();                               /* a minor: m = its marked count */
+  long long m = g_gen.last_minor_marked;
+  check(g_gen.n_minor == 1 && m > 0, "a minor set m");
+  collect();                               /* the major */
+  check(g_gen.n_major == 2, "the third collection is a major");
+  check(g_gc_marked_count > m, "the major marked more than the minor");
+  check(g_gen.last_minor_marked == m, "the major did not change m");
+  check(footprint_floor() < nursery_target(), "the floor is below heap + nursery here");
+  check(g_thr == nursery_target(), "the major's threshold uses the minor's m");
+  check(g_thr < g_heap + (long long)(g_gen.nursery_survive * (double)g_gc_marked_count),
+        "and not the major's marked count");
+  return g_failed;
+}
+
+/* SPROUT_GC_MINOR=0 ignores the nursery rule: the threshold is heap x factor, then the footprint
+ * floor, as before the nursery rule existed. */
+static int minors_off(void) {
+  register_roots();
+  check(g_gen.on == 0, "minor collections are off");
+  extend_chain(3000);
+  collect();
+  check(g_gen.n_minor == 0 && g_gen.n_major == 0, "no collection is a generational one");
+  long long want = imax(imax(g_gc_threshold_base, (long long)((double)g_heap * g_gc_adapt_factor)),
+                        footprint_floor());
+  check(g_thr == want, "the threshold is heap x factor");
+  check(g_thr != nursery_target(), "and not the nursery rule's target");
+  return g_failed;
+}
+
+/* SPROUT_GC_NURSERY_SHARE is read with minors on: s = 2 doubles the nursery. */
+static int share_read(void) {
+  register_roots();
+  check(g_gen.nursery_share == 2.0, "the share is read");
+  extend_chain(3000);
+  collect();
+  check(g_thr == g_heap + 2 * g_heap, "the nursery is 2 x the heap");
+  return g_failed;
+}
+
+/* ...and ignored with minors off: a bad value does not abort and the share stays at its default. */
+static int share_ignored_minors_off(void) {
+  check(g_gen.on == 0, "minor collections are off");
+  check(g_gen.nursery_share == 1.0, "a bad share is not read");
   return g_failed;
 }
 
@@ -230,14 +369,6 @@ static int nursery_pinned(void) {
         "a pinned threshold keeps heap x factor");
   return g_failed;
 }
-
-/* Heap + nursery, the nursery sized from the baseline at the last major. */
-static long long nursery_target(void) {
-  long long nursery = (long long)((double)g_gen.baseline * (g_gc_adapt_factor - 1.0));
-  return g_heap + imax(nursery, g_gc_threshold_base);
-}
-
-static long long footprint_floor(void) { return g_heap + (g_heap + g_gc_freelist_len) / g_gc_footprint_k; }
 
 /* The collection before a major and the major size the next one by heap + nursery, not
  * heap x factor, when that exceeds the footprint floor. */
@@ -366,29 +497,41 @@ static int bad_major_set(void) {
 typedef struct {
   const char* name;
   int (*fn)(void);
-  int k;               /* SPROUT_GC_PROMOTE_AGE */
-  int nursery;         /* SPROUT_GC_NURSERY */
+  int k;               /* g_gen.promote_age, set after startup; 0 keeps the default */
+  int minor;           /* SPROUT_GC_MINOR */
   const char* every;   /* SPROUT_GC_MAJOR_EVERY */
   const char* thr;     /* SPROUT_GC_THRESHOLD, or NULL */
+  const char* share;   /* SPROUT_GC_NURSERY_SHARE, or NULL */
+  double survive;      /* g_gen.nursery_survive (c), set after startup; < 0 keeps the default */
 } AgeCase;
 
 static const AgeCase k_cases[] = {
-  { "age2",                      age_seq,                     2, 0, "1000", NULL },
-  { "age3",                      age_seq,                     3, 0, "1000", NULL },
-  { "age_large",                 age_large,                   2, 0, "1000", NULL },
-  { "major_age",                 major_age,                   3, 0, "1",    NULL },
-  { "remember",                  remember,                    2, 0, "1000", NULL },
-  { "set_before_major",          set_before_major,            2, 0, "1",    NULL },
-  { "major_rule",                major_rule,                  2, 0, "1000", NULL },
-  { "nursery_sizing",            nursery_sizing,              1, 1, "1000", NULL },
-  { "nursery_pinned",            nursery_pinned,              1, 1, "1000", "5000" },
-  { "nursery_floor_before_major", nursery_floor_before_major, 1, 1, "1",    NULL },
-  { "nursery_floor_binds",       nursery_floor_binds,         1, 1, "1",    NULL },
-  { "census_age",                census_age,                  3, 0, "1000", NULL },
-  { "bad_unremembered_edge",    bad_unremembered_edge,       2, 0, "1000", NULL },
-  { "bad_major_bit13",           bad_major_bit13,             2, 0, "1",    NULL },
-  { "bad_major_set",             bad_major_set,               2, 0, "1",    NULL },
-  { "bad_stray_bit13",           bad_stray_bit13,             2, 0, "1000", NULL },
+  { "age2",                      age_seq,                     2, 1, "1000", NULL, NULL, -1 },
+  { "age3",                      age_seq,                     0, 1, "1000", NULL, NULL, -1 },
+  { "age_large",                 age_large,                   2, 1, "1000", NULL, NULL, -1 },
+  { "major_age",                 major_age,                   0, 1, "1",    NULL, NULL, -1 },
+  { "remember",                  remember,                    2, 1, "1000", NULL, NULL, -1 },
+  { "set_before_major",          set_before_major,            2, 1, "1",    NULL, NULL, -1 },
+  { "major_rule",                major_rule,                  2, 1, "1000", NULL, NULL, -1 },
+  { "defaults",                  defaults,                    0, 1, "1000", NULL, NULL, -1 },
+  { "nursery_sizing",            nursery_sizing,              1, 1, "1000", NULL, NULL, -1 },
+  { "nursery_share_half",        nursery_sizing,              1, 1, "1000", NULL, "0.5", 0 },
+  { "nursery_small_heap",        nursery_small_heap,          1, 1, "1000", NULL, NULL, -1 },
+  { "nursery_min_binds",         nursery_min_binds,           1, 1, "1000", NULL, "0.1", 0 },
+  { "nursery_pinned",            nursery_pinned,              1, 1, "1000", "5000", NULL, -1 },
+  { "nursery_floor_before_major", nursery_floor_before_major, 1, 1, "1",   NULL, NULL, -1 },
+  { "nursery_floor_binds",       nursery_floor_binds,         1, 1, "1",    NULL, NULL, -1 },
+  { "nursery_survive",           nursery_survive,             1, 1, "1000", NULL, "0.5", 4 },
+  { "nursery_survive_major",     nursery_survive_major,       1, 1, "1",    NULL, "0.5", 4 },
+  { "nursery_survive_off",       nursery_survive,             1, 1, "1000", NULL, NULL, 0 },
+  { "minors_off",                minors_off,                  1, 0, "1000", NULL, NULL, -1 },
+  { "share_read",                share_read,                  1, 1, "1000", NULL, "2", -1 },
+  { "share_ignored_minors_off",  share_ignored_minors_off,    1, 0, "1000", NULL, "abc", -1 },
+  { "census_age",                census_age,                  0, 1, "1000", NULL, NULL, -1 },
+  { "bad_unremembered_edge",     bad_unremembered_edge,       2, 1, "1000", NULL, NULL, -1 },
+  { "bad_major_bit13",           bad_major_bit13,             2, 1, "1",    NULL, NULL, -1 },
+  { "bad_major_set",             bad_major_set,               2, 1, "1",    NULL, NULL, -1 },
+  { "bad_stray_bit13",           bad_stray_bit13,             2, 1, "1000", NULL, NULL, -1 },
 };
 
 int main(int argc, char** argv) {
@@ -396,8 +539,9 @@ int main(int argc, char** argv) {
   const AgeCase* c = NULL;
   for (size_t i = 0; i < sizeof k_cases / sizeof k_cases[0]; i++)
     if (strcmp(argv[1], k_cases[i].name) == 0) c = &k_cases[i];
-  /* bad_env <var> <value>: a bad switch value aborts at startup, before anything runs. */
-  int bad_env = strcmp(argv[1], "bad_env") == 0 && argc == 4;
+  /* bad_env <var> <value> [<var> <value>]: a bad switch value aborts at startup, before anything
+   * runs. */
+  int bad_env = strcmp(argv[1], "bad_env") == 0 && (argc == 4 || argc == 6);
   if (!c && !bad_env) return 2;
   setenv("SPROUT_GC_MINOR", "1", 1);
   setenv("SPROUT_GC_GENCHECK", "1", 1);
@@ -406,20 +550,24 @@ int main(int argc, char** argv) {
   unsetenv("SPROUT_GC_STRESS");
   unsetenv("SPROUT_GC_AGEPROF");
   unsetenv("SPROUT_GC_THRESHOLD");
+  unsetenv("SPROUT_GC_PROMOTE_AGE");
+  unsetenv("SPROUT_GC_NURSERY");
+  unsetenv("SPROUT_GC_NURSERY_SHARE");
+  unsetenv("SPROUT_GC_NURSERY_SURVIVE");
   if (bad_env) {
-    setenv(argv[2], argv[3], 1);
+    for (int i = 2; i + 1 < argc; i += 2) setenv(argv[i], argv[i + 1], 1);
     sprout_set_argv(argc, argv);
     fprintf(stderr, "bad_env: no abort\n");
     return 1;
   }
-  char buf[16];
-  snprintf(buf, sizeof buf, "%d", c->k);
-  setenv("SPROUT_GC_PROMOTE_AGE", buf, 1);
-  setenv("SPROUT_GC_NURSERY", c->nursery ? "1" : "0", 1);
+  setenv("SPROUT_GC_MINOR", c->minor ? "1" : "0", 1);
+  if (c->share) setenv("SPROUT_GC_NURSERY_SHARE", c->share, 1);
   setenv("SPROUT_GC_MAJOR_EVERY", c->every, 1);
   if (c->thr) setenv("SPROUT_GC_THRESHOLD", c->thr, 1);
-  g_k = c->k;
   sprout_set_argv(argc, argv);  /* reads the switches, as a compiled program's main does */
+  if (c->k) g_gen.promote_age = (unsigned)c->k;
+  if (c->survive >= 0.0) g_gen.nursery_survive = c->survive;
+  g_k = (int)g_gen.promote_age;
   g_gc_threshold = 0;
   if (c->fn() || g_failed) return 1;
   printf("promote-age-%s\n", c->name);

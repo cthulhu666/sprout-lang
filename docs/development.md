@@ -145,7 +145,7 @@ All variables are read at program startup; invalid values abort with a message.
 
 | Variable | Default | Description |
 |---|---|---|
-| `SPROUT_GC_THRESHOLD` | `4096` | Managed heap node count that triggers a mid-execution collection. Positive integer to override; `off` or `0` to collect only at exit. Setting it turns the footprint floor (below) off, so the value forces collections at the rate it names. |
+| `SPROUT_GC_THRESHOLD` | `4096` | Managed heap node count that triggers a mid-execution collection. Positive integer to override; `off` or `0` to collect only at exit. Setting it turns the footprint floor (below) and the nursery rule off, so the value forces collections at the rate it names. |
 | `SPROUT_DEBUG_GC` | off | Set to `1` / `true` / `yes` to log each GC cycle to stderr: `[sprout gc] cycle=N reason=X threshold=N heap_before=N heap_after=N live=N roots=N marked=N alloc_since_gc=N swept=N elapsed_us=N arena_regions=N overflow_regions=N walked=N free=N`. `arena_regions`/`overflow_regions` report how many live regions sit inside the reserved arena versus outside it (see below). `walked` counts the slots the sweep stepped over, so `walked - live - swept` is the FREE slots it walked and reclaimed nothing from — sweep cost the trigger cannot see. Under `SPROUT_GC_LINEAGE=1` it also includes every POISON corpse ([debugging.md](debugging.md)). `free` is the freelist length after the sweep, which the footprint floor reads. |
 
 **Region arena** — 1-MiB regions are carved from a contiguous `mmap(PROT_NONE)` *reservation* of
@@ -159,11 +159,22 @@ Full rationale and measurements in [gc-arena-lookup-v0.md](gc-arena-lookup-v0.md
 |---|---|---|
 | `SPROUT_GC_ARENA_MB` | `4096` | Reserved address space in MiB. Costs no physical memory — RSS is driven by committed chunks, not by this number. Halves on `mmap` failure down to 1 MiB. Set `0` to disable the arena entirely and send every region to `malloc` (the pre-arena behaviour). |
 
-**Adaptive threshold** — after each collection the trigger is re-based on the *live* set:
-`threshold = max(live × SPROUT_GC_ADAPT_FACTOR, SPROUT_GC_THRESHOLD)`, capped by
-`SPROUT_GC_ADAPT_CAP`. This keeps the heap (hence RSS) proportional to live data: it rises for
-genuinely live-heavy heaps, avoiding GC thrash, and falls again when the working set shrinks.
-Set `SPROUT_GC_ADAPT_RATIO=0` to disable and freeze the threshold.
+**Adaptive threshold** — after each collection the trigger is re-based on the *live* set, so the
+heap (hence RSS) stays proportional to live data: it rises for genuinely live-heavy heaps,
+avoiding GC thrash, and falls again when the working set shrinks. Two regimes, capped by
+`SPROUT_GC_ADAPT_CAP`. Set `SPROUT_GC_ADAPT_RATIO=0` to disable both and freeze the threshold.
+
+- **Minor collections on (the default): the nursery rule.** The next collection runs after
+  `max(s × heap, 2 × m, base / factor)` more allocations, and the target is at least `base`
+  (`SPROUT_GC_THRESHOLD`'s default). `heap` is the object count after the sweep, `m` the objects
+  the last minor marked, `factor` is `SPROUT_GC_ADAPT_FACTOR`, and s is `SPROUT_GC_NURSERY_SHARE`.
+  The `2 × m` term keeps the nursery larger than the data still being built, so a minor does not
+  promote it early. Setting `SPROUT_GC_THRESHOLD` pins the threshold and the rule is off.
+- **`SPROUT_GC_MINOR=0`:** `threshold = max(live × SPROUT_GC_ADAPT_FACTOR, SPROUT_GC_THRESHOLD)`.
+  The factor governs here; read it as the garbage budget below.
+
+Design and measurements: [gc-stage2-v0.md](gc-stage2-v0.md) §5.5 and
+[the results](../bench/results-2026-11-08-gc-nursery-share.md).
 
 **Footprint floor** — a sweep walks free slots as well as live ones, and one survivor keeps a
 region's free slots in every later walk. So the threshold is also at least
@@ -176,14 +187,16 @@ data grows can hold several times the memory (§6.2.1); `SPROUT_GC_ADAPT_CAP` bo
 part of the adaptive re-base, so `SPROUT_GC_ADAPT_RATIO=0` turns it off too, as does setting
 `SPROUT_GC_THRESHOLD`.
 
-Read the factor as a **garbage budget**: `(factor − 1) × live` objects of garbage are tolerated
-before the next collection. Raising it trades RSS for time, and only for programs whose live set
-exceeds `SPROUT_GC_THRESHOLD / factor` — smaller programs sit on the floor and are unaffected.
+With `SPROUT_GC_MINOR=0`, read the factor as a **garbage budget**: `(factor − 1) × live` objects
+of garbage are tolerated before the next collection. Raising it trades RSS for time, and only for
+programs whose live set exceeds `SPROUT_GC_THRESHOLD / factor` — smaller programs sit on the floor
+and are unaffected. With minors on, the nursery share plays that part.
 
 | Variable | Default | Description |
 |---|---|---|
 | `SPROUT_GC_ADAPT_RATIO` | `0.2` | On/off switch: any value > 0 enables the adaptive threshold, `0` disables it. **No longer a ratio** — it named the swept fraction under the old only-ever-grow policy, which no longer exists; intermediate values are accepted for compatibility but behave like the default. |
-| `SPROUT_GC_ADAPT_FACTOR` | `3.0` | Float > 1. Multiplier on the live set. `3.0` is the measured knee on self-hosted compilation (−14% to −19% wall for +13% to +18% peak RSS vs `2.0`); `4.0` gives −29%/+38%, a worse-than-1:1 trade. Lower it toward `2.0` for memory-constrained workloads. |
+| `SPROUT_GC_ADAPT_FACTOR` | `3.0` | Float > 1. Multiplier on the live set, applied with `SPROUT_GC_MINOR=0`. `3.0` is the measured knee on self-hosted compilation (−14% to −19% wall for +13% to +18% peak RSS vs `2.0`); `4.0` gives −29%/+38%, a worse-than-1:1 trade. Lower it toward `2.0` for memory-constrained workloads. With minors on it only sets the nursery's minimum, `base / factor`. |
+| `SPROUT_GC_NURSERY_SHARE` | `1.0` | Number in `(0, 4]`; read with minors on, ignored with `SPROUT_GC_MINOR=0`. The nursery's share s of the heap: collect again after `s × heap` allocations (or `2 × m`, or `base / factor`, if larger). Raising it trades memory for fewer collections; lowering it does the reverse. Measured: `0.5` kept peak slots at or below 1.00× minor-off on every workload (`1.0` reaches 1.03 on load_spike), for more CPU on the self-compile (0.88 against 0.82 at `1.0`). [Results](../bench/results-2026-11-08-gc-nursery-share.md). |
 | `SPROUT_GC_ADAPT_CAP` | `0` (no cap) | Non-negative integer. Maximum threshold value; `0` = unbounded. **Set a cap for long-lived or memory-constrained workloads** to prevent unbounded RSS growth. |
 
 **Livelock detection** — warns or aborts when consecutive GC cycles free almost nothing (working set fills the heap).

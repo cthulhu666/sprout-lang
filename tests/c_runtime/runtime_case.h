@@ -26,6 +26,11 @@ static inline int is_old(long long word) {
   return (sprout_hdr_of((void*)(uintptr_t)word) & SPROUT_GC_COLOR_BIT) != 0;
 }
 
+/* Run `collect_fn` until `w` is old: at most promote_age times. */
+static inline void age_to_old(long long w, void (*collect_fn)(void)) {
+  for (unsigned i = 0; i < g_gen.promote_age && !is_old(w); i++) collect_fn();
+}
+
 /* Links of the Ref chain that starts at `head` and is still a live heap object. */
 static inline long long chain_length(void* head) {
   long long n = 0, cur = (long long)(uintptr_t)head;

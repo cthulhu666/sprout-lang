@@ -56,7 +56,13 @@ peak slots 1.07.
 
 So the defaults stay K = 1, nursery off.
 
+Superseded by [results-2026-11-08-gc-nursery-share.md](results-2026-11-08-gc-nursery-share.md):
+the defaults are now K = 3 with the heap-share nursery.
+
 ## Why galaxy_client's peak rises
+
+Superseded by [gc-stage2-v0.md §5.5](../docs/gc-stage2-v0.md): the extra regions come from the run
+of baseline-sized minors after the load. Promoted load-phase data alone does not reproduce them.
 
 From run 3 of each arm, steady state:
 

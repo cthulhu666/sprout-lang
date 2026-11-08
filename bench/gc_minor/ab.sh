@@ -19,7 +19,7 @@
 #   -a  "<label>:ENV=V[,ENV=V...];<label>:..." named MINOR=1 arms at default settings, each with
 #       its extra env (a label with no env is plain MINOR=1); each round also runs one MINOR=0
 #       baseline, and the run order rotates every round. The label goes in the TSV's `arm` column
-#       and in summarize.py's tables, e.g. -a "K1:SPROUT_GC_PROMOTE_AGE=1;K2N1:SPROUT_GC_PROMOTE_AGE=2,SPROUT_GC_NURSERY=1"
+#       and in summarize.py's tables, e.g. -a "s50:SPROUT_GC_NURSERY_SHARE=0.5;s200:SPROUT_GC_NURSERY_SHARE=2"
 #       With -a and no -s, only the -a sweep runs (and the -e sweep, if given too).
 #   -o  output dir (/private/tmp/gc_minor_ab/<timestamp>)
 #   -B  reuse binaries already in <dir>/bin and append to its results.tsv; without -B a
@@ -36,7 +36,7 @@ cd "$REPO"
 # repo, and wrk is time-bound (the request count, hence the allocation count, varies run to run
 # and arm to arm), so cycles could not be held equal. bench/results-2026-09-30-gc-floor.md §3
 # measured a wrk-driven server at +-30% rps spread, too wide to resolve a GC difference.
-ALL_WORKLOADS="selfcompile compiler_test digit_recognizer gc_roots http_log_middleware nqueens astar math_transcendental mutvec_int galaxy_client"
+ALL_WORKLOADS="selfcompile compiler_test digit_recognizer gc_roots http_log_middleware nqueens astar math_transcendental mutvec_int load_spike galaxy_client"
 UNSUNS="${UNSUNS:-$HOME/GameDev/uncharted-suns}"
 CATALOG="${CATALOG:-$HOME/GameDev/universegen/catalog}"
 COMPILER="$REPO/build/compile_driver_bin_stage1"
@@ -149,6 +149,9 @@ wl_def() {
     mutvec_int)
       W_SRC=bench/gc_minor/mutvec_int.sprout; W_CMD=("$BIN/mutvec_int")
       W_THR=27500 ;;      # 926 cycles, peak live 12.0k
+    load_spike)
+      W_SRC=bench/gc_minor/load_spike.sprout; W_CMD=("$BIN/load_spike")
+      W_THR=283000 ;;     # 252 cycles, peak live 174k
     galaxy_client)
       # What a player runs (§13.6): game/app.sprout on the catalog, auto-closing after 1200 frames.
       # --system pins the start system: the default is a random home seeded by the clock, which

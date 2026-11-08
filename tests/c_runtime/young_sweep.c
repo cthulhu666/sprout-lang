@@ -2,8 +2,9 @@
  * on and SPROUT_GC_GENCHECK=1, which adds the young-bitmap, free-count and region checks after
  * every sweep.
  *
- * An object is made old the real way: rooted across the first collection (a major). Collection
- * is explicit: the threshold is zeroed after each one, so only `collect` runs the collector.
+ * An object is made old the real way: rooted across g_gen.promote_age collections, the first a
+ * major. Collection is explicit: the threshold is zeroed after each one, so only `collect` runs
+ * the collector.
  *
  *   walked_young   — a minor over a large old heap visits the young slots, not the old ones, and
  *                    a second one does too when the young slots are reused from the free lists.
@@ -32,7 +33,9 @@ static void collect(void) {
   g_gc_threshold = 0;  /* the adaptive rule re-bases it; only `collect` collects here */
 }
 
-/* An old chain of n Refs: rooted across the first collection, a major. */
+static long long g_minor0;  /* minors run by setup_old's aging collections */
+
+/* An old chain of n Refs: rooted across collections until it is old (the first is a major). */
 static void setup_old(long long n) {
   register_root_slot(&g_chain, SPROUT_ROOT_PTR, 0);
   register_root_slot(&g_keep, SPROUT_ROOT_PTR, 0);
@@ -44,9 +47,10 @@ static void setup_old(long long n) {
     ref_write(g_tail, x);
     g_tail = x;
   }
-  collect();
-  check(g_gen.n_major == 1 && g_gen.n_minor == 0, "the first collection is a major");
+  age_to_old(head, collect);
+  check(g_gen.n_major == 1, "the first collection is a major");
   check(is_old(head) && is_old(g_tail), "the chain is old");
+  g_minor0 = g_gen.n_minor;
 }
 
 /* Strings of mixed classes, and a vector pushed past its inline area (a FREE tail split off). */
@@ -126,14 +130,14 @@ static int walked_young(void) {
   long long w0 = g_debug_gc_walked;
   collect();
   long long d = g_debug_gc_walked - w0;
-  check(g_gen.n_minor == 1, "the second collection is a minor");
+  check(g_gen.n_minor == g_minor0 + 1, "the next collection is a minor");
   check(d <= M + 64, "a minor over a large old heap walks only the young slots");
   check_free_lists("after the first minor");
   garbage_refs(M);  /* reuses the slots the minor just listed */
   w0 = g_debug_gc_walked;
   collect();
   d = g_debug_gc_walked - w0;
-  check(g_gen.n_minor == 2, "the third collection is a minor");
+  check(g_gen.n_minor == g_minor0 + 2, "the one after is a minor");
   check(d <= M + 64, "a minor that reuses listed slots walks only the young slots");
   check_free_lists("after the second minor");
   check(chain_length(g_chain) == N, "the old chain is intact");
@@ -153,7 +157,7 @@ static int free_count(void) {
     collect();
     check_free_lists("after a minor");
   }
-  check(g_gen.n_minor == 15 && g_gen.n_major == 1, "fifteen minors follow the major");
+  check(g_gen.n_minor == g_minor0 + 15 && g_gen.n_major == 1, "fifteen minors follow the major");
   check(chain_length(g_chain) == 5000 + 150, "the chain, with its survivors, is intact");
   return g_failed;
 }
@@ -165,7 +169,7 @@ static int no_double_list(void) {
   collect();
   check_free_lists("after the minor that freed them");
   collect();  /* nothing young, nothing reused */
-  check(g_gen.n_minor == 2, "two minors ran");
+  check(g_gen.n_minor == g_minor0 + 2, "two minors ran");
   check_free_lists("after a minor that visits nothing");
   garbage_refs(50);
   collect();
@@ -178,7 +182,7 @@ static int region_release(void) {
   garbage_refs(200000);  /* ~3 MiB of 16-byte slots: fresh regions holding nothing old */
   check(g_region_count >= 4, "the garbage filled fresh regions");
   collect();
-  check(g_gen.n_minor == 1, "the second collection is a minor");
+  check(g_gen.n_minor == g_minor0 + 1, "the next collection is a minor");
   check(g_region_count == 1, "every region left with no live slot was released");
   for (size_t ri = 0; ri < g_region_count; ri++)
     if (!g_regions[ri].is_large)
@@ -201,13 +205,14 @@ static int large_young(void) {
   long long w0 = g_debug_gc_walked;
   collect();
   long long d = g_debug_gc_walked - w0;
-  check(g_gen.n_minor == 1, "the second collection is a minor");
+  check(g_gen.n_minor == g_minor0 + 1, "the next collection is a minor");
   check(g_region_count == regions - 2, "the two dead young large objects were freed");
   check(sprout_heap_lookup((void*)(uintptr_t)dead1) == NULL, "a dead young large object is gone");
   check(sprout_heap_lookup((void*)(uintptr_t)dead2) == NULL, "another one too");
-  check(sprout_heap_lookup(g_keep) != NULL && is_old((long long)(uintptr_t)g_keep),
-        "a rooted young large object is promoted");
+  check(sprout_heap_lookup(g_keep) != NULL, "a rooted young large object survives");
   check(d <= 500 + 3 + 64, "a minor walks the young slots and the young large objects only");
+  age_to_old((long long)(uintptr_t)g_keep, collect);
+  check(is_old((long long)(uintptr_t)g_keep), "and is promoted after promote_age collections");
   collect();
   check(g_region_count == regions - 2, "the promoted one stays through a minor");
   g_keep = NULL;
@@ -233,7 +238,7 @@ static int lineage(void) {
     check(d <= 300 + 500 + 100 + 64, "a minor under lineage walks only the young slots");
     check_free_lists("after a minor under lineage");
   }
-  check(g_gen.n_minor == 4, "four minors ran");
+  check(g_gen.n_minor == g_minor0 + 4, "four minors ran");
   check(chain_length(g_chain) == 3000, "the old chain is intact");
   return g_failed;
 }
