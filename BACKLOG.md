@@ -1226,6 +1226,70 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   and no test could. That is a second use for the gate beyond regression detection, currently
   reachable only by reading 60 files of diff by hand. Have the report name added/removed
   `__sprout_ir_eta___tc_*` definitions on their own line.
+- [ ] `P2` **`just gate` misses 32 of `ci-fast-gates`' entries, though it claims CI parity.** Its
+  comment says a green `gate` "means CI will not surprise you", yet it never runs six
+  `gc-*-check`s, the `overflow`/`negative-shift`/`closure-arity`/`runtime-diag` smokes,
+  `o2-codegen-smoke`, the census smokes, `test-freelist-verify` or the hook self-tests. (A
+  `just --dump` dep walk finds 34; `gc-safety-check` runs from `gate`'s body, and `gate-audit`
+  stays out to avoid a cycle.) Check A skips `ci-fast-gates` on the premise that `gate` names each
+  member. Fix: `gate` depends on `ci-fast-gates` minus `gate-audit`, and check A reads GATES — the
+  same check-A rewrite as "`just gate-audit` derives … by grepping the workflow's COMMENTS".
+- [ ] `P2` **Rejection fixtures match their `.err` too loosely.** `_test-reject` runs
+  `grep -qF "$expected"` over stdout+stderr and ignores the exit status, so an error downgraded to
+  `WARNING:` with the same text still passes. Only 174 of 923 fixtures pin a line with `#~^`, and
+  short texts recur (46 expect "`_` drops a linear value"), so one can match a different error in
+  the same output. Fix: require a nonzero exit, match `ERROR:` lines only, and reject an empty or
+  multi-line `.err` (none exist yet; `grep -F` would read one as match-all or as an OR).
+- [ ] `P3` **Suite runners print every passing suite and end with a count, not names.**
+  `_test-stdlib` replays each suite's full output and ends with "N test suite(s) FAILED";
+  `_test-reject` prints two lines per fixture. Finding a failure means scrolling or teeing to a
+  file. Fix: replay output for failed suites only (all of it with `VERBOSE=1`) and end with the
+  failing paths. Do it with "Robust suite pass/fail signalling", which reworks the same ending.
+- [ ] `P2` **Golden IR snapshots whole programs, so most diffs are library noise.** Each
+  `tests/golden/ir/*.ll` holds the entry module plus every library function it reaches: in
+  `examples__tui_files` 516 of 893 defines are `stdlib.tui`. A stdlib edit moves goldens, and
+  `11_compiler_bundle.spr.ll` (82k lines) moves with most compiler edits. 154 of 542 commits in
+  October 2026 touched goldens, so DoD #12's "read the complete diff" is not followed in practice.
+  Fix: snapshot the entry module's own defines plus declares, and replace the compiler bundle
+  with one shape per compiler phase, as "The golden corpus covers the compiler's FRONT END only"
+  asks. See also "`just ir-golden-diff` truncates each file's diff at 40 lines".
+- [ ] `P3` **Test recipes copy the same shell.** 29 `clang` lines compile `runtime/*.c` from source
+  at link time, and the parallel fan-out loop is pasted 5 times. `overflow-smoke` recompiles the
+  runtime per fixture; `test-conformance-run` is serial (see "`test-gates` is the slowest CI
+  job"). The `div-by-zero`, `negative-shift`, `overflow` and `closure-arity` smokes all do
+  emit→link→run→expect a nonzero exit and a stderr text. Fix: fan-out and replay helpers in
+  `scripts/test_lib.sh`, cached runtime objects under "Compile caching for the stdlib test
+  runner", and one `tests/conformance/runtime_panic/` dir with one runner for the panic smokes.
+- [ ] `P3` **20 suites write fixed `/tmp/sprout_*` paths** (e.g. `tests/stdlib/test_fs.spr`), so two
+  worktrees running `just test` at once can collide, and stale files stay behind. Fix: the runner
+  exports a per-suite `SPROUT_TEST_TMPDIR`, and a `testsupport` helper builds paths in it.
+- [ ] `P3` **`stdlib.test` gaps.** A failure shows its label, not its source location. There is no
+  name filter, no `check_contains`/`check_ne`/`check_lt` (3,184 `check_true`/`assert_true` calls
+  fail with only "expected true"), and no property helper over `stdlib.rng`. `run_suite` takes
+  evaluated cases, so a panic in case N prints nothing, not even the earlier passes. Fix: add the
+  checks, a `check_forall`, a `SPROUT_TEST_FILTER` regex beside `SPROUT_TEST_SHARD`, and
+  optionally a `run_suite` over thunks.
+- [ ] `P3` **Redundant fixtures.** Seven hand-written fixtures repeat a linear-grid cell (e.g.
+  `run/linear_bound_chan_select` has the code and `.out` of `run/linear_grid_ext__chan_select`;
+  find the rest by comment-stripped hashing): keep the stronger and have `gen_linear_grid.sh` skip
+  the cell, as it does for `linear_bound_existential_pack`. `type_error/import_dotdot_spaced` has
+  the code and `.err` of `import_dotdot_in_list` (fmt drops the space it means to pin).
+  `fallible_bind_pure_fn` repeats `fallible_bind_in_int_fn`; give it the `!{IO}` host its comment
+  describes.
+- [ ] `P3` **`tests/stdlib/test_stamped.spr:33` asserts nothing.** Its "two chains from the start
+  agree" check is `check_eq(..., v.origin, v.origin)`, a value compared with itself. Compare the
+  two chains' origins, as the label says.
+- [ ] `P3` **No coverage tooling.** Measured once (2026-11-01, `just test` only): compiler 95.7% of
+  functions, stdlib 86.9%, C runtime 65.9% of lines. Method: instrument the compiler's IR with
+  `opt -passes=sancov-module,pgo-instr-gen,instrprof` and swap it in for stage 1; the same per
+  test binary; the runtime with `-fprofile-instr-generate -fcoverage-mapping`. Least covered:
+  `http_server`'s serve loop and `net` (only `task-io-smoke` runs them), `repl`, the scheduler's
+  fd-timeout parks, 41 poller/net runtime functions, `infer.concrete_typeexpr` (reachable, never
+  entered). Fix: a `just coverage` recipe, then tests for the gaps.
+- [ ] `P3` **Suite headers cite machinery that is gone.** 24 suites describe the retired IR
+  migration (`--use-ir-codegen`, `IR_XFAIL`, "direct codegen") and 9 cite the deleted
+  `codegen.sprout`. A reader trusts a header to say what the suite guards. Fix: rewrite or drop
+  the stale claims.
 
 **Modules, prelude and bootstrap edges**
 
@@ -1283,65 +1347,6 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `--emit-ir`/codegen, where `has_user_main` is already computed. Also decide separately whether to
   delete `runtime_error/main_arity_mismatch` (a mislabeled duplicate) and `parity_*` (byte-parity
   against the retired reference, no golden).
-- [ ] `P2` **`just gate` misses 34 of `ci-fast-gates`' entries, though it claims CI parity.** Its
-  comment says a green `gate` "means CI will not surprise you", yet its dependencies never reach
-  the six `gc-*-check`s, the `overflow`/`negative-shift`/`closure-arity`/`runtime-diag` smokes,
-  `o2-codegen-smoke`, the census smokes, `test-freelist-verify` or the hook self-tests (found by
-  walking `just --dump` deps against the GATES array). `gate-audit` check A skips
-  `ci-fast-gates` on the premise that `gate` names each member, which no longer holds. Fix: `gate`
-  depends on `ci-fast-gates` plus the CI-only jobs, and check A reads the GATES array.
-- [ ] `P2` **Rejection fixtures match their `.err` too loosely.** `_test-reject` runs
-  `grep -qF "$expected"` over stdout+stderr and ignores the exit status, so an error downgraded to
-  `WARNING:` with the same text still passes. Only 174 of 923 fixtures pin a line with `#~^`, and
-  short texts recur (46 expect "`_` drops a linear value"), so one can match a different error in
-  the same output. Fix: require a nonzero exit, match `ERROR:` lines only, and reject an empty or
-  multi-line `.err` (none exist yet; `grep -F` would read one as match-all or as an OR).
-- [ ] `P3` **Suite runners print every passing suite and end with a count, not names.**
-  `_test-stdlib` replays each suite's full output and ends with "N test suite(s) FAILED";
-  `_test-reject` prints two lines per fixture. Finding a failure means scrolling or teeing to a
-  file. Fix: replay output for failed suites only (all of it with `VERBOSE=1`) and end with the
-  failing paths.
-- [ ] `P2` **Golden IR snapshots whole programs, so most diffs are library noise.** Each
-  `tests/golden/ir/*.ll` holds the entry module plus every library function it reaches: in
-  `examples__tui_files` 516 of 893 defines are `stdlib.tui`. A stdlib edit moves goldens, and
-  `11_compiler_bundle.spr.ll` (82k lines) moves with most compiler edits. 154 of 542 commits in
-  October 2026 touched goldens, so DoD #12's "read the complete diff" is not followed in practice.
-  Fix: snapshot the entry module's own defines plus declares, and give the compiler bundle a
-  smaller shape.
-- [ ] `P3` **Test recipes copy the same shell.** 29 `clang` lines compile `runtime/*.c` from source
-  at link time, and the parallel fan-out loop is pasted 5 times. `overflow-smoke` recompiles the
-  runtime per fixture; `test-conformance-run` is serial (see "`test-gates` is the slowest CI
-  job"). The `div-by-zero`, `negative-shift`, `overflow` and `closure-arity` smokes all do
-  emit→link→run→expect a nonzero exit and a stderr text. Fix: `scripts/lib/harness.sh` (cached
-  runtime objects, fan-out, replay), and one `tests/conformance/runtime_panic/` dir with one
-  runner for the panic smokes.
-- [ ] `P3` **20 suites write fixed `/tmp/sprout_*` paths** (e.g. `tests/stdlib/test_fs.spr`), so two
-  worktrees running `just test` at once can collide, and stale files stay behind. Fix: the runner
-  exports a per-suite `SPROUT_TEST_TMPDIR`, and a `testsupport` helper builds paths in it.
-- [ ] `P3` **`stdlib.test` gaps.** A failure shows its label, not its source location. There is no
-  name filter, no `check_contains`/`check_ne`/`check_lt` (3,184 `check_true`/`assert_true` calls
-  fail with only "expected true"), and no property helper over `stdlib.rng`. `run_suite` takes
-  evaluated cases, so a panic in case N prints nothing, not even the earlier passes. Fix: add the
-  checks, a `check_forall`, a `SPROUT_TEST_FILTER` regex beside `SPROUT_TEST_SHARD`, and
-  optionally a `run_suite` over thunks.
-- [ ] `P3` **Redundant fixtures.** Seven hand-written fixtures repeat a linear-grid cell (e.g.
-  `run/linear_bound_chan_select` has the code and `.out` of `run/linear_grid_ext__chan_select`;
-  find the rest by comment-stripped hashing): keep the stronger and have `gen_linear_grid.sh` skip
-  the cell, as it does for `linear_bound_existential_pack`. `type_error/import_dotdot_spaced` has
-  the code and `.err` of `import_dotdot_in_list` (fmt drops the space it means to pin).
-  `fallible_bind_pure_fn` repeats `fallible_bind_in_int_fn`; give it the `!{IO}` host its comment
-  describes. `tests/stdlib/test_stamped.spr:33` compares `v.origin` with itself.
-- [ ] `P3` **No coverage tooling.** Measured once (2026-11-01, `just test` only): compiler 95.7% of
-  functions, stdlib 86.9%, C runtime 65.9% of lines. Method: instrument the compiler's IR with
-  `opt -passes=sancov-module,pgo-instr-gen,instrprof` and swap it in for stage 1; the same per
-  test binary; the runtime with `-fprofile-instr-generate -fcoverage-mapping`. Least covered:
-  `http_server`'s serve loop and `net` (only `task-io-smoke` runs them), `repl`, the scheduler's
-  fd-timeout parks, 41 poller/net runtime functions, `infer.concrete_typeexpr` (reachable, never
-  entered). Fix: a `just coverage` recipe, then tests for the gaps.
-- [ ] `P3` **Suite headers cite machinery that is gone.** 24 suites describe the retired IR
-  migration (`--use-ir-codegen`, `IR_XFAIL`, "direct codegen") and 9 cite the deleted
-  `codegen.sprout`. A reader trusts a header to say what the suite guards. Fix: rewrite or drop
-  the stale claims.
 
 **Developer setup**
 
