@@ -1,5 +1,5 @@
 """Shared helpers: parse .ll, decode sancov flags/pcs, classify names, parse Sprout sources."""
-import os, re, struct, glob, collections
+import os, re, struct, glob, collections, functools
 
 # scripts/coverage/covlib.py -> repo root; all output lives under COV (COV_DIR, default build/coverage).
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -81,24 +81,13 @@ def is_generated(n):
     return n.startswith("__sprout_ir_lambda_") or n.startswith("__sprout_ir_eta_")
 
 
-def read_flags(paths, n):
-    acc = bytearray(n)
-    for p in paths:
-        with open(p, "rb") as fh:
-            b = fh.read()
-        if len(b) != n:
-            raise SystemExit(f"flag size mismatch {p}: {len(b)} vs {n}")
-        acc = bytearray(x | y for x, y in zip(acc, b)) if any(b) else acc
-    return acc
-
-
 def or_into(acc, b):
     ia = int.from_bytes(acc, "little") | int.from_bytes(b, "little")
     return bytearray(ia.to_bytes(len(acc), "little"))
 
 
-def decode(pcs_path, nm_path, flags):
-    """-> name -> (nblocks, ncovered, entry_covered)"""
+def decode_bits(pcs_path, nm_path, flags):
+    """-> name -> list of 0/1 block flags, in PC-table order (a function starts at an entry-marked record)."""
     with open(pcs_path, "rb") as fh:
         raw = fh.read()
     n = len(raw) // 16
@@ -118,19 +107,23 @@ def decode(pcs_path, nm_path, flags):
         pc, fl = recs[2 * i], recs[2 * i + 1]
         if fl & 1:
             cur = addr2name.get(pc, f"?0x{pc:x}")
-            out[cur] = [0, 0, bool(flags[i])]
-        out[cur][0] += 1
-        if flags[i]:
-            out[cur][1] += 1
+            out[cur] = []
+        out[cur].append(1 if flags[i] else 0)
     return out
+
+
+def decode(pcs_path, nm_path, flags):
+    """-> name -> (nblocks, ncovered, entry_covered)"""
+    return {name: [len(bl), sum(bl), bool(bl[0])] for name, bl in decode_bits(pcs_path, nm_path, flags).items()}
+
+
+def pct(a, b):
+    return f"{100*a/b:5.1f}%" if b else "  n/a"
 
 
 # ---------------- module classification ----------------
 
-def compiler_modules():
-    return sorted(os.path.basename(p)[:-7] for p in glob.glob(f"{REPO}/stdlib/compiler/*.sprout"))
-
-
+@functools.lru_cache(maxsize=None)
 def stdlib_modules():
     mods = []
     for p in glob.glob(f"{REPO}/stdlib/**/*.sprout", recursive=True):
@@ -138,7 +131,14 @@ def stdlib_modules():
         if rel.startswith("stdlib/compiler/"):
             continue
         mods.append("prelude" if rel == "stdlib/prelude" else rel.replace("/", "."))
-    return sorted(mods)
+    return tuple(sorted(mods))
+
+
+@functools.lru_cache(maxsize=None)
+def _source_modules():
+    """Dotted names of every stdlib/**/*.sprout file, compiler included."""
+    return frozenset(os.path.relpath(p, REPO)[:-7].replace("/", ".")
+                     for p in glob.glob(f"{REPO}/stdlib/**/*.sprout", recursive=True))
 
 
 def module_of(name, main_module):
@@ -170,7 +170,7 @@ def module_of(name, main_module):
         # longest module prefix that exists
         for k in range(len(parts) - 1, 1, -1):
             mod = ".".join(parts[:k])
-            if os.path.exists(f"{REPO}/{mod.replace('.', '/')}.sprout"):
+            if mod in _source_modules():
                 return (mod, "fn")
         return (".".join(parts[:-1]), "fn")
     if "." in name:

@@ -21,24 +21,25 @@ step "instrumented test binaries"
 bash "$SCRIPTS/run_stdlib_cov.sh"
 step "tests/c_runtime"
 bash "$SCRIPTS/run_crt_cov.sh" || FAIL="$FAIL c_runtime(see $COV_DIR/crt_run/log)"
-# The stdlib and compiler analyses read each other's output (executed names; compiler IR rows),
-# so run stdlib, compiler, then stdlib again to fill its "+cc%" column. Start from empty results.
+# The stdlib and compiler analyses read each other's output (executed names; compiler IR rows):
+# collect stdlib's executed names, run the compiler analysis, then the full stdlib report
+# (whose "+cc%" column needs the compiler rows). Start from empty results.
 rm -rf "$COV_DIR/results"
-step "analyze stdlib"
-python3 -I "$SCRIPTS/analyze_stdlib.py" > /dev/null
+step "collect stdlib executed names"
+python3 -I "$SCRIPTS/analyze_stdlib.py" --names-only > /dev/null || FAIL="$FAIL analyze-stdlib-names"
 step "analyze compiler"
-python3 -I "$SCRIPTS/analyze_compiler.py"
-step "analyze stdlib (with compiler union)"
-python3 -I "$SCRIPTS/analyze_stdlib.py"
+python3 -I "$SCRIPTS/analyze_compiler.py" || FAIL="$FAIL analyze-compiler"
+step "analyze stdlib"
+python3 -I "$SCRIPTS/analyze_stdlib.py" || FAIL="$FAIL analyze-stdlib"
 step "analyze runtime"
-bash "$SCRIPTS/analyze_runtime.sh"
-python3 -I "$SCRIPTS/analyze_runtime_fns.py"
+bash "$SCRIPTS/analyze_runtime.sh" || FAIL="$FAIL analyze-runtime"
+python3 -I "$SCRIPTS/analyze_runtime_fns.py" || FAIL="$FAIL analyze-runtime-fns"
 
 step "checks"
 NOW_SUM=$(shasum -a 256 "$STAGE1" | cut -d' ' -f1)
-[[ "$ORIG_SUM" == "$NOW_SUM" ]] || { echo "ERROR: stage-1 differs from the start of the run" >&2; exit 1; }
-[[ ! -e "$STAGE1_BACKUP" ]] || { echo "ERROR: stage-1 swap backup still present" >&2; exit 1; }
-[[ ! -e "$REPO/default.profraw" ]] || { echo "ERROR: default.profraw leaked into the repo root: an instrumented run lacked LLVM_PROFILE_FILE" >&2; exit 1; }
-echo "stage-1 restored byte-identical; no default.profraw in the repo root"
+if [[ "$ORIG_SUM" != "$NOW_SUM" ]]; then echo "ERROR: stage-1 differs from the start of the run" >&2; FAIL="$FAIL stage1-changed"; fi
+if [[ -e "$STAGE1_BACKUP" ]]; then echo "ERROR: stage-1 swap backup still present" >&2; FAIL="$FAIL stage1-backup-left"; fi
+if [[ -e "$REPO/default.profraw" ]]; then echo "ERROR: default.profraw leaked into the repo root: an instrumented run lacked LLVM_PROFILE_FILE" >&2; FAIL="$FAIL default.profraw"; fi
+[[ -n "$FAIL" ]] || echo "stage-1 restored byte-identical; no default.profraw in the repo root"
 echo "==> coverage done in $(( $(date +%s) - T0 ))s; reports in $COV_DIR/results/"
 if [[ -n "$FAIL" ]]; then echo "ERROR: failed steps:$FAIL (numbers above are from a partial run)" >&2; exit 1; fi

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # stdlib_one.sh <idx> <file> <kind: stdlib|conf>
 # Emit IR (plain stage-1), sancov-instrument it, link with the coverage-instrumented runtime, run.
-# Keeps: <idx>.nm (function symbols), <idx>.pcs (PC table), flags/<idx>.<pid>.flags, <idx>.ll, <idx>.log.
+# Keeps, in work/<idx>/: t.nm (function symbols), t.pcs (PC table), t.ll, t.bin, run.out, status;
+# flags go to flags/<idx>.<pid>.flags.
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 R="$COV_DIR/stdlib_run"

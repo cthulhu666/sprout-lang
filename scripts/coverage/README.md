@@ -58,7 +58,7 @@ says ok / emit_fail / run_exit_N / suite_failed), `crt_run/log`.
    counters. Linked with an `-O2` runtime.
 2. `run_compiler_cov.sh`: **the stage-1 swap.** Copies the instrumented compiler over
    `build/compile_driver_bin_stage1` (gitignored), runs one full `just test`, then restores the
-   original. Restore runs on any exit (trap) and is byte-compared. If a run is killed hard
+   original. The backup is `cmp`-checked before the swap; restore runs on any exit (trap) and is checked against the original's sha256. If a run is killed hard
    (SIGKILL), the backup `$COV_DIR/stage1.swap-backup` stays and the next run refuses to start;
    the error says how to restore. `run_all.sh` also checks stage-1 is unchanged at the end.
 3. `run_stdlib_cov.sh` / `stdlib_one.sh`: for every input of `just test` (`tests/stdlib`,
