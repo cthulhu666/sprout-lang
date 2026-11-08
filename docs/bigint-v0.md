@@ -340,12 +340,12 @@ Two further sites, checked rather than assumed, and both cleared SAFE:
   (`tests/overflow_smoke/range_count_span.spr`). Enumerating the functions that looked like
   walkers, rather than every function doing range arithmetic, is what let it through.
 
-**NOT cleared, and this entry was wrong.** `stdlib/rng.sprout`'s header states the LCG was chosen
+**NOT cleared, and this entry was wrong.** `stdlib/rng.sprout`'s header stated the LCG was chosen
 so that `A * (M - 1) < 2^61 < 2^63`, "so the multiply never overflows an i64 — the stream is
-identical regardless of a target's integer-overflow semantics." That covers `rng_next` only for a state in `[0, M)`, a precondition nothing enforced for
-caller-supplied states (a seed above ~8.4e9 trapped); `rng_next` and `rng_below` now reduce the
-state first. It does
-not cover `rng_hash2`, which this audit waved through on the strength of a documented precondition
+identical regardless of a target's integer-overflow semantics." That covers `rng_next` only for a
+state in `[0, M)`, a precondition nothing enforced for caller-supplied states (a seed above ~8.4e9
+trapped); `rng_next` and `rng_below` now reduce the state first. It does not cover `rng_hash2`,
+which this audit waved through on the strength of a documented precondition
 on COORDINATE magnitude — while the overflowing term was `seed + (ix * prime)`, and the seed
 carries no precondition at all, being an arbitrary `Int` from the caller. A seed within
 `rng_hash_px` of `MAX_INT` therefore aborted. Fixed by reducing the seed before it meets the

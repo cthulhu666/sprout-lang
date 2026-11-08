@@ -1,5 +1,7 @@
 module stdlib.rng
 
+import stdlib.bits
+
 # Deterministic seeded pseudo-random numbers — a linear congruential generator
 # (LCG). Same seed produces the same sequence on every target, so it suits
 # simulations, sampling, shuffling, jitter, and property tests where
@@ -12,15 +14,11 @@ module stdlib.rng
 #   state' = (A * state + C) mod M      M = 2^31, A = 1103515245, C = 12345
 # The reduced state keeps A * state < 2^62 < 2^63, so the multiply never overflows an
 # i64 — the stream is identical regardless of a target's integer-overflow semantics.
-#
-# Compatibility: states in [0, 2^31) give exactly the old values. A negative state now
-# yields the non-negative representative of the same residue (the old code gave a
-# negative Int: rng_next(-1) was -1103502900, now 1043980748). `rng_below` of a state
-# >= 2^31 changes.
 
 let rng_modulus = 2147483648  # 2^31
 let rng_mult = 1103515245
 let rng_incr = 12345
+let rng_mask = 2147483647  # 2^31 - 1
 
 # High-bit shift: the low bits of an LCG cycle with short periods, so rng_below
 # derives values from the upper bits (drop the low 16). 2^16 = 65536.
@@ -30,27 +28,21 @@ let rng_high_shift = 65536
 # a - (a / b) * b (integer `/` truncates toward zero).
 fn imod(a: Int, b: Int) -> Int = a - ((a / b) * b)
 
-# Non-negative reduction into [0, rng_modulus). Unlike `imod` (which truncates toward
-# zero and so can return a negative remainder), this corrects the sign, so a hash of a
-# negative coordinate is still a valid generator state. O(1).
-fn rng_mod(a: Int) -> Int =
-  let m = imod(a, rng_modulus)
-  in if m < 0 then m + rng_modulus else m
-
-# Any Int as a generator state: already in [0, rng_modulus) passes through, else reduced.
-fn rng_state(s: Int) -> Int = if (s >= 0) && (s < rng_modulus) then s else rng_mod(s)
+# The non-negative residue mod 2^31 for any Int (two's complement): one `and`. Same values
+# as `imod` plus a sign fix, for every Int. O(1).
+fn rng_mod(a: Int) -> Int = bit_and(a, rng_mask)
 
 # Advance the generator one step. Pure: threading the returned state is how a
 # caller draws successive values. Accepts any Int state. O(1).
 export fn rng_next(state: Int) -> Int =
-  imod((rng_mult * rng_state(state)) + rng_incr, rng_modulus)
+  rng_mod((rng_mult * rng_mod(state)) + rng_incr)
 
 # A value in [0, n) derived from `state`, taken from its high bits for better
 # uniformity than a raw `state mod n`. Total: n <= 0 yields 0. O(1).
 # Draws from 15 bits (state / 65536 < 32768): n > 32768 is not covered, and an n that
 # does not divide 32768 is slightly biased.
 export fn rng_below(state: Int, n: Int) -> Int =
-  if n <= 0 then 0 else imod(rng_state(state) / rng_high_shift, n)
+  if n <= 0 then 0 else imod(rng_mod(state) / rng_high_shift, n)
 
 # The two large primes that decorrelate the x and z axes of a spatial hash (the classic
 # Perlin lattice constants). Distinct primes so the two coordinates never share a stride.
@@ -72,11 +64,11 @@ let rng_hash_pz = 19349663
 #
 # Coordinates may be any Int; negatives are handled. O(1).
 #
-# Every input is reduced mod 2^31 before it is multiplied or added, so nothing here can
-# leave i64. That is a pure guard, not a change of function: reducing a factor or an addend
-# before the operation leaves the result's residue alone, so no hash value moves —
-# `tests/stdlib/test_rng.spr` pins the same reference hashes across this change. The reduced
-# coordinate term is at most 2^31 * 73856093 < 2^58.
+# Every operand of a multiply or add is below 2^31 (`rng_next` reduces its own input), so each
+# product stays below 2^62 and nothing here can leave i64. That is a pure guard, not a change of
+# function: reducing a factor or an addend leaves the result's residue alone, so no hash value
+# moves — `tests/stdlib/test_rng.spr` pins the same reference hashes across this change. The
+# reduced coordinate term is at most 2^31 * 73856093 < 2^58.
 #
 # Reducing afterwards was enough while overflow wrapped, because the wrap was itself a mod
 # 2^64 and the residue survived it. Under trapping arithmetic (bigint-v0 Stage 1) it is not:
@@ -84,6 +76,6 @@ let rng_hash_pz = 19349663
 # The coordinate magnitude had been a documented assumption rather than an enforced one,
 # which is the weakest form a precondition can take once breaking it is fatal.
 export fn rng_hash2(ix: Int, iz: Int, seed: Int) -> Int =
-  let s1 = rng_next(rng_mod(rng_mod(seed) + (rng_mod(ix) * rng_hash_px)))
-      s2 = rng_next(rng_mod(s1 + (rng_mod(iz) * rng_hash_pz)))
-  in rng_next(rng_mod(s1 * rng_mod((2 * s2) + 1)))
+  let s1 = rng_next(rng_mod(seed) + (rng_mod(ix) * rng_hash_px))
+      s2 = rng_next(s1 + (rng_mod(iz) * rng_hash_pz))
+  in rng_next(s1 * rng_mod((2 * s2) + 1))
