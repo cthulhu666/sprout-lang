@@ -21,11 +21,13 @@
 #       baseline, and the run order rotates every round. The label goes in the TSV's `arm` column
 #       and in summarize.py's tables, e.g. -a "s50:SPROUT_GC_NURSERY_SHARE=0.5;s200:SPROUT_GC_NURSERY_SHARE=2"
 #       With -a and no -s, only the -a sweep runs (and the -e sweep, if given too).
-#   -o  output dir (/private/tmp/gc_minor_ab/<timestamp>)
+#   -o  output dir (/tmp/gc_minor_ab/<timestamp>)
 #   -B  reuse binaries already in <dir>/bin and append to its results.tsv; without -B a
 #       fresh results.tsv is started
 #
-# macOS only: it times with `/usr/bin/time -l`. Run from anywhere; it cds to the repo root.
+# macOS and Linux: it times with `/usr/bin/time -l` (BSD) or `-v` (GNU, the `time` package), and
+# needs perl (the run timeout), python3 (summarize.py), clang with llvm-as and llvm-link on PATH,
+# and a built build/compile_driver_bin_stage1. Run from anywhere; it cds to the repo root.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -49,7 +51,7 @@ WL_NAMED=0
 EVERY=""
 ARM_LABELS=()   # -a: one label per arm, and its extra env ("A=1,B=2", maybe empty)
 ARM_ENVS=()
-OUT="/private/tmp/gc_minor_ab/$(date +%Y%m%d-%H%M%S)"
+OUT="/tmp/gc_minor_ab/$(date +%Y%m%d-%H%M%S)"
 REUSE=0
 
 parse_arms() { # <spec>: fills ARM_LABELS and ARM_ENVS
@@ -81,7 +83,11 @@ if [[ -z "$SETTING" ]]; then
   if [[ -n "$EVERY" || ${#ARM_LABELS[@]} -gt 0 ]]; then SETTING=none; else SETTING=both; fi
 fi
 case "$SETTING" in fixed|default|both|none) ;; *) echo "bad -s: $SETTING" >&2; exit 2 ;; esac
-[[ "$(uname)" == "Darwin" ]] || { echo "ERROR: macOS only (/usr/bin/time -l)" >&2; exit 1; }
+case "$(uname)" in
+  Darwin) TIME_FLAG=-l; CLANG_EXTRA="-framework Security -framework CoreFoundation" ;;
+  Linux) TIME_FLAG=-v; CLANG_EXTRA="" ;;
+  *) echo "ERROR: unsupported OS $(uname) (macOS and Linux only)" >&2; exit 1 ;;
+esac
 [[ -x "$COMPILER" ]] || { echo "ERROR: $COMPILER missing (run: mise exec -- just bootstrap-from-seed)" >&2; exit 1; }
 
 # galaxy_client needs the game repo, raylib and a catalog: dropped with a warning when it came from
@@ -104,7 +110,6 @@ fi
 
 mkdir -p "$OUT/bin" "$OUT/runs"
 TSV="$OUT/results.tsv"
-CLANG_EXTRA="-framework Security -framework CoreFoundation"
 
 # ── Workloads ────────────────────────────────────────────────────────────────────────────────
 # wl_def <name> sets W_SRC (source built to a binary, empty if none), W_DIR (cwd of the run),
@@ -214,6 +219,16 @@ build_galaxy() { # mirrors uncharted-suns' `run-gfx`, minus the run; SPROUT_ROOT
   rm -f "$OUT/galaxy.ll"
 }
 
+# What `just compile-native <src> <out>` does, without just or mise: emit IR with the stage-1
+# compiler, then link it whole-program with the runtime.
+compile_native() {
+  local ll="$OUT/compile_native.$$.ll"
+  "$COMPILER" --emit-ir "$REPO/stdlib" --package-root "$REPO" "$1" > "$ll" || { rm -f "$ll"; return 1; }
+  # shellcheck disable=SC2086
+  bash "$REPO/scripts/link_whole_program.sh" "$ll" "$2" $CLANG_EXTRA || { rm -f "$ll"; return 1; }
+  rm -f "$ll"
+}
+
 build_all() {
   local w
   for w in $WORKLOADS; do
@@ -226,7 +241,7 @@ build_all() {
     elif [[ -n "$W_SRC" ]]; then
       if [[ $REUSE == 1 && -x "$BIN/$w" ]]; then continue; fi
       echo "==> building $w" >&2
-      mise exec -- just compile-native "$W_SRC" "$BIN/$w" >> "$OUT/build.log" 2>&1 \
+      compile_native "$W_SRC" "$BIN/$w" >> "$OUT/build.log" 2>&1 \
         || { echo "ERROR: build of $w failed, see $OUT/build.log" >&2; exit 1; }
     fi
   done
@@ -237,6 +252,29 @@ build_all() {
 # compared between arms.
 norm() {
   sed -E '/\[unsuns\] ship home:/d; s/(time_us|dur_us|us)=[0-9]+/\1=T/g; s/[0-9]+(\.[0-9]+)? *(ms|us\/run|ns\/op|us)/T \2/g'
+}
+
+# One-minute load average.
+load1() {
+  if [[ "$(uname)" == Darwin ]]; then sysctl -n vm.loadavg | awk '{print $2}'; else cut -d' ' -f1 /proc/loadavg; fi
+}
+
+sha1_hex() { if command -v shasum >/dev/null 2>&1; then shasum; else sha1sum; fi; }
+
+# "real user sys max_rss_kb" from a `/usr/bin/time` report, BSD `-l` or GNU `-v` (told by format).
+time_fields() {
+  awk '
+    / real .* user .* sys/ { real = $1; user = $3; sys = $5 }   # BSD: "1.23 real 1.00 user 0.20 sys"
+    /maximum resident set size/ { rss = $1 / 1024 }             # BSD: bytes
+    /Elapsed \(wall clock\)/ {                                  # GNU: "(h:mm:ss or m:ss): 1:02.50"
+      t = $0; sub(/.*\): /, "", t)
+      n = split(t, p, ":")
+      real = (n == 3) ? p[1] * 3600 + p[2] * 60 + p[3] : p[1] * 60 + p[2]
+    }
+    /User time \(seconds\)/ { user = $NF }
+    /System time \(seconds\)/ { sys = $NF }
+    /Maximum resident set size \(kbytes\)/ { rss = $NF }
+    END { printf "%s %s %s %d\n", real, user, sys, rss }' "$1"
 }
 
 # Percentile of a sorted one-column file (linear interpolation, like bench/gc_pause).
@@ -277,16 +315,15 @@ run_one() {
   fi
   [[ "$setting" == fixed ]] && envs+=("SPROUT_GC_ADAPT_RATIO=0" "SPROUT_GC_THRESHOLD=$W_THR")
 
-  local load; load="$(sysctl -n vm.loadavg | awk '{print $2}')"
+  local load; load="$(load1)"
   local rc=0
   # The alarm survives perl's exec, so a collection livelock ends the run (exit 142) instead of hanging.
-  (cd "$W_DIR" && exec env "${envs[@]}" /usr/bin/time -l -o "$rd.time" \
+  (cd "$W_DIR" && exec env "${envs[@]}" /usr/bin/time "$TIME_FLAG" -o "$rd.time" \
     perl -e 'alarm shift; exec @ARGV' "$RUN_TIMEOUT" "${W_CMD[@]}") \
     > "$rd.out" 2> "$rd.err" || rc=$?
 
   local real user sys rss
-  read -r real user sys < <(awk '/ real /{print $1, $3, $5}' "$rd.time")
-  rss="$(awk '/maximum resident/{printf "%d", $1 / 1024}' "$rd.time")"
+  read -r real user sys rss < <(time_fields "$rd.time")
 
   local steady="$rd.steady"; : > "$steady"
   local cycles minors majors gc_us marked line
@@ -295,7 +332,7 @@ run_one() {
   sort -n "$steady" -o "$steady"
   local p50 p90; p50="$(pctl "$steady" 50)"; p90="$(pctl "$steady" 90)"
 
-  local hash; hash="$(norm < "$rd.out" | shasum | cut -c1-12)"
+  local hash; hash="$(norm < "$rd.out" | sha1_hex | cut -c1-12)"
   # Stdout must match across arms and settings; the first TSV row of a workload is the reference.
   local ref; ref="$(awk -F'\t' -v w="$w" '$1 == w { print $18; exit }' "$TSV")"
   if [[ -n "$ref" && "$ref" != "$hash" ]]; then
@@ -310,7 +347,7 @@ run_one() {
     "$w" "$setting" "$minor" "$every" "$idx" "$real" "$load" "$cycles" "${arm:+ arm=$arm}" >&2
 
   # Large outputs (the IR of a self-compile) are kept only as a hash.
-  [[ "$(stat -f %z "$rd.out")" -gt 1048576 ]] && : > "$rd.out"
+  [[ "$(wc -c < "$rd.out")" -gt 1048576 ]] && : > "$rd.out"
   rm -f "$steady"
 }
 
