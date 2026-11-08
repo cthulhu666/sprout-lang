@@ -1,0 +1,5 @@
+# Harness self-test fixture: a suite that exits 0 and never prints a verdict.
+# `just _test-stdlib` must fail it with NO VERDICT. See `just test-harness-selftest`.
+
+fn main() -> Unit !{IO} =
+  print("ran, but never called summary or run_suite")

@@ -1176,12 +1176,6 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `just test` runner sets the variable, so the trap is specific to fast iteration, which is exactly
   when a green is trusted. Fix: set it in `_test-file`, or make the guard fail loudly. A skip that
   reports success is the worst of the three options.
-- [ ] `P3` **`just test-file` cannot compile a test that imports `testsupport.*`.** `_test-file`
-  runs `--emit-ir` without `--package-root`, so the import does not resolve and the file fails to
-  compile; `just test` passes it. Seven IR suites now import `testsupport.ir_fixtures` (e.g.
-  `tests/stdlib/test_ir_rooting.spr`), so none of them runs through `test-file`. Fix: pass
-  `--package-root "{{justfile_directory()}}"` there as the other emit-ir recipes do, and drop the
-  caveat from AGENTS.md §How to run tests.
 - [ ] `P3` **IR tests — the lex→parse→check→lower→compile helper is pasted into 13 suites.**
   `translate_source` is defined in 8 of the `tests/stdlib/test_ir_codegen_*.spr` files and 5 under
   `tests/stdlib/compiler/` (`test_ir_*.spr`, `test_scalar_global_no_root.spr`); 7 of them also
@@ -1193,7 +1187,8 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   with a real nonzero exit via the existing `panic` extern. Separately, `print` has no
   `fflush`/`setvbuf`, so output is lost on a crash under capture; add
   `setvbuf(stdout, NULL, _IOLBF, 0)` at startup. The runtime edit needs approval per the
-  builtin/runtime rules.
+  builtin/runtime rules. Done: the runner now also requires a `SUITE PASSED` line, so a suite with
+  no verdict fails.
 - [ ] `P1` **Stack-overflow diagnostic v2 — map native backtrace frames to Sprout source
   locations.** v1 catches the overflow on an alternate signal stack and panics with a native
   backtrace naming the recursing function; v2 turns symbol+offset into `file:line`. Options: (a) a

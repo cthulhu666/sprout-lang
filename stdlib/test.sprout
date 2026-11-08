@@ -24,7 +24,9 @@ import stdlib.math (abs)
 #   "N passed, M failed"
 #   "SUITE PASSED"   ← or "SUITE FAILED" if M > 0
 #
-# The justfile test-stdlib recipe greps for "SUITE FAILED" to detect failures.
+# The justfile test-stdlib recipe passes a suite only if it exits 0, prints a
+# "SUITE PASSED" line and prints no "SUITE FAILED" line. A suite whose main never
+# reaches summary/run_suite prints neither, and fails with NO VERDICT.
 # ---------------------------------------------------------------------------
 
 export type TestState =
@@ -62,7 +64,7 @@ export fn assert_eq(state: TestState, label: String, actual: a, expected: a) -> 
   else record(state, false, label ++ " (expected " ++ to_string(expected) ++ ", got " ++ to_string(actual) ++ ")")
 
 # Prints pass/fail counts, then "SUITE PASSED" or "SUITE FAILED".
-# The justfile runner greps for "SUITE FAILED" to set the exit code.
+# The justfile runner requires the "SUITE PASSED" line and rejects "SUITE FAILED".
 export fn summary(state: TestState) -> Unit !{IO} =
   match state with
   | TestState pass_ref fail_ref ->
@@ -156,7 +158,7 @@ fn case_fail_count(acc: Int, c: TestCase) -> Int =
   | TestCase _ passed _ -> if passed then acc else acc + 1
 
 # Print one PASS/FAIL line per case, then "N passed, M failed" and the
-# SUITE PASSED/FAILED verdict the justfile runner greps for. Emits a single
+# SUITE PASSED/FAILED verdict the justfile runner checks for. Emits a single
 # print (the whole report is a pure fold) so output survives buffered capture.
 export fn run_suite(name: String, cases: Vec TestCase) -> Unit !{IO} =
   do

@@ -1,0 +1,10 @@
+import stdlib.test (new_state, assert_eq, summary)
+
+# Harness self-test fixture: a well-formed passing suite.
+# `just _test-stdlib` must accept it. See `just test-harness-selftest`.
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "1 + 1", 1 + 1, 2)
+    summary(state)
