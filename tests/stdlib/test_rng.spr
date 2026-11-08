@@ -63,6 +63,7 @@ fn main() -> Unit !{IO} =
     #   -1 = 2^31 - 1 (mod 2^31);  MIN_INT = -2^63 = 0 (mod 2^31) so it steps like 0
     #   1043980748 / 65536 = 15929;  15929 mod 100 = 29
     check_eq("rng_next(MIN_INT) steps like 0", rng_next(0 - 9223372036854775807 - 1), 12345),
+    check_eq("rng_next(-2^31) steps like 0", rng_next(0 - 2147483648), 12345),
     check_eq("rng_next(MAX_INT) steps like 2^31 - 1", rng_next(9223372036854775807), 1043980748),
     check_eq("rng_next(1e10) reduces mod 2^31", rng_next(10000000000), rng_next(1410065408)),
     check_eq("rng_next(1e10) literal", rng_next(10000000000), 1082672185),
