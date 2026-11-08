@@ -1,22 +1,14 @@
 import stdlib.test (check_eq, run_suite)
 import stdlib.scram as scram
 
-# The server-supplied iteration count is bounded at parse time, and again in `hi` for a
-# hand-built `ScramServerFirst` that never went through the parser.
+# The server-supplied iteration count is bounded at parse time. `ScramServerFirst` is opaque,
+# so `parse_server_first` is the only way to build one.
 
 fn first_with(count: String) -> String =
   `r=clientnonceserver,s=W22ZaJ0SNY7soEsUEjb6gQ==,i=${count}`
 
 fn parsed(count: String) -> String =
   match scram.parse_server_first(first_with(count)) with
-  | Ok _ -> "ok"
-  | Err err -> `err:${scram.error_message(err)}`
-
-# The cap is far too large to hash, so this must fail before any PBKDF2 round runs.
-fn final_with_count(count: Int) -> String =
-  match scram.client_final("pencil", "n=user,r=clientnonce",
-    scram.ScramServerFirst("r=clientnonceserver", "clientnonceserver", "W22ZaJ0SNY7soEsUEjb6gQ==", count),
-    scram.no_channel_binding) with
   | Ok _ -> "ok"
   | Err err -> `err:${scram.error_message(err)}`
 
@@ -34,8 +26,5 @@ fn main() -> Unit !{IO} =
       "err:SCRAM iteration count must be decimal digits"),
     check_eq("empty count is rejected", parsed(""), "err:SCRAM iteration count cannot be empty"),
     check_eq("non-digits are rejected", parsed("12x"), "err:SCRAM iteration count must be decimal digits"),
-    check_eq("client_final rejects a hand-built count over the cap", final_with_count(1000001),
-      "err:SCRAM iteration count 1000001 exceeds the limit 1000000"),
-    check_eq("client_final rejects a hand-built zero count", final_with_count(0),
-      "err:SCRAM iteration count must be positive")
+    check_eq("a negative count is rejected", parsed("-5"), "err:SCRAM iteration count must be positive")
   ])
