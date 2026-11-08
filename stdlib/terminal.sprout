@@ -175,7 +175,8 @@ export fn read_avail(max: Int, timeout_ms: Int) -> TermInput !{IO} =
 # Parks the calling task on a pipe, so other tasks keep running while it waits. It reads fd 0
 # directly, so bytes an earlier `term_read_line` (stdio getline) already buffered are not seen:
 # do not mix the two on one stream. `read_avail`'s one-reader rule applies. It does not hold raw
-# mode; under raw mode a terminal never reports EOF.
+# mode; under raw mode a terminal never reports EOF. If the process starts with stdin closed, the
+# read fails in the runtime instead of returning `Err`.
 export fn read_stdin_bytes() -> Result String Bytes !{IO} =
   read_stdin_loop(Nil)
 
@@ -192,9 +193,9 @@ fn read_stdin_loop(parts: List Builder) -> Result String Bytes !{IO} =
 # All of stdin as text. `Err` is a read failure, or the reason the bytes are not valid UTF-8 text
 # (a NUL byte counts). Same stream rules as `read_stdin_bytes`.
 export fn read_stdin_text() -> Result String String !{IO} =
-  match read_stdin_bytes() with
-  | Err msg -> Err(msg)
-  | Ok raw ->
-      match bytes.to_string(raw) with
-      | Ok text -> Ok(text)
-      | Err (bytes.Utf8DecodeError reason) -> Err(reason)
+  let Ok raw = read_stdin_bytes() else Err msg -> Err(msg)
+  in bytes.to_string(raw) |> result_pipe_error(decode_reason)
+
+fn decode_reason(e: bytes.Utf8Error) -> String =
+  match e with
+  | bytes.Utf8DecodeError reason -> reason

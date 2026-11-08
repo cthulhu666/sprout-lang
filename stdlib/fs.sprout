@@ -27,21 +27,20 @@ import stdlib.string as string
 # `fs_read_bytes` / `fs_write_bytes`; the runtime has no String-valued file builtin.
 #
 # `Err` is a human-readable message, not a matchable code: "<path>: <reason>" for an I/O failure
-# and for a file that is not valid UTF-8 text. Do not pattern-match its content. The
-# classified error is what `read_bytes` / `write_bytes` return. No path is special: "-" names a
-# file called `-`, and `terminal.read_stdin_text` reads stdin.
+# and for a file that is not valid UTF-8 text. The one exception is an empty path, whose `Err` is
+# "empty path" (there is no path to name). Do not pattern-match its content. The classified
+# error is what `read_bytes` / `write_bytes` return. No path is special: "-" names a file called
+# `-`, and `terminal.read_stdin_text` reads stdin.
 export fn read_text(path: String) -> Result String String !{IO} =
-  match fs_read_bytes(path) with
-  | Err e -> Err(fs_error_message(e))
-  | Ok raw ->
-      match bytes.to_string(raw) with
-      | Ok text -> Ok(text)
-      | Err (bytes.Utf8DecodeError reason) -> Err(path ++ ": " ++ reason)
+  let Ok raw = fs_read_bytes(path) else Err e -> Err(fs_error_message(e))
+  in bytes.to_string(raw) |> result_pipe_error(\e -> path ++ ": " ++ decode_reason(e))
 
 export fn write_text(path: String, content: String) -> Result String Unit !{IO} =
-  match fs_write_bytes(path, bytes.from_string(content)) with
-  | Err e -> Err(fs_error_message(e))
-  | Ok _ -> Ok(())
+  fs_write_bytes(path, bytes.from_string(content)) |> result_pipe_error(fs_error_message)
+
+fn decode_reason(e: bytes.Utf8Error) -> String =
+  match e with
+  | bytes.Utf8DecodeError reason -> reason
 
 # ---------------------------------------------------------------------------
 # Listing, metadata, binary I/O, mutation

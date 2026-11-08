@@ -55,7 +55,7 @@ fn stdlib_root() -> String !{IO} =
 
 fn write_scratch(src: String) -> Unit !{IO} =
   match fs.write_text(scratch_path, src) with
-  | Err msg -> panic("write_file: " ++ scratch_path ++ ": " ++ msg)
+  | Err msg -> panic("cannot write " ++ msg)
   | Ok _ -> ()
 
 # The file/bundler front end. Needs a real path, so the source is staged on disk —

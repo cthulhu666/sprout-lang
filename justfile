@@ -2302,12 +2302,12 @@ argv-smoke: bootstrap-from-seed
     echo "argv-smoke: fs.read_text(\"-\") with no file named - - expected an Err, got '$got'" >&2; exit 1
   fi
   # read_stdin_bytes: an exact round trip, with CR, NUL and no trailing newline. Hex is
-  # 61 0d 0a 62 00 63. An empty stdin (/dev/null, not pollable) is Ok with no bytes.
+  # 97 13 10 98 0 99. An empty stdin (/dev/null, not pollable) is Ok with no bytes.
   build_fixture tests/argv_smoke/stdin_all.spr "$TMPD/all_bin" \
     "stdin_all fixture emit failed" "stdin_all fixture link failed"
   got=$(printf 'a\r\nb\0c' | "$TMPD/all_bin" bytes)
-  if [[ "$got" != "Ok 610d0a620063" ]]; then
-    echo "argv-smoke: read_stdin_bytes - expected 'Ok 610d0a620063', got '$got'" >&2; exit 1
+  if [[ "$got" != "Ok 97 13 10 98 0 99 " ]]; then
+    echo "argv-smoke: read_stdin_bytes - expected 'Ok 97 13 10 98 0 99 ', got '$got'" >&2; exit 1
   fi
   got=$("$TMPD/all_bin" bytes < /dev/null)
   if [[ "$got" != "Ok " ]]; then

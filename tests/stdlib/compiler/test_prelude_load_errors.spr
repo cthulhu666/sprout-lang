@@ -31,7 +31,9 @@ fn main() -> Unit !{IO} =
     t <- new_state()
     fs.make_dir_all("/tmp/sprout_prelude_missing")
     missing <- bundle_msg("/tmp/sprout_prelude_missing")
-    assert_true(t, "a missing prelude names its path", has(missing, "cannot read the prelude /tmp/sprout_prelude_missing/prelude.sprout"))
+    assert_true(t, "a missing prelude names its path", has(missing, "cannot read the prelude /tmp/sprout_prelude_missing/prelude.sprout: "))
+    assert_true(t, "a missing prelude names its path once",
+      !has(missing, "/tmp/sprout_prelude_missing/prelude.sprout: /tmp/sprout_prelude_missing/prelude.sprout"))
     lex <- with_prelude("/tmp/sprout_prelude_lex", "let s: String = \"abc\n")
     assert_true(t, "a prelude that does not lex is a lex error", has(lex, "Lex error in prelude: "))
     parse <- with_prelude("/tmp/sprout_prelude_parse", "fn f( -> Int = 1\n")
