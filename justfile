@@ -488,6 +488,8 @@ test-conformance-run: bootstrap-from-seed
   set -uo pipefail
   STAGE="{{build_dir}}/compile_driver_bin_stage1"
   DIR="tests/conformance/run"
+  # Per-step hang guard (emit-IR, fixture binary): SPROUT_TEST_TIMEOUT seconds, default 300.
+  TEST_TO="${SPROUT_TEST_TIMEOUT:-300}"
   TMPD=$(mktemp -d /tmp/sprout_conf_run_XXXXXX); trap 'rm -rf "$TMPD"' EXIT
   RTO="$TMPD/rtobj"; mkdir -p "$RTO"
   for rtsrc in {{runtime_src}}; do
@@ -516,8 +518,11 @@ test-conformance-run: bootstrap-from-seed
     ok=1; why=""
     if [[ ! -f "$golden" ]]; then ok=0; why="no .out golden"; fi
     if [[ $ok -eq 1 ]]; then
-      "$STAGE" --emit-ir "{{stdlib_root}}" "$spr" > "$TMPD/t.ll" 2>"$TMPD/t.err"
-      if grep -qE "^([0-9]+:[0-9]+: )?ERROR:" "$TMPD/t.ll" "$TMPD/t.err"; then
+      perl -e 'alarm shift; exec @ARGV' "$TEST_TO" "$STAGE" --emit-ir "{{stdlib_root}}" "$spr" > "$TMPD/t.ll" 2>"$TMPD/t.err"
+      emit_rc=$?
+      if [[ $emit_rc -eq 142 ]]; then
+        ok=0; why="TIMEOUT after ${TEST_TO}s (emit-ir)"
+      elif grep -qE "^([0-9]+:[0-9]+: )?ERROR:" "$TMPD/t.ll" "$TMPD/t.err"; then
         ok=0; why="compile: $(grep -hE '^([0-9]+:[0-9]+: )?ERROR:' "$TMPD/t.ll" "$TMPD/t.err" | head -1)"
       elif ! clang "$TMPD/t.ll" "$RTO"/*.o {{clang_extra}} -o "$TMPD/t.bin" 2>"$TMPD/t.err"; then
         ok=0; why="link: $(grep -iE 'undefined|error' "$TMPD/t.err" | head -1)"
@@ -525,8 +530,9 @@ test-conformance-run: bootstrap-from-seed
         # Golden-stdout: assert stdout only, deliberately ignoring the binary's
         # exit code (a fixture that prints the right thing then exits nonzero is
         # not what this corpus checks — see conformance/{run,runtime_error}).
-        got="$("$TMPD/t.bin" 2>/dev/null)"
-        [[ "$got" == "$(cat "$golden")" ]] || { ok=0; why="stdout mismatch"; }
+        got="$(perl -e 'alarm shift; exec @ARGV' "$TEST_TO" "$TMPD/t.bin" 2>/dev/null)"; run_rc=$?
+        if [[ $run_rc -eq 142 ]]; then ok=0; why="TIMEOUT after ${TEST_TO}s (run)"
+        elif [[ "$got" != "$(cat "$golden")" ]]; then ok=0; why="stdout mismatch"; fi
       fi
     fi
     if [[ -n "${xfail[$name]:-}" ]]; then
@@ -620,11 +626,14 @@ _test-stdlib stage dirs="tests/stdlib tests/stdlib/compiler" sanitize="":
   # sanitize=asan: runtime and test binaries get ASan+UBSan (docs/gates.md §ASan gate).
   RT_OPT="-O2"
   SAN_LINK=""
+  # Per-step hang guard (emit-IR, test binary): SPROUT_TEST_TIMEOUT seconds, default 300, 900 under ASan.
+  TEST_TO="${SPROUT_TEST_TIMEOUT:-300}"
   case "{{sanitize}}" in
     "") ;;
     asan)
       RT_OPT="{{asan_flags}}"
       SAN_LINK="$RT_OPT"
+      TEST_TO="${SPROUT_TEST_TIMEOUT:-900}"
       export ASAN_OPTIONS="{{asan_opts}}"
       export UBSAN_OPTIONS="{{ubsan_opts}}"
       ;;
@@ -679,8 +688,11 @@ _test-stdlib stage dirs="tests/stdlib tests/stdlib/compiler" sanitize="":
       set +e
       echo "==> $f" > "$TMPD/$idx.out"
       ok=1
-      "./$STAGE" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$f" > "$TMPD/$idx.ll" 2>"$TMPD/$idx.err"
-      if [[ $? -ne 0 ]]; then
+      perl -e 'alarm shift; exec @ARGV' "$TEST_TO" "./$STAGE" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$f" > "$TMPD/$idx.ll" 2>"$TMPD/$idx.err"
+      emit_rc=$?
+      if [[ $emit_rc -eq 142 ]]; then
+        echo "  TIMEOUT after ${TEST_TO}s (emit-ir)" >> "$TMPD/$idx.out"; ok=0
+      elif [[ $emit_rc -ne 0 ]]; then
         { echo "  COMPILE FAILED:"; cat "$TMPD/$idx.err"; } >> "$TMPD/$idx.out"; ok=0
       elif ! opt --passes=verify "$TMPD/$idx.ll" -o /dev/null 2>"$TMPD/$idx.err"; then
         { echo "  IR INVALID (opt --passes=verify):"; cat "$TMPD/$idx.err"; } >> "$TMPD/$idx.out"; ok=0
@@ -691,16 +703,26 @@ _test-stdlib stage dirs="tests/stdlib tests/stdlib/compiler" sanitize="":
         fi
       fi
       if [[ $ok -eq 1 ]]; then
-        if out=$(SPROUT_STDLIB_ROOT="{{stdlib_root}}" "$TMPD/$idx.bin" 2>&1); then
+        if out=$(SPROUT_STDLIB_ROOT="{{stdlib_root}}" perl -e 'alarm shift; exec @ARGV' "$TEST_TO" "$TMPD/$idx.bin" 2>&1); then
           echo "$out" >> "$TMPD/$idx.out"
+          # A pass needs exit 0, a SUITE PASSED line and no SUITE FAILED line: a suite that
+          # prints no verdict (main never reached summary/run_suite) must not pass silently.
           if echo "$out" | grep -q "^SUITE FAILED"; then
+            echo 1 > "$TMPD/$idx.st"
+          elif ! echo "$out" | grep -q "^SUITE PASSED$"; then
+            echo '  NO VERDICT: suite printed no "SUITE PASSED" line (did main call summary/run_suite?)' >> "$TMPD/$idx.out"
             echo 1 > "$TMPD/$idx.st"
           else
             echo 0 > "$TMPD/$idx.st"
           fi
         else
           status=$?
-          { echo "$out"; echo "  RUN FAILED: exit $status"; } >> "$TMPD/$idx.out"
+          echo "$out" >> "$TMPD/$idx.out"
+          if [[ $status -eq 142 ]]; then
+            echo "  TIMEOUT after ${TEST_TO}s (run)" >> "$TMPD/$idx.out"
+          else
+            echo "  RUN FAILED: exit $status" >> "$TMPD/$idx.out"
+          fi
           echo 1 > "$TMPD/$idx.st"
         fi
       else
@@ -755,6 +777,13 @@ test-stdlib-core-stage1: bootstrap-from-seed (_test-stdlib "build/compile_driver
 # stdlib-test CPU. PR-gated to compiler-affecting paths; always run on master + nightly.
 [group('test')]
 test-stdlib-compiler-stage1: bootstrap-from-seed (_test-stdlib "build/compile_driver_bin_stage1" "tests/stdlib/compiler")
+
+# The suite runner itself: a suite with no `SUITE PASSED` line fails (NO VERDICT), a hung one is
+# killed (TIMEOUT), a good one passes. Fixtures in tests/harness_selftest/, outside every globbed
+# suite dir. See scripts/test_harness_selftest.sh and docs/gates.md §Suite runner.
+[group('test')]
+test-harness-selftest: bootstrap-from-seed
+  bash scripts/test_harness_selftest.sh "{{just_executable()}}" build/compile_driver_bin_stage1
 
 # The ASan gate (docs/gates.md §ASan gate): the suites and the C runtime tests against an
 # ASan+UBSan runtime. `test-asan` runs all four; CI shards them over four parallel jobs.
@@ -900,21 +929,34 @@ _test-file stage file:
   trap 'rm -f "$TMP_LL" "$TMP_BIN" "$TMP_ERR" "$TMP_RT"' EXIT
   # Single binary: link the runtime sources directly (no object cache needed).
   echo "==> {{file}}"
-  if ! "./$STAGE" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "{{file}}" > "$TMP_LL" 2>"$TMP_ERR"; then
+  # Per-step hang guard (emit-IR, test binary): SPROUT_TEST_TIMEOUT seconds, default 300.
+  TEST_TO="${SPROUT_TEST_TIMEOUT:-300}"
+  emit_rc=0
+  perl -e 'alarm shift; exec @ARGV' "$TEST_TO" "./$STAGE" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "{{file}}" > "$TMP_LL" 2>"$TMP_ERR" || emit_rc=$?
+  if [[ $emit_rc -eq 142 ]]; then
+    echo "  TIMEOUT after ${TEST_TO}s (emit-ir)"; exit 1
+  elif [[ $emit_rc -ne 0 ]]; then
     echo "  COMPILE FAILED:"; cat "$TMP_ERR"; exit 1
   fi
   if ! clang "$TMP_LL" {{runtime_src}} {{clang_extra}} -o "$TMP_BIN" 2>"$TMP_ERR"; then
     echo "  LINK FAILED:"; cat "$TMP_ERR"; exit 1
   fi
-  if out=$("$TMP_BIN" 2>&1); then
+  if out=$(perl -e 'alarm shift; exec @ARGV' "$TEST_TO" "$TMP_BIN" 2>&1); then
     echo "$out"
   else
     status=$?
     echo "$out"
+    if [[ $status -eq 142 ]]; then
+      echo "  TIMEOUT after ${TEST_TO}s (run)"; exit 1
+    fi
     echo "  RUN FAILED: exit $status"; exit 1
   fi
+  # A pass needs a SUITE PASSED line and no SUITE FAILED line (same rule as _test-stdlib).
   if echo "$out" | grep -q "^SUITE FAILED"; then
     exit 1
+  fi
+  if ! echo "$out" | grep -q "^SUITE PASSED$"; then
+    echo '  NO VERDICT: suite printed no "SUITE PASSED" line (did main call summary/run_suite?)'; exit 1
   fi
 
 [group('test')]
@@ -1128,6 +1170,8 @@ _test-reject stage dir noun xfail="" phase="check":
   set -euo pipefail
   STAGE="{{stage}}"
   XFAIL="{{xfail}}"
+  # Per-compile hang guard: SPROUT_TEST_TIMEOUT seconds, default 300.
+  TEST_TO="${SPROUT_TEST_TIMEOUT:-300}"
   if [[ ! -x "./$STAGE" ]]; then
     echo "ERROR: $STAGE not found" >&2; exit 1
   fi
@@ -1168,7 +1212,10 @@ _test-reject stage dir noun xfail="" phase="check":
       is_xfail=0
       for xf in $XFAIL; do [[ "$name" == "$xf" ]] && is_xfail=1 && break; done
       expected="$(cat "$err")"
-      out="$("./$STAGE" --phase {{phase}} "{{stdlib_root}}" "$spr" 2>&1)"
+      out="$(perl -e 'alarm shift; exec @ARGV' "$TEST_TO" "./$STAGE" --phase {{phase}} "{{stdlib_root}}" "$spr" 2>&1)"; rc=$?
+      if [[ $rc -eq 142 ]]; then
+        echo "  TIMEOUT after ${TEST_TO}s (--phase {{phase}})" >> "$TMPD/$idx.out"; echo fail > "$TMPD/$idx.st"; exit 0
+      fi
       if echo "$out" | grep -qF -- "$expected"; then
         if [[ $is_xfail -eq 1 ]]; then
           echo "  UNEXPECTED MATCH (remove from xfail)" >> "$TMPD/$idx.out"; echo fail > "$TMPD/$idx.st"
@@ -1180,9 +1227,10 @@ _test-reject stage dir noun xfail="" phase="check":
           fi
           fixed="tests/conformance/{{dir}}/$name.fixed.spr"
           if [[ -f "$fixed" ]]; then
-            fout="$("./$STAGE" --phase {{phase}} "{{stdlib_root}}" "$fixed" 2>&1)"; fst=$?
+            fout="$(perl -e 'alarm shift; exec @ARGV' "$TEST_TO" "./$STAGE" --phase {{phase}} "{{stdlib_root}}" "$fixed" 2>&1)"; fst=$?
             if [[ $fst -ne 0 ]] || echo "$fout" | grep -q 'ERROR:'; then
               first="$(echo "$fout" | grep -m1 'ERROR:' || echo "exit $fst")"
+              [[ $fst -eq 142 ]] && first="TIMEOUT after ${TEST_TO}s"
               echo "  FAILED: $name.fixed.spr does not check clean: $first" >> "$TMPD/$idx.out"; echo fail > "$TMPD/$idx.st"
             fi
           fi
@@ -4560,6 +4608,10 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     # One invocation for all three: each rebuilds stage-2, and two parallel entries would
     # write the same binary at once. `just` runs a shared dependency once per call.
     "compile-cost|rooting-cost-gate scc-cost-gate verify-roots"
+    # `just test` runs front-end-agreement, package-resolution and renaming-termination, but CI
+    # runs ci-fast-gates, not `test`, so each needs its own entry here (21s, 4s, 3s).
+    # harness-selftest (9s) is the suite runner's own regression test.
+    "front-end-agreement|test-front-end-agreement"
     # Added when Assertion D landed: both had names that CLAIM verification while nothing
     # ran them. c-runtime-test's ten C-level assertions were unrunnable for however long it
     # took someone to try (the runtime split into sprout_scheduler.c/sprout_poll.c broke its
@@ -4568,6 +4620,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "c-runtime-test|c-runtime-test"
     "b1-gate|b1-gate"
     "bce-gate|bce-gate"
+    "harness-selftest|test-harness-selftest"
     "noscan-gate|noscan-gate"
     "spec-gate|spec-gate"
     "approved-builtins|check-approved-builtins"
@@ -4587,6 +4640,8 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "fmt-check|fmt-check"
     "fmt-batch-smoke|fmt-batch-smoke"
     "tui-files-smoke|tui-files-smoke"
+    "package-resolution|test-package-resolution"
+    "renaming-termination|test-renaming-termination"
     "ide-smoke|ide-smoke"
     "render-cost|render-cost-gate"
     "type-errors|test-type-errors"

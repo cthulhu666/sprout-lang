@@ -1,0 +1,9 @@
+# Harness self-test fixture: a suite that never returns.
+# `just _test-stdlib` must kill it and report TIMEOUT. See `just test-harness-selftest`.
+
+fn spin(n: Int) -> Int = spin(n + 1)
+
+fn main() -> Unit !{IO} =
+  do
+    print("spinning")
+    print(int_to_string(spin(0)))

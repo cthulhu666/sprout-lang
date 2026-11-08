@@ -100,6 +100,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-26.04
+    # Hang guard: a job takes 2-9 minutes (max seen 8.1); GitHub's default cutoff is 360.
+    timeout-minutes: 30
     # Turn the runtime's invariant enforcers ON for every binary the shards run.
     # These are runtime-read env vars (see sprout_runtime.c), so one declaration per
     # shard covers bootstrap, fixed-point verify, ci-fast-gates (incl. the example
@@ -206,6 +208,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-26.04
+    timeout-minutes: 30
     env: *invariant-env
     steps:
       - *checkout
@@ -234,6 +237,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-26.04
+    timeout-minutes: 30
     env: *invariant-env
     steps:
       - *checkout
@@ -253,6 +257,7 @@ jobs:
     needs: changes
     if: &compiler-if needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.run_compiler == 'true'
     runs-on: ubuntu-26.04
+    timeout-minutes: 30
     env: *invariant-env
     steps:
       - *checkout
@@ -268,6 +273,7 @@ jobs:
     needs: changes
     if: *compiler-if
     runs-on: ubuntu-26.04
+    timeout-minutes: 30
     env: *invariant-env
     steps:
       - *checkout

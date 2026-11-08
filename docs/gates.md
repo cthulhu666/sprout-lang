@@ -274,6 +274,18 @@ stopped being true. The recipe is wired in as `example-canary` inside `just ci-f
 runs that aggregate (`.github/workflows/ci.yml`). Running `ci-fast-gates` satisfies the item; the
 stale note was liable to send you hand-running five examples a gate you already ran had covered.
 
+## Suite runner — `just test-harness-selftest`
+
+`_test-stdlib` (and `_test-file`) pass a suite only if it exits 0, prints at least one
+`^SUITE PASSED$` line and prints no `^SUITE FAILED` line. A suite that prints no verdict fails as
+`NO VERDICT`: it used to count as passed, so a `main` that never reached `summary`/`run_suite`, or
+one DCE reduced to `()`, hid every defect behind it. A step that outlives `SPROUT_TEST_TIMEOUT`
+seconds (default 300, 900 under `sanitize=asan`) is killed by `perl -e 'alarm ...'` and reported as
+`TIMEOUT after Ns (<step>)`; the emit-IR and test-binary steps each get the full budget. The slowest
+step measured on a 4-wide local run was 25-40s. `_test-reject` and `test-conformance-run` take the
+same variable. `just test-harness-selftest` runs `tests/harness_selftest/` (no verdict, hang, pass)
+through the runner and asserts each outcome; it is in `ci-fast-gates`.
+
 ## Optimized codegen — `just o2-codegen-smoke`
 
 Emits IR for each `tests/codegen_o2/*.spr` and runs `clang -O2` on it, failing on a non-zero exit.
