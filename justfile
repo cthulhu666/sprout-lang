@@ -2292,12 +2292,15 @@ argv-smoke: bootstrap-from-seed
     "fs_read_dash fixture emit failed" "fs_read_dash fixture link failed"
   mkdir "$TMPD/with_dash" "$TMPD/no_dash"
   printf 'F' > "$TMPD/with_dash/-"
-  got=$(cd "$TMPD/with_dash" && printf 'S' | "$TMPD/dash_bin")
+  # stdin comes from a file, not a pipe: the fixture never reads it, and a writer on a pipe that
+  # closes early dies of SIGPIPE, which `pipefail` reports as 141.
+  printf 'S' > "$TMPD/stdin_S"
+  got=$(cd "$TMPD/with_dash" && "$TMPD/dash_bin" < "$TMPD/stdin_S")
   if [[ "$got" != "Ok F" ]]; then
     echo "argv-smoke: fs.read_text(\"-\") with a file named - - expected 'Ok F', got '$got'" >&2; exit 1
   fi
   # perl alarm is the portable timeout (macOS lacks `timeout`); it bounds a run that waits on stdin.
-  got=$(cd "$TMPD/no_dash" && printf 'S' | perl -e 'alarm 5; exec @ARGV' "$TMPD/dash_bin")
+  got=$(cd "$TMPD/no_dash" && perl -e 'alarm 5; exec @ARGV' "$TMPD/dash_bin" < "$TMPD/stdin_S")
   if [[ "$got" != *"Err"*"No such file"* ]]; then
     echo "argv-smoke: fs.read_text(\"-\") with no file named - - expected an Err, got '$got'" >&2; exit 1
   fi
