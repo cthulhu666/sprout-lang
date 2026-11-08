@@ -1,4 +1,6 @@
-# Verifies tuple expressions and tuple patterns lower via --use-ir-codegen
+import stdlib.test (check_eq, run_suite)
+
+# Verifies tuple expressions and tuple patterns lower
 # (M3 PR 7).  Closes the dominant blocker exposed by PR 6: 72 of 85
 # remaining IR_XFAIL entries fail at `ast_to_ir.sprout:699` with
 # `Tuple not yet supported` because TTuple expression case currently
@@ -58,5 +60,12 @@ fn get_count(p: (String, Int)) -> Int =
   match p with
   | (_, n) -> n
 
-# Trivial main — IR path requires `() : Unit` until PR 8 lands do/IO.
-fn main() -> Unit !{IO} = ()
+fn main() -> Unit !{IO} =
+  run_suite("ir_codegen_tuples", [
+    check_eq("pair fst", fst(make_pair(1, 2)), 1),
+    check_eq("pair snd", snd(make_pair(1, 2)), 2),
+    check_eq("triple middle", mid_of_triple(make_triple(1, 2, 3)), 2),
+    check_eq("round_trip", round_trip(10, 20), 30),
+    check_eq("labeled String field", get_label(make_labeled("tag", 7)), "tag"),
+    check_eq("labeled Int field", get_count(make_labeled("tag", 7)), 7)
+  ])

@@ -21,6 +21,12 @@ fn main() -> Unit !{IO} =
     check_eq("clamp overflow", str_slice_bytes("hi", 0, 100), "hi"),
     check_eq("clamp start at end", str_slice_bytes("hi", 2, 5), ""),
 
+    # --- Late offset: the lexer's last token in a long source (was O(n^2) via str_slice) ---
+    # 26 letters, each followed by a space = 52 bytes; "end_tok" starts at byte 52.
+    check_eq("late token",
+              str_slice_bytes("a b c d e f g h i j k l m n o p q r s t u v w x y z end_tok", 52, 7),
+              "end_tok"),
+
     # --- UTF-8 multi-byte (codepoint-boundary respect) ---
     # "Cześć" byte layout: C(1) z(1) e(1) ś(2) ć(2) = 7 bytes total.
     # Slicing on codepoint boundaries must yield valid UTF-8.

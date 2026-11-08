@@ -1,5 +1,7 @@
 module tests.stdlib.test_ir_entry_main_qualified
 
+import stdlib.test (new_state, assert_true, summary)
+
 # Regression: an entry `main` in a file with a `module` declaration is qualified
 # by the bundler. The typed-IR path (ast_to_ir) only renamed a bare `main` to
 # `__sprout_user_main`, so a qualified entry main was emitted under its qualified
@@ -9,8 +11,12 @@ module tests.stdlib.test_ir_entry_main_qualified
 # `source.entry_main_name` whatever the module is called, and codegen tests it
 # through `source.is_entry_main`.
 #
-# Run via --use-ir-codegen this must print "entry-main-ran"; before the fix it
-# printed nothing. Under `just test` (direct codegen) it also prints it.
+# The suite verdict is printed only if the entry main runs, so a main that never
+# ran leaves no `SUITE PASSED` line and the runner fails the suite (NO VERDICT).
+# Before the fix this program printed nothing.
 
 fn main() -> Unit !{IO} =
-  print("entry-main-ran")
+  do
+    state <- new_state()
+    assert_true(state, "entry main ran", true)
+    summary(state)

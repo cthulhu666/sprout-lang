@@ -1,4 +1,6 @@
-# Verifies short-circuit `&&` and `||` lower correctly via --use-ir-codegen
+import stdlib.test (check_true, check_false, run_suite)
+
+# Verifies short-circuit `&&` and `||` lower correctly
 # (M3 PR 4 — promoted ahead of the original PR 4 because PR 3's probe
 # showed `&&` blocks 72 of 85 remaining IR_XFAIL entries).
 #
@@ -6,15 +8,11 @@
 # into the equivalent TIf:
 #   a && b  ≡  if a then b else false
 #   a || b  ≡  if a then true else b
-# translate_if produces the canonical `br i1 + label + phi` LLVM pattern
-# that direct codegen emits via emit_short_circuit (codegen.sprout:2046+).
-# Reusing translate_if rather than introducing new IR ops means the
-# differential framework (PR 1.5) will report 0 divergence for any
-# shared-OK file that uses && or ||.
+# translate_if produces the canonical `br i1 + label + phi` LLVM pattern.
 #
-# Before PR 4: --use-ir-codegen errors with
+# Before PR 4: ast_to_ir errors with
 #   ERROR: ast_to_ir: binary op '&&' requires Int operands
-# After PR 4: emits LLVM with br i1 + phi pattern matching direct codegen.
+# After PR 4: emits LLVM with the br i1 + phi pattern.
 
 # Simple `&&`.
 fn both(a: Bool, b: Bool) -> Bool = a && b
@@ -50,5 +48,32 @@ fn first_some(a: Maybe Int, b: Maybe Int) -> Bool =
 fn has_any(a: Bool, b: Bool, m: Maybe Int) -> Bool =
   a || b || first_some(m, Nothing)
 
-# Trivial main — IR path requires `() : Unit` until PR 5 lands do/IO.
-fn main() -> Unit !{IO} = ()
+fn main() -> Unit !{IO} =
+  run_suite("ir_codegen_short_circuit", [
+    check_true("both true true", both(true, true)),
+    check_false("both true false", both(true, false)),
+    check_false("both false true", both(false, true)),
+    check_false("both false false", both(false, false)),
+    check_true("either true false", either(true, false)),
+    check_true("either false true", either(false, true)),
+    check_false("either false false", either(false, false)),
+    check_true("mixed a short-circuits", mixed(true, false, false)),
+    check_true("mixed b && c", mixed(false, true, true)),
+    check_false("mixed b only", mixed(false, true, false)),
+    check_false("mixed c only", mixed(false, false, true)),
+    check_true("in_range inside", in_range(5, 1, 10)),
+    check_true("in_range lo edge", in_range(1, 1, 10)),
+    check_true("in_range hi edge", in_range(10, 1, 10)),
+    check_false("in_range below", in_range(0, 1, 10)),
+    check_false("in_range above", in_range(11, 1, 10)),
+    check_true("safely_positive 3", safely_positive(3)),
+    check_false("safely_positive 0", safely_positive(0)),
+    check_false("safely_positive -1", safely_positive(-1)),
+    check_true("first_some a", first_some(Just(1), Nothing)),
+    check_true("first_some b", first_some(Nothing, Just(2))),
+    check_false("first_some neither", first_some(Nothing, Nothing)),
+    check_true("has_any a", has_any(true, false, Nothing)),
+    check_true("has_any b", has_any(false, true, Nothing)),
+    check_true("has_any m", has_any(false, false, Just(1))),
+    check_false("has_any none", has_any(false, false, Nothing))
+  ])

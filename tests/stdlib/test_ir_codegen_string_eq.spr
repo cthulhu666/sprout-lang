@@ -1,7 +1,9 @@
-# Verifies that String equality (`==` / `!=`) lowers correctly via
-# --use-ir-codegen (M3 PR 9).
+import stdlib.test (check_eq, check_true, check_false, run_suite)
+
+# Verifies that String equality (`==` / `!=`) lowers correctly
+# (M3 PR 9).
 #
-# Before PR 9: --use-ir-codegen errors with
+# Before PR 9: ast_to_ir errors with
 #   ERROR: ast_to_ir: binary op '==' requires Int operands
 # for any source that compares two String values.  The binary-op handler
 # had a monomorphic int-type guard that rejected all other operand types.
@@ -17,12 +19,9 @@
 #        %result      = zext i1 %result$i1 to i64
 #
 # For `!=`, an IRBoolNot (`xor i64 %r, 1`) follows IRStrEq.
-# Mirrors direct codegen's emit_ptr_comparison (codegen.sprout ~2094).
 #
-# This file defines representative functions so the --use-ir-codegen
-# compile+opt-verify path checks both ops in isolation and composition.
-# Runtime-level correctness is covered by the stdlib test suite
-# (direct-codegen path: `just test`).
+# This file defines representative functions and asserts their results, so both
+# ops are checked in isolation and in composition.
 #
 # Note: StringPattern-in-match (| "let" -> ...) is a separate IR parity
 # gap; those cases are intentionally absent here, not forgotten.
@@ -52,6 +51,25 @@ fn same_or_empty(a: String, b: String) -> Bool =
 fn is_keyword(s: String) -> Bool =
   s == "let" || s == "fn" || s == "if" || s == "then" || s == "else"
 
-# Trivial main — required by the compiler; no IO until do-block support
-# lands in the IR path.
-fn main() -> Unit !{IO} = ()
+fn main() -> Unit !{IO} =
+  run_suite("ir_codegen_string_eq", [
+    check_true("== equal", str_eq_fn("abc", "abc")),
+    check_false("== differ", str_eq_fn("abc", "abd")),
+    check_false("== prefix", str_eq_fn("abc", "ab")),
+    check_true("== both empty", str_eq_fn("", "")),
+    check_false("!= equal", str_neq_fn("abc", "abc")),
+    check_true("!= differ", str_neq_fn("abc", "abd")),
+    check_eq("classify yes", classify("yes"), "positive"),
+    check_eq("classify no", classify("no"), "other"),
+    check_true("non_empty x", non_empty("x")),
+    check_false("non_empty empty", non_empty("")),
+    check_true("same_or_empty equal", same_or_empty("a", "a")),
+    check_true("same_or_empty empty b", same_or_empty("a", "")),
+    check_false("same_or_empty neither", same_or_empty("a", "b")),
+    check_true("is_keyword let", is_keyword("let")),
+    check_true("is_keyword fn", is_keyword("fn")),
+    check_true("is_keyword if", is_keyword("if")),
+    check_true("is_keyword then", is_keyword("then")),
+    check_true("is_keyword else", is_keyword("else")),
+    check_false("is_keyword other", is_keyword("match"))
+  ])

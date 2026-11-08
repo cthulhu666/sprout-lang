@@ -1,4 +1,6 @@
-# Verifies CPR-eligible ctor APPLICATION compiles via --use-ir-codegen
+import stdlib.test (check_eq, run_suite)
+
+# Verifies CPR-eligible ctor APPLICATION compiles and runs
 # under boxed lowering (M3 PR 2).
 #
 # Sprout's direct codegen has a CPR (Constructed Product Result) optimization:
@@ -8,12 +10,9 @@
 # through the same boxed allocation path as non-CPR ctors (`@sprout_alloc_obj`).
 # Programs compile correctly; the unboxing perf win lands in PR 2b.
 #
-# This file uses CPR-eligible ctors without IO or do-blocks, so it can be
-# compiled via --use-ir-codegen end-to-end.  Before the PR 2 fix it fails
-# with `ERROR: ast_to_ir: CPR ctor lowering deferred to follow-up PR`.
+# Before the PR 2 fix this fails with
+# `ERROR: ast_to_ir: CPR ctor lowering deferred to follow-up PR`.
 # After: lowers cleanly to LLVM IR with @sprout_alloc_obj calls.
-#
-# Direct codegen has always handled this; this file is the IR-path coverage.
 
 type Box a =
   | Wrap a
@@ -50,5 +49,12 @@ fn snd_int(p: Pair Int Int) -> Int =
   match p with
   | MkPair _ b -> b
 
-# Trivial main — IR path requires `() : Unit` until PR 4 lands do/IO.
-fn main() -> Unit !{IO} = ()
+fn main() -> Unit !{IO} =
+  run_suite("ir_codegen_cpr_app", [
+    check_eq("unwrap_or Wrap", unwrap_or(make_wrap(7), 0), 7),
+    check_eq("unwrap_or Empty", unwrap_or(make_empty, 5), 5),
+    check_eq("round_trip", round_trip(123), 123),
+    check_eq("round_trip zero", round_trip(0), 0),
+    check_eq("fst_int", fst_int(make_pair(1, 2)), 1),
+    check_eq("snd_int", snd_int(make_pair(1, 2)), 2)
+  ])

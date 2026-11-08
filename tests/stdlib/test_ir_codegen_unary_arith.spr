@@ -1,11 +1,13 @@
+import stdlib.test (check_eq, check_true, check_false, run_suite)
+
 # Verifies TUnary `!` (boolean negation) and TBinary `/` (integer division)
-# lower correctly via --use-ir-codegen (M3 PR 3, promoted from old PR 8).
+# lower correctly (M3 PR 3, promoted from old PR 8).
 #
 # Promoted to right-after-PR-2 because the post-PR-2 IR_XFAIL probe revealed
 # that unary op blocks 72 of 85 remaining IR_XFAIL entries — the single
 # biggest gate to unblocking the IR-typed codegen path corpus.
 #
-# Before PR 3: --use-ir-codegen errors with
+# Before PR 3: ast_to_ir errors with
 #   ERROR: ast_to_ir: unary op not yet supported
 #   ERROR: ast_to_ir: binary op '/' not yet supported
 #
@@ -13,14 +15,7 @@
 #   xor i64 %x, 1     (boolean negation: flip 0↔1)
 #   sdiv i64          (signed integer division)
 #
-# Direct codegen already handles both; this is the IR-path coverage.
-# Snapshot test compiled via --emit-ir (TestState/Maybe usage is fine on
-# the direct path).  Each assertion greps the IR emitted by --use-ir-codegen
-# from a stage-1 subprocess — but invoking stage-1 from within a stage-1-
-# generated binary needs process.proc_run.  Until that machinery is in
-# place, the test relies on the IR_XFAIL bucket movement as the regression
-# signal (file removed from XFAIL = test passes; file in XFAIL with
-# unexpected OK = explicit fail).
+# main calls each function and asserts its result.
 
 # Boolean negation through TUnary `!`.
 fn negate_bool(b: Bool) -> Bool = !b
@@ -52,5 +47,18 @@ fn unwrap_or_zero(m: Maybe Int) -> Int =
   | Just k -> k
   | Nothing -> 0
 
-# Trivial main — IR path requires `() : Unit` until PR 5 lands do/IO.
-fn main() -> Unit !{IO} = ()
+fn main() -> Unit !{IO} =
+  run_suite("ir_codegen_unary_arith", [
+    check_false("negate_bool true", negate_bool(true)),
+    check_true("negate_bool false", negate_bool(false)),
+    check_true("double_negate true", double_negate(true)),
+    check_false("double_negate false", double_negate(false)),
+    check_true("is_negative -1", is_negative(-1)),
+    check_false("is_negative 0", is_negative(0)),
+    check_false("is_negative 1", is_negative(1)),
+    check_eq("div_simple", div_simple(7, 2), 3),
+    check_eq("div_simple negative", div_simple(-7, 2), -3),
+    check_eq("average", average(3, 6), 4),
+    check_eq("safe_div ok", unwrap_or_zero(safe_div(10, 2)), 5),
+    check_eq("safe_div by zero", unwrap_or_zero(safe_div(10, 0)), 0)
+  ])

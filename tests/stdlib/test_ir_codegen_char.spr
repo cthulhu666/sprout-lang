@@ -1,3 +1,5 @@
+import stdlib.test (check_eq, check_true, check_false, run_suite)
+
 # M3 PR 12 — Char literal + char_to_string + CharPattern lowering.
 #
 # Sprout functions exercising the three Char sub-tasks:
@@ -5,12 +7,9 @@
 #   2. char_to_string — explicit call to the prelude extern.
 #   3. CharPattern    — match on a Char literal lowers to IRStrEq + IRCondBr.
 #
-# Imports the prelude (via stdlib.string) so the non-intrinsic extern
-# char_to_string resolves.  An importless file is self-contained and does NOT
-# get the prelude, so a char_to_string call there is a hard "unresolved call"
-# error (codegen.emit_named_call) rather than a silent zero_val.
+# char_to_string is a non-intrinsic prelude extern, so it must resolve from the prelude.
 
-# 0. Use the import so it is not dead, and keep prelude bundling deterministic.
+# 0. A prelude extern (str_len), to keep prelude bundling deterministic.
 fn len_of(s: String) -> Int = str_len(s)
 
 # 1. TChar literal: returns the char value as a String via char_to_string.
@@ -34,4 +33,15 @@ fn char_rank(c: Char) -> Int =
   | 'c' -> 3
   | _ -> 0
 
-fn main() -> Unit !{IO} = ()
+fn main() -> Unit !{IO} =
+  run_suite("ir_codegen_char", [
+    check_eq("len_of", len_of("abc"), 3),
+    check_eq("char_as_string", char_as_string('z'), "z"),
+    check_eq("get_a through char_as_string", char_as_string(get_a), "a"),
+    check_true("is_a 'a'", is_a('a')),
+    check_false("is_a 'b'", is_a('b')),
+    check_eq("char_rank a", char_rank('a'), 1),
+    check_eq("char_rank b", char_rank('b'), 2),
+    check_eq("char_rank c", char_rank('c'), 3),
+    check_eq("char_rank other", char_rank('z'), 0)
+  ])

@@ -1,5 +1,7 @@
-# Verifies user `extern fn` declarations lower to LLVM `declare` lines via
-# --use-ir-codegen (M3 PR 14).
+import stdlib.test (new_state, assert_true, summary)
+
+# Verifies user `extern fn` declarations lower to LLVM `declare` lines
+# (M3 PR 14).
 #
 # Before this PR, ast_to_ir.sprout's translate_decl mapped TExternFnDecl to
 # Ok(Nothing) — externs were silently dropped — and ir_lowering.sprout had a
@@ -32,5 +34,11 @@ extern fn pr14_probe_extern(n: Int) -> Int !{IO}
 extern fn pr14_probe_zero() -> Int !{IO}
 extern fn pr14_probe_two(a: Int, b: Int) -> Int !{IO}
 
-# Trivial main — IR path requires `()` until further milestones.
-fn main() -> Unit !{IO} = ()
+# main asserts only that the program compiled, verified, linked and ran with the
+# declarations present; there is no function result to check, since the externs
+# are fictional and never called.
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_true(state, "ran with extern declarations present", true)
+    summary(state)

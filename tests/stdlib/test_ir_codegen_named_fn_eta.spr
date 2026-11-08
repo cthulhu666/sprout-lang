@@ -1,10 +1,11 @@
 import stdlib.string as string
+import stdlib.test (check_eq, run_suite)
 # Rebase-merge regression marker: synthesize_eta_wrapper must build IRFunction
 # with List (String, IRType) params, not List String. PR #44 (IRType ADT) changed
 # the IRFunction constructor; PR #51 must use build_wrapper_arg_params (not
 # build_wrapper_arg_names) so env$ and args carry IRTHeap type annotations.
 #
-# Verifies bare TVar reference to a top-level fn lowers via --use-ir-codegen
+# Verifies bare TVar reference to a top-level fn lowers
 # (M3 PR 6).  Closes the dominant blocker exposed by PR 5: 72 of 85
 # remaining IR_XFAIL entries fail with `unbound variable '<name>'` because
 # top-level fns (and externs declared in prelude) referenced as VALUES
@@ -47,5 +48,9 @@ fn doubled_of_7() -> Int = apply(double, 7)
 # wrapper synthesis is per-reference (no dedup), or deduplicated cleanly.
 fn pair_of_squares(a: Int, b: Int) -> Int = apply(square, a) + apply(square, b)
 
-# Trivial main — IR path requires `() : Unit` until PR 7 lands do/IO.
-fn main() -> Unit !{IO} = ()
+fn main() -> Unit !{IO} =
+  run_suite("ir_codegen_named_fn_eta", [
+    check_eq("apply(square, 5)", squared_of_5(), 25),
+    check_eq("apply(double, 7)", doubled_of_7(), 14),
+    check_eq("pair_of_squares", pair_of_squares(3, 4), 25)
+  ])
