@@ -858,7 +858,7 @@ SCRAM helpers (in `stdlib/scram.sprout`):
 - `random_nonce(count: Int) -> Result CryptoError String`
 - `client_first_bare(username, nonce) -> String`
 - `client_first_message(username, nonce) -> String`
-- `parse_server_first(raw) -> Result ScramError ScramServerFirst`
+- `parse_server_first(raw) -> Result ScramError ScramServerFirst` — the `i=` count must be 1 to 1,000,000, else `ScramInvalidIterationCount`; `client_final` applies the same bound
 - `client_final_without_proof(channel_binding, server) -> String`
 - `client_final(password, client_first_bare_raw, server, channel_binding) -> Result ScramError ScramClientFinal`
   — runs PBKDF2 once and keeps the server signature the exchange expects back

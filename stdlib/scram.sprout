@@ -61,15 +61,29 @@ fn attr_value(raw: String, key: String) -> Maybe String =
           | Just value -> Just(value)
           | Nothing -> attr_value(rest, key)
 
-# W8/P1: parse_int is now total (Maybe Int), so the digits_only predicate is
-# redundant. Still reject negatives (the old digits check excluded '-').
+# Upper bound on the iteration count a server may ask for. It bounds the work a server can
+# ask of the client: `hi` runs every round without yielding. 1,000,000 admits OWASP's 600,000
+# for PBKDF2-HMAC-SHA256; PostgreSQL's default is 4096. For comparison, Go pgx caps at
+# 10,000,000 and Rust postgres-protocol at 100,000. Not exported: callers see the limit
+# through the `ScramInvalidIterationCount` message.
+let scram_max_iterations: Int = 1000000
+
+# The one place the bound is stated. Used at parse and again in `hi`, which a hand-built
+# `ScramServerFirst` reaches without parsing.
+fn check_iteration_count(n: Int) -> ScramResult Int =
+  if n <= 0 then Err(ScramInvalidIterationCount("SCRAM iteration count must be positive"))
+  else if n > scram_max_iterations then
+    Err(ScramInvalidIterationCount(`SCRAM iteration count ${to_string(n)} exceeds the limit ${to_string(scram_max_iterations)}`))
+  else Ok(n)
+
+# parse_int is total (Maybe Int): non-digits, negatives and digit runs past Int range are Nothing.
 fn parse_positive_int(raw: String) -> ScramResult Int =
   if string.is_empty(raw) then Err(ScramInvalidIterationCount("SCRAM iteration count cannot be empty"))
   else scram_int_result(parse_int(raw))
 
 fn scram_int_result(m: Maybe Int) -> ScramResult Int =
   match m with
-  | Just n -> if n >= 0 then Ok(n) else Err(ScramInvalidIterationCount("SCRAM iteration count must be decimal digits"))
+  | Just n -> check_iteration_count(n)
   | Nothing -> Err(ScramInvalidIterationCount("SCRAM iteration count must be decimal digits"))
 
 export fn parse_server_first(raw: String) -> ScramResult ScramServerFirst =
@@ -134,8 +148,9 @@ where
   current = crypto.hmac_sha256(password, previous)
 
 fn hi(password: Bytes, salt: Bytes, iterations: Int) -> ScramResult Bytes =
-  if iterations <= 0 then Err(ScramInvalidIterationCount("SCRAM iteration count must be positive"))
-  else hi_loop(password, first, iterations - 1, first)
+  match check_iteration_count(iterations) with
+  | Err err -> Err(err)
+  | Ok _ -> hi_loop(password, first, iterations - 1, first)
 where
   first = crypto.hmac_sha256(password, bytes.append(salt, bytes.u32_be(1)))
 
