@@ -1,6 +1,6 @@
 module examples.aoc_2025_day_4
 import stdlib.string (char_at_or, join, length, string_from_char, string_lines)
-import stdlib.fs as fs
+import stdlib.terminal as terminal
 
 # Advent of Code 2025 Day 4: Printing Department
 # part1 counts currently accessible rolls.
@@ -82,9 +82,9 @@ fn solve_grid(grid: Vec String) -> Answers =
   Answers(count_accessible_now(grid), total_removable(grid, 0))
 
 export fn solve_stdin() -> Answers !{IO} =
-  match fs.read_text("-") with
+  match terminal.read_stdin_text() with
   | Ok content -> content |> parse_grid |> solve_grid
-  | Err msg -> panic("read_file: " ++ msg)
+  | Err msg -> panic("stdin: " ++ msg)
 
 fn main() -> Unit !{IO} =
   print(solve_stdin())

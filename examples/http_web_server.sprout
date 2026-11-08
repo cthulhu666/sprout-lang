@@ -237,10 +237,10 @@ let form_template_path: String = "examples/templates/user_form.html"
 # (stdout) — the same logger the request middleware uses.
 fn main() -> Unit !{IO} =
   match fs.read_text(list_template_path) with
-  | Err msg -> log.error(lg, `failed to read ${list_template_path}: ${msg}`)
+  | Err msg -> log.error(lg, `failed to read ${msg}`)
   | Ok list_src ->
       match fs.read_text(form_template_path) with
-      | Err msg -> log.error(lg, `failed to read ${form_template_path}: ${msg}`)
+      | Err msg -> log.error(lg, `failed to read ${msg}`)
       | Ok form_src -> compile_and_serve(lg, list_src, form_src)
 where
   lg = log.stderr_logger(log.Info)

@@ -394,7 +394,7 @@ export fn type_of_expr_in_source(src: String, expr: String, stdlib_root: source.
 # compile_file: read a file, strip headers, then call compile_source.
 export fn compile_file(path: source.FilePath) -> CompileResult !{IO} =
   match fs.read_text(source.filepath_str(path)) with
-  | Err msg -> panic("read_file: " ++ source.filepath_str(path) ++ ": " ++ msg)
+  | Err msg -> panic("cannot read " ++ msg)
   | Ok src -> compile_source(source.strip_headers(src))
 
 # ---------------------------------------------------------------------------

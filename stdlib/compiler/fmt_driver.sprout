@@ -39,19 +39,19 @@ fn print_findings(path: String, findings: List lint_rules.LintFinding) -> Unit !
 # A failure reports on stderr and fails the run, leaving stdout to carry only the
 # report (docs/compiler-internals.md §Driver diagnostic contract). One unreadable
 # path must not abandon the rest of the batch, so neither of these panics.
-fn read_failed(path: String, msg: String) -> Int !{IO} =
+fn read_failed(msg: String) -> Int !{IO} =
   do
-    eprint("read_file: " ++ path ++ ": " ++ msg)
+    eprint("cannot read " ++ msg)
     1
 
-fn write_failed(path: String, msg: String) -> Int !{IO} =
+fn write_failed(msg: String) -> Int !{IO} =
   do
-    eprint("write_file: " ++ path ++ ": " ++ msg)
+    eprint("cannot write " ++ msg)
     1
 
 fn run_fmt_check(path: String) -> Int !{IO} =
   match fs.read_text(path) with
-  | Err msg -> read_failed(path, msg)
+  | Err msg -> read_failed(msg)
   | Ok src ->
       do
         if formatter.is_formatted(src)
@@ -64,7 +64,7 @@ fn run_fmt_check(path: String) -> Int !{IO} =
 
 fn run_fmt_write(path: String) -> Int !{IO} =
   match fs.read_text(path) with
-  | Err msg -> read_failed(path, msg)
+  | Err msg -> read_failed(msg)
   | Ok src ->
       do
         let formatted = formatter.format_source(src)
@@ -74,7 +74,7 @@ fn run_fmt_write(path: String) -> Int !{IO} =
           0
         else
           match fs.write_text(path, formatted) with
-          | Err msg -> write_failed(path, msg)
+          | Err msg -> write_failed(msg)
           | Ok _ ->
               do
                 print("formatted " ++ path)
@@ -82,7 +82,7 @@ fn run_fmt_write(path: String) -> Int !{IO} =
 
 fn run_lint_file(path: String) -> Int !{IO} =
   match fs.read_text(path) with
-  | Err msg -> read_failed(path, msg)
+  | Err msg -> read_failed(msg)
   | Ok src ->
       do
         let tokenized = lexer.tokenize_source(src)

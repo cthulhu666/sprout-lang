@@ -1,6 +1,6 @@
 /* Runtime code that names a constructor takes its tag from the registered metadata when the
  * program supplies no constant. Register the constructors at non-default tags and check each
- * builder returns the registered tag: the `_unboxed` Maybe reads (hit and miss), `read_file`'s
+ * builder returns the registered tag: the `_unboxed` Maybe reads (hit and miss), `fs_read_bytes`'s
  * `Err` and `Ok`, and the channel builders' `stdlib.chan.Got` / `stdlib.chan.Closed`. Each
  * builder runs twice so a cached tag is exercised too.
  * Unboxed layout: low word = tag, high word = payload.
@@ -21,7 +21,7 @@ long long bytes_singleton(long long value);
 long long bytes_append(long long left, long long right);
 Unboxed2 vector_get_unboxed(long long vec, long long index);
 Unboxed2 bytes_get_unboxed(long long bytes, long long index);
-long long read_file(long long path);
+long long fs_read_bytes(long long path);
 long long sprout_tag(long long h);
 long long sprout_chan_make_got(long long v);
 long long sprout_chan_make_closed(void);
@@ -53,6 +53,7 @@ int main(void) {
   sprout_register_ctor(22, "Ok", 1, "p");
   sprout_register_ctor(23, "stdlib.chan.Got", 1, "i");
   sprout_register_ctor(24, "stdlib.chan.Closed", 0, "");
+  sprout_register_ctor(25, "stdlib.fs.FsNotFound", 1, "s");
 
   long long vec = vector_empty();
   vector_push(vec, 41);
@@ -81,9 +82,9 @@ int main(void) {
   }
   close(fd);
   for (int round = 0; round < 2; round++) {
-    bad |= check_tag("read_file missing -> Err",
-                     read_file((long long)(uintptr_t)"/definitely/missing/sprout-tag.txt"), 21);
-    bad |= check_tag("read_file ok -> Ok", read_file((long long)(uintptr_t)path), 22);
+    bad |= check_tag("fs_read_bytes missing -> Err",
+                     fs_read_bytes((long long)(uintptr_t)"/definitely/missing/sprout-tag.txt"), 21);
+    bad |= check_tag("fs_read_bytes ok -> Ok", fs_read_bytes((long long)(uintptr_t)path), 22);
     bad |= check_tag("chan Got", sprout_chan_make_got(5), 23);
     bad |= check_tag("chan Closed", sprout_chan_make_closed(), 24);
     bad |= check("vector hit again", vector_get_unboxed(vec, 0), 8, 41);

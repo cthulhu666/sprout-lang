@@ -215,13 +215,13 @@ fn read_children(segs: List String) -> Msg !{IO} =
 fn read_at(p: document.FilePath, r: version.Version) -> Msg !{IO} =
   match fs.read_text(document.path_text(p)) with
   | Ok body -> Loaded(stamped.stamp(r, (p, body)))
-  | Err e -> Noted(`cannot read ${document.path_text(p)}: ${e}`)
+  | Err e -> Noted(`cannot read ${e}`)
 
 fn write_body(p: document.FilePath, body: String,
               r: version.Version) -> Msg !{IO} =
   match fs.write_text(document.path_text(p), body) with
   | Ok _ -> Written(ed.WroteTo(stamped.stamp(r, p)))
-  | Err e -> Written(ed.WriteFailed(`cannot write ${document.path_text(p)}: ${e}`))
+  | Err e -> Written(ed.WriteFailed(`cannot write ${e}`))
 
 # ── what the application decides ────────────────────────────────────────────
 

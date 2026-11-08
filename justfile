@@ -186,7 +186,7 @@ fmt-batch-smoke: build-fmt-from-seed
   if [[ "$status" -eq 0 ]]; then
     echo "fmt-batch-smoke: an unreadable path must exit nonzero" >&2; fail=1
   fi
-  if ! grep -qs 'read_file:' "$TMPD/bad.err"; then
+  if ! grep -qs 'cannot read .*absent.sprout: ' "$TMPD/bad.err"; then
     echo "fmt-batch-smoke: the read failure must reach stderr, not stdout" >&2
     echo "  --- stdout ---" >&2; cat "$TMPD/bad.out" >&2
     echo "  --- stderr ---" >&2; cat "$TMPD/bad.err" >&2
@@ -219,7 +219,7 @@ fmt-batch-smoke: build-fmt-from-seed
   if [[ "$status" -eq 0 ]]; then
     echo "fmt-batch-smoke: an unwritable path must exit nonzero" >&2; fail=1
   fi
-  if ! grep -qs 'write_file:' "$TMPD/ro.err"; then
+  if ! grep -qs 'cannot write .*ugly.sprout: ' "$TMPD/ro.err"; then
     echo "fmt-batch-smoke: the write failure must reach stderr, not stdout" >&2
     cat "$TMPD/ro.out" "$TMPD/ro.err" >&2; fail=1
   fi
@@ -2032,7 +2032,7 @@ diagnostic-stream-smoke: bootstrap-from-seed
 
   # --check-iface must never SUCCEED SILENTLY. Its own contract (compile_driver.sprout) promises a
   # caller can gate on the exit status "instead of scraping text", and an unreadable path defeated
-  # that completely: `contents <- read_file(path)` discarded the Err and returned early, so the
+  # that completely: `contents <- fs.read_text(path)` discarded the Err and returned early, so the
   # driver printed NOTHING and exited 0 for a file it never read. Found 2026-08-11 by the
   # discarded-fallible-bind measurement (docs/fallible-bind-diagnostic-v0.md) — it was the only
   # production hit in the whole tree.
@@ -2144,7 +2144,8 @@ verify-dispatch-smoke: bootstrap-from-seed
 # NO args, so this is the ONLY gate exercising argv under typed codegen.
 # It also covers the other ways outside bytes reach a program, none of which may mint a String
 # that is not valid UTF-8: an argument (argv_utf8.spr, argv_bytes.spr), an environment value
-# (env_utf8.spr), a stdin line (term_line.spr) and stdin bytes (stdin_nul.spr).
+# (env_utf8.spr), a stdin line (term_line.spr) and stdin bytes (stdin_nul.spr, stdin_all.spr). It
+# also pins that `fs.read_text("-")` reads a file, not stdin (fs_read_dash.spr).
 [group('smoke')]
 argv-smoke: bootstrap-from-seed
   #!/usr/bin/env bash
@@ -2284,6 +2285,42 @@ argv-smoke: bootstrap-from-seed
   if [[ "$got" != "$want" ]]; then
     echo "argv-smoke: stdin_read_bytes - expected:" >&2; echo "$want" >&2; echo "got:" >&2; echo "$got" >&2
     exit 1
+  fi
+  # fs.read_text("-") reads a file called `-`; it does not read stdin. stdin carries `S` in both
+  # arms, so output `S` means stdin was read.
+  build_fixture tests/argv_smoke/fs_read_dash.spr "$TMPD/dash_bin" \
+    "fs_read_dash fixture emit failed" "fs_read_dash fixture link failed"
+  mkdir "$TMPD/with_dash" "$TMPD/no_dash"
+  printf 'F' > "$TMPD/with_dash/-"
+  got=$(cd "$TMPD/with_dash" && printf 'S' | "$TMPD/dash_bin")
+  if [[ "$got" != "Ok F" ]]; then
+    echo "argv-smoke: fs.read_text(\"-\") with a file named - - expected 'Ok F', got '$got'" >&2; exit 1
+  fi
+  # perl alarm is the portable timeout (macOS lacks `timeout`); it bounds a run that waits on stdin.
+  got=$(cd "$TMPD/no_dash" && printf 'S' | perl -e 'alarm 5; exec @ARGV' "$TMPD/dash_bin")
+  if [[ "$got" != *"Err"*"No such file"* ]]; then
+    echo "argv-smoke: fs.read_text(\"-\") with no file named - - expected an Err, got '$got'" >&2; exit 1
+  fi
+  # read_stdin_bytes: an exact round trip, with CR, NUL and no trailing newline. Hex is
+  # 61 0d 0a 62 00 63. An empty stdin (/dev/null, not pollable) is Ok with no bytes.
+  build_fixture tests/argv_smoke/stdin_all.spr "$TMPD/all_bin" \
+    "stdin_all fixture emit failed" "stdin_all fixture link failed"
+  got=$(printf 'a\r\nb\0c' | "$TMPD/all_bin" bytes)
+  if [[ "$got" != "Ok 610d0a620063" ]]; then
+    echo "argv-smoke: read_stdin_bytes - expected 'Ok 610d0a620063', got '$got'" >&2; exit 1
+  fi
+  got=$("$TMPD/all_bin" bytes < /dev/null)
+  if [[ "$got" != "Ok " ]]; then
+    echo "argv-smoke: read_stdin_bytes on /dev/null - expected 'Ok ', got '$got'" >&2; exit 1
+  fi
+  # read_stdin_text: text comes back whole; input that is not UTF-8 is an Err.
+  got=$(printf 'h\xc3\xa9llo' | "$TMPD/all_bin" text)
+  if [[ "$got" != $'Ok h\xc3\xa9llo' ]]; then
+    echo "argv-smoke: read_stdin_text - expected 'Ok h\xc3\xa9llo', got '$got'" >&2; exit 1
+  fi
+  got=$(printf '\xff' | "$TMPD/all_bin" text)
+  if [[ "$got" != Err* ]]; then
+    echo "argv-smoke: read_stdin_text on non-UTF-8 - expected an Err, got '$got'" >&2; exit 1
   fi
   echo "==> argv-smoke ✓"
 

@@ -1848,7 +1848,7 @@ extern fn print_str(s: String) -> Unit !{IO}
 export fn print(value: a) -> Unit !{IO} where linear a, ToString a =
   print_str(to_string(value))
 
-# Filesystem primitives are NOT declared here. `read_file` / `write_file` live in stdlib.fs, which
+# Filesystem primitives are NOT declared here. They live in stdlib.fs, which
 # must be imported explicitly; callers use `fs.read_text` / `fs.write_text`. Reading and writing
 # files is not something a program should be able to reach by accident — the same reasoning already
 # recorded below for stdlib.net's socket primitives.

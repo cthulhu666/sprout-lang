@@ -96,7 +96,7 @@ fn read_children(segs: List String) -> Msg !{IO} =
 fn read_body(segs: List String) -> Msg !{IO} =
   match fs.read_text(joined(segs)) with
   | Ok body -> Shown(body)
-  | Err e -> Shown(`cannot read ${joined(segs)}: ${e}`)
+  | Err e -> Shown(`cannot read ${e}`)
 
 fn listed_for(m: Msg) -> Maybe tr.Update =
   match m with

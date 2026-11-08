@@ -1,0 +1,12 @@
+module main
+
+import stdlib.fs as fs
+
+# Prints `fs.read_text("-")`: `Ok <text>` or `Err <message>`. "-" is an ordinary path, not stdin.
+# Run via `just argv-smoke` from a directory that does, or does not, hold a file named `-`, with
+# stdin carrying `S`.
+
+fn main() -> Unit !{IO} =
+  match fs.read_text("-") with
+  | Ok text -> print("Ok " ++ text)
+  | Err msg -> print("Err " ++ msg)

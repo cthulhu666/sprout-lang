@@ -199,7 +199,7 @@ Each of the 111 gets a decision in the migration PR:
   `stdlib.bits`'s `bit_*`, `stdlib.string`'s byte-offset functions, `bytes_from_utf8`,
   `term_write`, `split_words`, `json_stringify`, and the 9 already marked.
 - **A bridge its own module wraps: stays private.** Its module's Sprout wrapper is the API, as
-  `read_text` is over `read_file`. Decided by Kuba, 2026-10-24: 56 such externs had no caller
+  `read_text` is over `fs_read_bytes`. Decided by Kuba, 2026-10-24: 56 such externs had no caller
   outside their module, here or in uncharted-suns, repbit or sprout-sqlite. Examples: the `fs_*`,
   `crypto_*`, `term_*` and `bytes_builder_*` sets, `http_request`, `proc_run_raw`.
 - **Internal: stays private.** Examples: `vector_mutset`, `vector_push`, `vector_truncate`,

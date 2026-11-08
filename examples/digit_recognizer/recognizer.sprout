@@ -149,7 +149,7 @@ fn load_lines(lines: List String) -> List (MutVec Double, Int) !{IO} =
             Cons((pixels, label), others)
 
 fn load_dataset(path: String) -> List (MutVec Double, Int) !{IO} =
-  # Match read_file directly: a do-bind would strip the Result wrapper.
+  # Match fs.read_text directly: a do-bind would strip the Result wrapper.
   match fs.read_text(path) with
   | Err _ -> Nil
   | Ok text -> load_lines(str_split_lines(text))

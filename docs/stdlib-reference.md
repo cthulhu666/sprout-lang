@@ -256,10 +256,12 @@ Filesystem module (in `stdlib/fs.sprout`):
 - `write_text(path: String, content: String) -> Result String Unit !{IO}`
 
 Named `*_text` rather than `*_file` because that is the actual contract:
-`read_file` validates the whole buffer as UTF-8 before returning and reports a
-binary file as `Err`, so this pair cannot read one. `Err` carries a
-human-readable message — `strerror(errno)`, a UTF-8 decode reason, or
-`"null path"` / `"out of memory"` — and must not be pattern-matched on.
+`read_text` decodes the whole file as UTF-8 and reports a file that is not text
+as `Err`, so this pair cannot read a binary file. Both are written in Sprout over
+`read_bytes` / `write_bytes`. `Err` carries a human-readable message,
+`"<path>: <reason>"` (the reason is `strerror(errno)` or a UTF-8 decode reason),
+and must not be pattern-matched on. No path is special: `"-"` names a file called
+`-`; to read stdin use `terminal.read_stdin_text`.
 
 The rest of the module is the **classified** surface, whose error is a matchable
 `FsError` rather than a String. Both halves coexist; the pair above is not
@@ -924,6 +926,12 @@ Session surface, for a UI rather than a prompt:
 - `raw_enter() -> Unit !{IO}` / `raw_exit() -> Unit !{IO}`
 - `size() -> TermSize !{IO}`, with `size_rows(s) -> Int` / `size_cols(s) -> Int`
 - `read_avail(max, timeout_ms) -> TermInput !{IO}`
+- `read_stdin_bytes() -> Result String Bytes !{IO}` — all of stdin to EOF, byte for byte (line ends,
+  NUL and non-UTF-8 bytes kept); `Err` is a read failure. Parks the task on a pipe. It reads fd 0
+  directly, so bytes an earlier `term_read_line` already buffered are not seen: do not mix the two
+  on one stream. `read_avail`'s one-reader rule applies
+- `read_stdin_text() -> Result String String !{IO}` — the same, decoded as UTF-8; `Err` is a read
+  failure or the decode reason (a NUL byte counts)
 
 `TermInput` is total by construction — `TermBytes Bytes`, `TermIdle`,
 `TermResized`, `TermEof`, `TermFailed String` — so every outcome the descriptor

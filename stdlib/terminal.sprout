@@ -168,3 +168,33 @@ export fn size_cols(s: TermSize) -> Int =
 # task and hand events on through a channel.
 export fn read_avail(max: Int, timeout_ms: Int) -> TermInput !{IO} =
   term_read_avail(max, timeout_ms)
+
+# All of stdin up to EOF, byte for byte: line ends, NUL and non-UTF-8 bytes are kept. `Err` is a
+# read failure.
+#
+# Parks the calling task on a pipe, so other tasks keep running while it waits. It reads fd 0
+# directly, so bytes an earlier `term_read_line` (stdio getline) already buffered are not seen:
+# do not mix the two on one stream. `read_avail`'s one-reader rule applies. It does not hold raw
+# mode; under raw mode a terminal never reports EOF.
+export fn read_stdin_bytes() -> Result String Bytes !{IO} =
+  read_stdin_loop(Nil)
+
+# `parts` is the chunks so far, newest first. `builder_concat` joins them once at EOF: a left fold
+# of `builder_append` is O(k^2) in the chunk count, and the writer on the other end picks k.
+fn read_stdin_loop(parts: List Builder) -> Result String Bytes !{IO} =
+  match read_avail(4096, 1000) with
+  | TermBytes chunk -> read_stdin_loop(Cons(bytes.builder_bytes(chunk), parts))
+  | TermIdle -> read_stdin_loop(parts)
+  | TermResized -> read_stdin_loop(parts)
+  | TermEof -> Ok(bytes.builder_build(bytes.builder_concat(list_reverse(parts))))
+  | TermFailed msg -> Err(msg)
+
+# All of stdin as text. `Err` is a read failure, or the reason the bytes are not valid UTF-8 text
+# (a NUL byte counts). Same stream rules as `read_stdin_bytes`.
+export fn read_stdin_text() -> Result String String !{IO} =
+  match read_stdin_bytes() with
+  | Err msg -> Err(msg)
+  | Ok raw ->
+      match bytes.to_string(raw) with
+      | Ok text -> Ok(text)
+      | Err (bytes.Utf8DecodeError reason) -> Err(reason)
