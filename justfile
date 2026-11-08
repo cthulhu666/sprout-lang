@@ -421,6 +421,13 @@ debug-run file: bootstrap-from-seed
 [group('test')]
 test: test-stdlib-stage1 test-ide test-type-errors test-linear-grid test-parse-errors test-executable-errors test-emit-errors test-conformance-run test-package-resolution test-front-end-agreement test-renaming-termination
 
+# MANUAL, not a gate: runs the whole suite under an instrumented compiler plus every test binary (long).
+# Compiler, stdlib and C runtime coverage from `just test`'s inputs, in build/coverage/results.
+# See scripts/coverage/README.md.
+[group('test')]
+coverage: bootstrap-from-seed
+  bash scripts/coverage/run_all.sh
+
 # The two typecheck front ends must reach the same verdict, and the editor one must
 # terminate. `--phase check` runs the bundler; the DEFAULT phase runs the env path, which
 # is what the REPL, analysis service and LSP use — and which no gate ran before this one,
@@ -5132,6 +5139,8 @@ gate-audit:
   #                           its meaning.  Run it by hand to substantiate such a claim.
   #   setup-dev.sh          — manual installer; an automatic gate must never install host
   #                           packages. test-setup-dev covers its dry-run and idempotent paths.
+  # scripts/coverage/ is not listed: the loop below globs scripts/*.sh only, and the `coverage`
+  # recipe is manual (its name matches no verification pattern in assertion D either).
   SCRIPTS_EXCLUDE="seed_gate.sh guidelines_reminder.sh memwatch.sh ir_byte_identical_check.sh setup-dev.sh"
   unreachable=""
   shopt -s nullglob
