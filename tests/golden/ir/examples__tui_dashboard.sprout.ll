@@ -140,13 +140,13 @@ declare i64 @vector_truncate(i64, i64)
 @.str.12 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1968, column 58)\00" }
 @.str.13 = private unnamed_addr constant { i64, [24 x i8] } { i64 376842, [24 x i8] c"str_byte_at: null input\00" }
 @.str.14 = private unnamed_addr constant { i64, [34 x i8] } { i64 540682, [34 x i8] c"str_byte_at: String has no header\00" }
-@.str.15 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 63, column 42)\00" }
-@.str.16 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 193, column 31)\00" }
-@.str.17 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 193, column 40)\00" }
-@.str.18 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 193, column 69)\00" }
-@.str.19 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 194, column 44)\00" }
-@.str.20 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 200, column 42)\00" }
-@.str.21 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 225, column 80)\00" }
+@.str.15 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 68, column 42)\00" }
+@.str.16 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 198, column 31)\00" }
+@.str.17 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 198, column 40)\00" }
+@.str.18 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 198, column 69)\00" }
+@.str.19 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 199, column 44)\00" }
+@.str.20 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 205, column 42)\00" }
+@.str.21 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 230, column 80)\00" }
 @.str.22 = private unnamed_addr constant { i64, [66 x i8] } { i64 1064970, [66 x i8] c"channel capacity must be >= 0 (0 = rendezvous / unbuffered), got \00" }
 @.str.23 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"[?1049h\00" }
 @.str.24 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"[?1049l\00" }

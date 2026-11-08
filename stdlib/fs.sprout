@@ -33,14 +33,10 @@ import stdlib.string as string
 # `-`, and `terminal.read_stdin_text` reads stdin.
 export fn read_text(path: String) -> Result String String !{IO} =
   let Ok raw = fs_read_bytes(path) else Err e -> Err(fs_error_message(e))
-  in bytes.to_string(raw) |> result_pipe_error(\e -> path ++ ": " ++ decode_reason(e))
+  in bytes.to_string(raw) |> result_pipe_error(\e -> path ++ ": " ++ bytes.utf8_error_message(e))
 
 export fn write_text(path: String, content: String) -> Result String Unit !{IO} =
   fs_write_bytes(path, bytes.from_string(content)) |> result_pipe_error(fs_error_message)
-
-fn decode_reason(e: bytes.Utf8Error) -> String =
-  match e with
-  | bytes.Utf8DecodeError reason -> reason
 
 # ---------------------------------------------------------------------------
 # Listing, metadata, binary I/O, mutation

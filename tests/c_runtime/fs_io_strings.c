@@ -11,6 +11,8 @@
  *
  * argv[1] = a scratch directory that exists and is empty; stdin carries the bytes "hel\0o".
  */
+#include <errno.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,6 +20,15 @@
 #include <unistd.h>
 
 #include "str_check.h"
+
+/* Not under ASan: its allocator aborts on an oversized malloc instead of returning NULL. */
+#if defined(__SANITIZE_ADDRESS__)
+#define SPROUT_TEST_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define SPROUT_TEST_ASAN 1
+#endif
+#endif
 
 long long fs_list_dir(long long path_i);
 long long fs_read_bytes(long long path_i);
@@ -100,14 +111,6 @@ int main(int argc, char** argv) {
    * 47-bit address space holds) makes malloc fail: the out-of-memory Err must name the path like
    * every other fs_* Err. Skipped where the filesystem refuses a file that large (ext4 caps files
    * at 16 TiB, so this runs on APFS and tmpfs). */
-  /* Not under ASan: its allocator aborts on a request this large instead of returning NULL. */
-#if defined(__SANITIZE_ADDRESS__)
-#define SPROUT_TEST_ASAN 1
-#elif defined(__has_feature)
-#if __has_feature(address_sanitizer)
-#define SPROUT_TEST_ASAN 1
-#endif
-#endif
 #ifndef SPROUT_TEST_ASAN
   snprintf(path, sizeof path, "%s/huge.sparse", dir);
   FILE* huge = fopen(path, "wb");
@@ -124,6 +127,22 @@ int main(int argc, char** argv) {
     unlink(path);
   }
 #endif
+
+  /* A path of about 2000 bytes: the Err names all of it, then the reason. The reason is whatever
+   * errno the OS gives (ENAMETOOLONG for a 2000-byte component, else ENOENT). */
+  {
+    static char longpath[4200];
+    static char want[4300];
+    int n = snprintf(longpath, sizeof longpath, "%s/", dir);
+    memset(longpath + n, 'a', 2000);
+    longpath[n + 2000] = '\0';
+    int fd = open(longpath, O_RDONLY);
+    if (fd >= 0) return fail("the long path unexpectedly opened");
+    int e = errno;
+    snprintf(want, sizeof want, "%s: %s", longpath, strerror(e));
+    if (!is_fs_err(fs_read_bytes(W(longpath)), e == ENAMETOOLONG ? FS_INVALID_PATH : FS_NOT_FOUND, want))
+      return fail("fs_read_bytes on a 2000-byte path does not give \"<full path>: <reason>\"");
+  }
 
   /* read_int_lines: a vector of the parsed lines. */
   snprintf(path, sizeof path, "%s/ints.txt", dir);

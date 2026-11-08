@@ -194,8 +194,4 @@ fn read_stdin_loop(parts: List Builder) -> Result String Bytes !{IO} =
 # (a NUL byte counts). Same stream rules as `read_stdin_bytes`.
 export fn read_stdin_text() -> Result String String !{IO} =
   let Ok raw = read_stdin_bytes() else Err msg -> Err(msg)
-  in bytes.to_string(raw) |> result_pipe_error(decode_reason)
-
-fn decode_reason(e: bytes.Utf8Error) -> String =
-  match e with
-  | bytes.Utf8DecodeError reason -> reason
+  in bytes.to_string(raw) |> result_pipe_error(bytes.utf8_error_message)

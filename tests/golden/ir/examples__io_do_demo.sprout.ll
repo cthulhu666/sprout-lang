@@ -92,7 +92,7 @@ declare i64 @str_slice_bytes(i64, i64, i64)
 declare i64 @str_split_lines(i64)
 declare i64 @split_words(i64)
 declare i64 @env_get_bytes(i64)
-@.str.0 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 70, column 30)\00" }
+@.str.0 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 75, column 30)\00" }
 @__sprout_sclo.__sprout_ir_lambda_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_0 }
 @.str.1 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 247, column 67)\00" }
 @.str.2 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 252, column 17)\00" }

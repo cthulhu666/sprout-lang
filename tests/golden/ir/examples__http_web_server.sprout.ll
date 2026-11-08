@@ -167,17 +167,17 @@ declare i64 @fs_rename(i64, i64)
 @.str.20 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1968, column 58)\00" }
 @.str.21 = private unnamed_addr constant { i64, [24 x i8] } { i64 376842, [24 x i8] c"str_byte_at: null input\00" }
 @.str.22 = private unnamed_addr constant { i64, [34 x i8] } { i64 540682, [34 x i8] c"str_byte_at: String has no header\00" }
-@.str.23 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 63, column 42)\00" }
-@.str.24 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 70, column 30)\00" }
-@.str.25 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 76, column 35)\00" }
-@.str.26 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 193, column 31)\00" }
-@.str.27 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 193, column 40)\00" }
-@.str.28 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 193, column 69)\00" }
-@.str.29 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 194, column 44)\00" }
-@.str.30 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 200, column 42)\00" }
-@.str.31 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 225, column 80)\00" }
-@.str.32 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 243, column 49)\00" }
-@.str.33 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 244, column 36)\00" }
+@.str.23 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 68, column 42)\00" }
+@.str.24 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 75, column 30)\00" }
+@.str.25 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 81, column 35)\00" }
+@.str.26 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 198, column 31)\00" }
+@.str.27 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 198, column 40)\00" }
+@.str.28 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 198, column 69)\00" }
+@.str.29 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 199, column 44)\00" }
+@.str.30 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 205, column 42)\00" }
+@.str.31 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 230, column 80)\00" }
+@.str.32 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 248, column 49)\00" }
+@.str.33 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 249, column 36)\00" }
 @.str.34 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.35 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 114, column 38)\00" }
 @.str.36 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 121, column 28)\00" }
@@ -674,7 +674,7 @@ declare i64 @fs_rename(i64, i64)
 @__sprout_sclo.__sprout_ir_lambda_57 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_57 }
 @.str.499 = private unnamed_addr constant { i64, [24 x i8] } { i64 376842, [24 x i8] c"str_byte_at: null input\00" }
 @.str.500 = private unnamed_addr constant { i64, [34 x i8] } { i64 540682, [34 x i8] c"str_byte_at: String has no header\00" }
-@.str.501 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 225, column 80)\00" }
+@.str.501 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 230, column 80)\00" }
 @.str.502 = private unnamed_addr constant { i64, [30 x i8] } { i64 475146, [30 x i8] c"bytes_get_unboxed: null bytes\00" }
 @.str.503 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c": \00" }
 @.str.504 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c" \00" }
@@ -3229,6 +3229,20 @@ define i64 @str_starts_with(i64 %p$s, i64 %p$prefix) {
 entry:
   %t$0 = add i64 0, 0
   %t$1 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %t$0, i64 %p$prefix)
+  ret i64 %t$1
+}
+
+define i64 @stdlib.bytes.utf8_error_message(i64 %p$err) {
+entry:
+  br label %arm_0_0
+arm_0_0:
+  %t$2 = call i64 @sprout_field(i64 %p$err, i64 0)
+  br label %join_0
+arm_1_0:
+  call void @sprout_abort_match()
+  unreachable
+join_0:
+  %t$1 = phi i64 [%t$2, %arm_0_0]
   ret i64 %t$1
 }
 
@@ -20738,7 +20752,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$3 = call i64 @__tc_Semigroup_String_append(i64 %t$0, i64 %t$2)
   %t$12 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$4 = call i64 @stdlib.fs.decode_reason(i64 %p$e)
+  %t$4 = call i64 @stdlib.bytes.utf8_error_message(i64 %p$e)
   %t$13 = alloca i64
   store i64 %t$3, ptr %t$13
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
@@ -20806,20 +20820,6 @@ join_2:
   %t$3 = phi i64 [%t$8, %body_0_2], [%t$12, %body_1_2]
   %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$3
-}
-
-define i64 @stdlib.fs.decode_reason(i64 %p$e) {
-entry:
-  br label %arm_0_0
-arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$e, i64 0)
-  br label %join_0
-arm_1_0:
-  call void @sprout_abort_match()
-  unreachable
-join_0:
-  %t$1 = phi i64 [%t$2, %arm_0_0]
-  ret i64 %t$1
 }
 
 define i64 @stdlib.fs.fs_error_message(i64 %p$e) {
@@ -24759,7 +24759,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$3 = call i64 @__tc_Semigroup_String_append(i64 %t$0, i64 %t$2)
   %t$12 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$4 = call i64 @stdlib.fs.decode_reason(i64 %p$e)
+  %t$4 = call i64 @stdlib.bytes.utf8_error_message(i64 %p$e)
   %t$13 = alloca i64
   store i64 %t$3, ptr %t$13
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)

@@ -117,7 +117,7 @@ declare i64 @term_read_avail(i64, i64)
 @.str.10 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 152, column 33)\00" }
 @.str.11 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.12 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0D\00" }
-@__sprout_sclo.__sprout_ir_eta_stdlib.terminal.decode_reason_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.terminal.decode_reason_1 }
+@__sprout_sclo.__sprout_ir_eta_stdlib.bytes.utf8_error_message_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.bytes.utf8_error_message_1 }
 @.str.13 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.14 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 31, column 21)\00" }
 @.str.15 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 31, column 33)\00" }
@@ -1118,6 +1118,20 @@ entry:
   ret i64 %t$1
 }
 
+define i64 @stdlib.bytes.utf8_error_message(i64 %p$err) {
+entry:
+  br label %arm_0_0
+arm_0_0:
+  %t$2 = call i64 @sprout_field(i64 %p$err, i64 0)
+  br label %join_0
+arm_1_0:
+  call void @sprout_abort_match()
+  unreachable
+join_0:
+  %t$1 = phi i64 [%t$2, %arm_0_0]
+  ret i64 %t$1
+}
+
 define i64 @stdlib.bytes.to_string(i64 %p$value) {
 entry:
   %t$1 = alloca i64
@@ -1800,9 +1814,9 @@ join_4:
   ret i64 %t$5
 }
 
-define i64 @__sprout_ir_eta_stdlib.terminal.decode_reason_1(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta_stdlib.bytes.utf8_error_message_1(i64 %p$env$, i64 %p$a0) {
 entry:
-  %ret = call i64 @stdlib.terminal.decode_reason(i64 %p$a0)
+  %ret = call i64 @stdlib.bytes.utf8_error_message(i64 %p$a0)
   ret i64 %ret
 }
 
@@ -1818,7 +1832,7 @@ arm_0_2:
   %t$5 = icmp eq i64 %t$0, %t$4
   br i1 %t$5, label %body_0_2, label %arm_1_2
 body_0_2:
-  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.terminal.decode_reason_1, i64 8) to i64
+  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.bytes.utf8_error_message_1, i64 8) to i64
   %t$12 = alloca i64
   store i64 %t$1, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
@@ -1850,20 +1864,6 @@ arm_2_2:
 join_2:
   %t$3 = phi i64 [%t$8, %body_0_2], [%t$11, %body_1_2]
   ret i64 %t$3
-}
-
-define i64 @stdlib.terminal.decode_reason(i64 %p$e) {
-entry:
-  br label %arm_0_0
-arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$e, i64 0)
-  br label %join_0
-arm_1_0:
-  call void @sprout_abort_match()
-  unreachable
-join_0:
-  %t$1 = phi i64 [%t$2, %arm_0_0]
-  ret i64 %t$1
 }
 
 define i64 @examples.aoc_2025_day_4.line_at(i64 %p$grid, i64 %p$row) {
@@ -2907,7 +2907,7 @@ arm_0_2:
   %t$5 = icmp eq i64 %t$0, %t$4
   br i1 %t$5, label %body_0_2, label %arm_1_2
 body_0_2:
-  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.terminal.decode_reason_1, i64 8) to i64
+  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.bytes.utf8_error_message_1, i64 8) to i64
   %t$21 = alloca i64
   store i64 %t$1, ptr %t$21
   %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)

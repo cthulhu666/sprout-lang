@@ -2304,8 +2304,8 @@ argv-smoke: bootstrap-from-seed
   if [[ "$got" != *"Err"*"No such file"* ]]; then
     echo "argv-smoke: fs.read_text(\"-\") with no file named - - expected an Err, got '$got'" >&2; exit 1
   fi
-  # read_stdin_bytes: an exact round trip, with CR, NUL and no trailing newline. Hex is
-  # 97 13 10 98 0 99. An empty stdin (/dev/null, not pollable) is Ok with no bytes.
+  # read_stdin_bytes: an exact round trip, with CR, NUL and no trailing newline. Decimal
+  # bytes are 97 13 10 98 0 99. An empty stdin (/dev/null, not pollable) is Ok with no bytes.
   build_fixture tests/argv_smoke/stdin_all.spr "$TMPD/all_bin" \
     "stdin_all fixture emit failed" "stdin_all fixture link failed"
   got=$(printf 'a\r\nb\0c' | "$TMPD/all_bin" bytes)
