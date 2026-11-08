@@ -18,7 +18,7 @@ bash "$SCRIPTS/build_compiler.sh"
 step "full just test under the instrumented compiler"
 bash "$SCRIPTS/run_compiler_cov.sh" || FAIL="$FAIL compiler-run(just test failed; see $COV_DIR/compiler_run/just_test.log)"
 step "instrumented test binaries"
-bash "$SCRIPTS/run_stdlib_cov.sh"
+bash "$SCRIPTS/run_stdlib_cov.sh" || FAIL="$FAIL stdlib-run"
 step "tests/c_runtime"
 bash "$SCRIPTS/run_crt_cov.sh" || FAIL="$FAIL c_runtime(see $COV_DIR/crt_run/log)"
 # The stdlib and compiler analyses read each other's output (executed names; compiler IR rows):
