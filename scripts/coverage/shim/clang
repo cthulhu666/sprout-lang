@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# clang shim for tests/c_runtime/run.sh: adds source-based coverage, keeps a copy of each linked binary.
+# run_crt_cov.sh sets COV_REAL_CLANG (the clang this shim hides) and COV_KEEP_BINS.
+: "${COV_REAL_CLANG:?run via scripts/coverage/run_crt_cov.sh}"
+: "${COV_KEEP_BINS:?run via scripts/coverage/run_crt_cov.sh}"
+out=""; compile_only=0; prev=""
+for a in "$@"; do
+  [[ "$prev" == "-o" ]] && out="$a"
+  [[ "$a" == "-c" || "$a" == "-E" || "$a" == "-S" ]] && compile_only=1
+  prev="$a"
+done
+"$COV_REAL_CLANG" "$@" -fprofile-instr-generate -fcoverage-mapping
+rc=$?
+if [[ $rc -eq 0 && $compile_only -eq 0 && -n "$out" && -f "$out" ]]; then
+  mkdir -p "$COV_KEEP_BINS"; cp "$out" "$COV_KEEP_BINS/$(basename "$out").$$"
+fi
+exit "$rc"
