@@ -4201,8 +4201,9 @@ gc-ageprof-check: bootstrap-from-seed
   (( failed == 0 )) || exit 1
   echo "==> gc-ageprof-check ✓"
 
-# Pin the adaptive-threshold policy (`threshold = max(live x adapt_factor, floor)`).
-# Two properties, both load-bearing for the `adapt_factor` default:
+# Pin the adaptive-threshold policy (`threshold = max(live x adapt_factor, floor)`), which governs
+# with SPROUT_GC_MINOR=0. With minors on the nursery rule governs and the factor only floors it.
+# Three properties: 1 and 2 pin the `adapt_factor` default (minors off), 3 pins the share (minors on).
 #   1. The DEFAULT collects as sparsely as an explicit F=3, and strictly less often
 #      than the old F=2 default.  This is what makes the default a policy and not an
 #      accident — an accidental revert to 2.0 fails here.
@@ -4210,6 +4211,7 @@ gc-ageprof-check: bootstrap-from-seed
 #      PROVABLY INERT: cycles/marked/freed are bit-identical at F=2 and F=4.  This is
 #      the safety argument for raising the default at all (small programs cannot pay
 #      RSS for it), so it is asserted rather than assumed.
+#   3. With minors on, SPROUT_GC_NURSERY_SHARE=2 collects less often than =1 on the adversary.
 # Reuses the age-instrument workloads: retain_all holds a 150k-node chain live (live
 # set >> floor, so the factor binds), retain_none retains nothing (floor-pinned).
 # Cycle counts come from SPROUT_GC_AGEPROF and are deterministic run to run, so the
@@ -4267,6 +4269,28 @@ gc-adapt-check: bootstrap-from-seed
   echo "  retain_none (floor-pinned): F=2 '${none_f2}' | F=4 '${none_f4}'  (cycles marked freed)"
   [ "$none_f2" = "$none_f4" ] \
     || { echo "gc-adapt-check: floor-pinned workload changed with the factor ('${none_f2}' vs '${none_f4}') — raising the default is NOT free for small-live-set programs" >&2; failed=1; }
+  # --- Property 3: with minors on, the share (not the factor) sizes the nursery --
+  # Collections run at SPROUT_GC_NURSERY_SHARE=1 and =2 on the same program: a bigger share
+  # must collect less often, so the kept knob is wired up. The adversary allocates steadily, so
+  # the share binds; retain_all's count does not move with it.
+  build_one test_gc_trigger_adversary || exit 1
+  # A crashed run has fewer cycles and would pass the comparison, so rc and the verdict are checked.
+  share_cycles() {
+    local rc
+    env -u SPROUT_GC_ADAPT_FACTOR -u SPROUT_GC_THRESHOLD SPROUT_GC_MINOR=1 SPROUT_GC_NURSERY_SHARE="$1" SPROUT_DEBUG_GC=1 \
+      "$TMPD/test_gc_trigger_adversary.bin" >"$TMPD/share$1.out" 2>"$TMPD/share$1.err"
+    rc=$?
+    if [ "$rc" != 0 ] || ! grep -q "SUITE PASSED" "$TMPD/share$1.out"; then
+      echo "gc-adapt-check: adversary failed at SHARE=$1 (rc=$rc)" >&2; tail -5 "$TMPD/share$1.out" "$TMPD/share$1.err" >&2
+      return 1
+    fi
+    grep -c '\[sprout gc\] cycle' "$TMPD/share$1.err"
+  }
+  share1=$(share_cycles 1) || exit 1
+  share2=$(share_cycles 2) || exit 1
+  echo "  adversary, minors on: cycles at SHARE=1 ${share1} | SHARE=2 ${share2}"
+  (( share1 > 0 && share2 < share1 )) \
+    || { echo "gc-adapt-check: SPROUT_GC_NURSERY_SHARE=2 did not collect less often than =1 (${share2} vs ${share1})" >&2; failed=1; }
   (( failed == 0 )) || exit 1
   echo "==> gc-adapt-check ✓"
 
@@ -4275,9 +4299,10 @@ gc-adapt-check: bootstrap-from-seed
 # with SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1: every allocation collects, so a
 # store without its barrier is caught by the verifier within a few allocations. Each program must
 # print the exact stdout in its sidecar tests/gc_gen/<name>.out, and must have run minor
-# collections. Also run with SPROUT_FL_VERIFY=1 and with SPROUT_GC_LINEAGE=1 (same flags, same
-# output), at SPROUT_GC_PROMOTE_AGE=2 and 3 with SPROUT_GC_NURSERY=1 (plus FL_VERIFY at K=2), and
-# with the mode off, where the output must be the same.
+# collections. The default arm is the shipped default (K=3, s=1, c=2) under GENCHECK. Also run
+# with SPROUT_FL_VERIFY=1 and with SPROUT_GC_LINEAGE=1 (same flags, same output), and with the
+# mode off, where the output must be the same. The nursery share is not varied here: under STRESS
+# every allocation collects, and without it these programs run no minor at either share.
 # The two analysis helpers are static and need a live analysis service to reach from Sprout, so a C case covers
 # them (tests/c_runtime/analysis_strings.c).
 [group('test')]
@@ -4317,11 +4342,7 @@ gc-gen-check: bootstrap-from-seed
       || { echo "gc-gen-check: $name ran only $minors minor collections; the barrier was not exercised" >&2; failed=1; }
     # The young-only sweep keeps the free lists between minors: FL_VERIFY compares them with a
     # full walk after every collection, and lineage poisons dead OBJs instead of listing them.
-    # Promotion age and the nursery rule (docs/gc-stage2-v0.md §5): young survivors, the
-    # remembered rule and premise 3 only exist at K > 1, so the default runs above never reach them.
-    for mode in SPROUT_FL_VERIFY=1 SPROUT_GC_LINEAGE=1 \
-                "SPROUT_GC_PROMOTE_AGE=2 SPROUT_GC_NURSERY=1" "SPROUT_GC_PROMOTE_AGE=3 SPROUT_GC_NURSERY=1" \
-                "SPROUT_GC_PROMOTE_AGE=2 SPROUT_GC_NURSERY=1 SPROUT_FL_VERIFY=1"; do
+    for mode in SPROUT_FL_VERIFY=1 SPROUT_GC_LINEAGE=1; do
       # shellcheck disable=SC2086
       env $mode SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 \
         "$TMPD/$name.bin" > "$TMPD/$name.mode.out" 2>"$TMPD/$name.mode.err"
@@ -4438,9 +4459,10 @@ gc-walk-check: bootstrap-from-seed
 #      minor collections on and off. A floor that counts free slots by class demand grows it
 #      ~100,000 slots a cycle there instead. Free alone is not the footprint under minors: a major
 #      moves the dead old objects a minor kept from the heap count into the free pool.
-#   3. It settles with the nursery rule too (SPROUT_GC_NURSERY=1, also with PROMOTE_AGE=2): the
-#      rule sizes every collection, so the floor is its lower bound before a major and at it.
-# The probes clear the GC tuning env; SPROUT_GC_THRESHOLD turns the floor off (§12 Q5).
+#   3. It settles with the nursery rule, which is the default with minors on: it sizes every
+#      collection, so the floor is its lower bound before a major and at it. The `share` mode
+#      repeats the check at SPROUT_GC_NURSERY_SHARE=0.5.
+# The probes clear the GC tuning env (SPROUT_GC_NURSERY_SHARE too); SPROUT_GC_THRESHOLD turns the floor off (§12 Q5).
 [group('test')]
 gc-trigger-check: bootstrap-from-seed
   #!/usr/bin/env bash
@@ -4451,14 +4473,13 @@ gc-trigger-check: bootstrap-from-seed
     clang -c "$rtsrc" -O2 {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
       || { echo "gc-trigger-check: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
   done
-  # run <test> [default|0|1|nursery|nursery_k2]: SPROUT_GC_MINOR unset (the default) or set; the last
-  # two add SPROUT_GC_NURSERY=1 (and SPROUT_GC_PROMOTE_AGE=2) to minors on. Log: <test>.<mode>.log.
+  # run <test> [default|0|1|share]: SPROUT_GC_MINOR unset (the default) or set; `share` is minors
+  # on with SPROUT_GC_NURSERY_SHARE=0.5. Log: <test>.<mode>.log.
   run() {
     local name="$1" mode="${2:-default}" f="tests/stdlib/$1.spr" menv=(-u SPROUT_GC_MINOR)
     case "$mode" in
       default) ;;
-      nursery)    menv=(SPROUT_GC_MINOR=1 SPROUT_GC_NURSERY=1) ;;
-      nursery_k2) menv=(SPROUT_GC_MINOR=1 SPROUT_GC_NURSERY=1 SPROUT_GC_PROMOTE_AGE=2) ;;
+      share)      menv=(SPROUT_GC_MINOR=1 SPROUT_GC_NURSERY_SHARE=0.5) ;;
       *)          menv=("SPROUT_GC_MINOR=$mode") ;;
     esac
     [ -f "$f" ] || { echo "gc-trigger-check: missing $f" >&2; return 1; }
@@ -4467,7 +4488,7 @@ gc-trigger-check: bootstrap-from-seed
     clang "$TMPD/$name.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$name.bin" 2>"$TMPD/$name.err" \
       || { echo "gc-trigger-check: link failed: $f" >&2; cat "$TMPD/$name.err" >&2; return 1; }
     env -u SPROUT_GC_THRESHOLD -u SPROUT_GC_ADAPT_FACTOR -u SPROUT_GC_ADAPT_RATIO -u SPROUT_GC_ADAPT_CAP \
-      -u SPROUT_GC_LINEAGE -u SPROUT_GC_STRESS -u SPROUT_GC_NURSERY -u SPROUT_GC_PROMOTE_AGE "${menv[@]}" SPROUT_DEBUG_GC=1 "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.$mode.log" \
+      -u SPROUT_GC_LINEAGE -u SPROUT_GC_STRESS -u SPROUT_GC_NURSERY_SHARE "${menv[@]}" SPROUT_DEBUG_GC=1 "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.$mode.log" \
       || { echo "gc-trigger-check: $name ($mode) failed" >&2; tail -5 "$TMPD/$name.$mode.log" >&2; return 1; }
     grep -q "SUITE PASSED" "$TMPD/$name.out" \
       || { echo "gc-trigger-check: $name did not pass" >&2; tail -5 "$TMPD/$name.out" >&2; return 1; }
@@ -4503,7 +4524,7 @@ gc-trigger-check: bootstrap-from-seed
     (( sp_w < 4 * sp_s )) \
       || { echo "gc-trigger-check: walk_sparse walked ${sp_w} >= 4x swept ${sp_s} — the footprint floor is not raising the threshold" >&2; failed=1; }
   else failed=1; fi
-  for mode in default 0 nursery nursery_k2; do
+  for mode in default 0 share; do
     if read -r ad_c ad_mid ad_end < <(pool test_gc_trigger_adversary "$mode"); then
       echo "  adversary   : minor=${mode} cycles=${ad_c} free+heap at middle=${ad_mid} at end=${ad_end}"
       (( ad_end - ad_mid <= ad_mid / 50 )) \

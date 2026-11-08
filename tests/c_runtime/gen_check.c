@@ -1,8 +1,8 @@
 /* Minor collections and the GENCHECK verifier (docs/gc-generational-v0.md §14.4, §14.5), driven
  * directly with the mode on (the default) and SPROUT_GC_GENCHECK=1.
  *
- * An object is made old the real way: rooted across the first collection (a major, which keeps
- * the colour bit on every survivor). The runtime is included so the cases reach the static
+ * An object is made old the real way: rooted across collections until it has survived
+ * g_gen.promote_age of them (the first is a major). The runtime is included so the cases reach the static
  * remembered set and the collector entry. Nothing here is rooted except `g_old`, a permanent root.
  *
  *   missing_barrier — a young Ref is stored into the old one with NO barrier and has no other
@@ -40,14 +40,14 @@ static void* g_old;  /* permanent root: the old Ref */
 
 static void collect(void) { sprout_gc_collect_with_reason("threshold"); }
 
-/* Root a fresh Ref, run the first collection (a major), and return it, old. */
+/* Root a fresh Ref, collect until it is old (the first collection is a major), and return it. */
 static long long make_old_ref(void) {
   long long r = ref_new(0);
   g_old = (void*)(uintptr_t)r;
   register_root_slot(&g_old, SPROUT_ROOT_PTR, 0);
-  collect();
-  check(g_gen.n_major == 1 && g_gen.n_minor == 0, "the first collection is a major");
-  check(is_old((long long)(uintptr_t)g_old), "a survivor of a major is old");
+  age_to_old(r, collect);
+  check(is_old(r), "a rooted survivor is old after promote_age collections");
+  check(g_gen.n_major >= 1, "the first collection is a major");
   return (long long)(uintptr_t)g_old;
 }
 
@@ -65,13 +65,16 @@ static int barrier(void) {
   long long y = ref_new(7);
   ref_write(r, y);
   check(is_remembered(r) && g_gen.remembered.len == 1, "the barrier remembers the old Ref");
+  long long minors = g_gen.n_minor;
   collect();
-  check(g_gen.n_minor == 1, "the second collection is a minor");
-  check(g_gen.remembered.len == 0 && !is_remembered(r), "a minor empties the remembered set");
+  check(g_gen.n_minor == minors + 1, "the next collection is a minor");
   long long got = ref_read(r);
   check(got == y, "the old Ref still holds the young one");
   check(sprout_heap_lookup((void*)(uintptr_t)y) != NULL, "the young Ref survived");
-  check(is_old(y), "a survivor of a minor is old");
+  age_to_old(y, collect);
+  check(is_old(y), "the young Ref is old after promote_age collections");
+  check(g_gen.remembered.len == 0 && !is_remembered(r),
+        "the set is empty once the young Ref is promoted");
   check(ref_read(y) == 7, "the young Ref still reads back");
   /* Churn: many minors keep the structure intact. */
   for (int i = 0; i < 50; i++) {
@@ -86,21 +89,20 @@ static int barrier(void) {
 static int minor_keeps_old(void) {
   long long r = make_old_ref();
   g_old = NULL;
+  long long minors = g_gen.n_minor, majors = g_gen.n_major;
   collect();
-  check(g_gen.n_minor == 1, "the second collection is a minor");
+  check(g_gen.n_minor == minors + 1, "the next collection is a minor");
   check(sprout_heap_lookup((void*)(uintptr_t)r) != NULL, "a minor keeps an unrooted old object");
   sprout_gc_collect_with_reason("atexit");
-  check(g_gen.n_major == 2, "a non-threshold reason forces a major");
+  check(g_gen.n_major == majors + 1, "a non-threshold reason forces a major");
   check(sprout_heap_lookup((void*)(uintptr_t)r) == NULL, "a major frees it");
   return g_failed;
 }
 
 static int major_every(void) {
-  make_old_ref();
-  for (int i = 0; i < 3; i++) collect();
-  check(g_gen.n_major == 1 && g_gen.n_minor == 3, "three minors follow a major");
-  collect();
-  check(g_gen.n_major == 2 && g_gen.n_minor == 3, "the fourth collection is a major");
+  make_old_ref();                      /* the major and the minors that promote the Ref */
+  for (int i = 0; i < 10 && g_gen.n_major == 1; i++) collect();
+  check(g_gen.n_major == 2 && g_gen.n_minor == 3, "three minors follow a major, then a major");
   return g_failed;
 }
 
@@ -109,8 +111,9 @@ static int clear_before_major(void) {
   long long r = make_old_ref();
   long long y = ref_new(7);
   ref_write(r, y);
+  long long minors = g_gen.n_minor, majors = g_gen.n_major;
   collect();
-  check(g_gen.n_minor == 1 && g_gen.n_major == 1, "the second collection is a minor");
+  check(g_gen.n_minor == minors + 1 && g_gen.n_major == majors, "the next collection is a minor");
   check(!is_old(r) && !is_old(y), "the sweep before a major clears every colour bit");
   check(g_gen.remembered.len == 0 && !is_remembered(r), "no object is remembered");
   check(ref_read(r) == y && ref_read(y) == 7, "both Refs still read back");
@@ -118,10 +121,10 @@ static int clear_before_major(void) {
   ref_write(r, z);
   check(!is_remembered(r) && g_gen.remembered.len == 0, "a store into a colourless object is not remembered");
   collect();
-  check(g_gen.n_major == 2 && g_gen.n_minor == 1, "the third collection is a major");
+  check(g_gen.n_major == majors + 1 && g_gen.n_minor == minors + 1, "the collection after it is a major");
   check(ref_read(r) == z && ref_read(z) == 8, "the stored Ref survived the major");
   check(sprout_heap_lookup((void*)(uintptr_t)y) == NULL, "the overwritten Ref was freed");
-  check(is_old(r) && is_old(z), "survivors of a major are old again");
+  check(is_old(r), "a survivor of enough collections is old again");
   return g_failed;
 }
 
@@ -137,17 +140,18 @@ static int doubling(void) {
     tail = next;
   }
   ref_write(r, head);
+  long long minors = g_gen.n_minor, majors = g_gen.n_major;
   collect();
-  check(g_gen.n_minor == 1 && g_gen.n_major == 1, "the second collection is a minor");
+  check(g_gen.n_minor == minors + 1 && g_gen.n_major == majors, "the next collection is a minor");
   check(!is_old(r) && !is_old(head) && !is_old(tail), "the sweep before a major clears every colour bit");
   check(g_gen.remembered.len == 0, "no object is remembered");
   collect();
-  check(g_gen.n_major == 2 && g_gen.n_minor == 1, "the third collection is a major");
+  check(g_gen.n_major == majors + 1 && g_gen.n_minor == minors + 1, "the collection after it is a major");
   long long cur = ref_read(r);
   long long len = 0;
   while (cur != 0 && sprout_heap_lookup((void*)(uintptr_t)cur) != NULL) { len++; cur = ref_read(cur); }
   check(len == n, "the whole chain is readable after the major");
-  check(is_old(r) && is_old(head) && is_old(tail), "survivors of a major are old again");
+  check(is_old(r), "the old Ref is old again");
   return g_failed;
 }
 

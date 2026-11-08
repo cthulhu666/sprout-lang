@@ -1,0 +1,66 @@
+module main
+
+# Load spike then steady state, for the minor-collection A/B (docs/gc-stage2-v0.md §7 step 2b).
+#
+# Models galaxy_client's startup. A load phase builds ~180k live objects in one growing list, so
+# several collections fire while it grows; every 240th item also goes into a second list that
+# lives to the end, so the long-lived objects share regions with the load data, and a scratch
+# list dropped every 30k items adds medium-lived data. Then the load data is dropped and a long
+# run of short-lived garbage keeps collections coming; every 40th round adds one more survivor,
+# so long-lived data also arrives while a nursery run still holds the dropped load data (~1k
+# long-lived objects at the end). Prints a checksum only: both arms must print the same bytes.
+
+let load_items = 90000
+let keep_every = 240
+let stage_every = 30000
+let survive_every = 40
+let rounds = 4500
+let churn_len = 3000
+
+type Item = (id: Int, weight: Int)
+
+type Held = (data: List Item, keep: List Item, stage: List Item)
+
+type Loaded = (total: Int, keep: List Item)
+
+# Remainder for non-negative operands; `math.int.mod` answers `Maybe` and would add allocation.
+fn modulo(a: Int, b: Int) -> Int =
+  a - (a / b) * b
+
+fn item_of(i: Int) -> Item =
+  Item(id = i, weight = modulo(i * 7919, 1009))
+
+# Each step conses one Item onto `data`, and onto `keep` when `i` is a multiple of `keep_every`.
+# It also conses a scratch Item onto `stage`, which is dropped every `stage_every` steps: medium-
+# lived data that outlives a collection or two and then dies.
+fn load_step(held: Held, i: Int) -> Held =
+  let item = item_of(i)
+      keep = if modulo(i, keep_every) == 0 then Cons(item, held.keep) else held.keep
+      stage =
+        if modulo(i, stage_every) == 0 then Nil
+        else Cons(item_of(i + 1), held.stage)
+  in Held(data = Cons(item, held.data), keep = keep, stage = stage)
+
+fn weight_sum(items: List Item) -> Int =
+  list_fold(\ (acc, it) -> acc + it.weight, 0, items)
+
+# Short-lived garbage: a list that dies when the fold returns.
+fn churn(r: Int) -> Int =
+  list_fold(\ (acc, x) -> acc + x * 2 + 1, 0, [i + r for i in 1..churn_len])
+
+# Every `survive_every` rounds also adds an Item to `keep`, so long-lived data keeps arriving after
+# the load, while the first collections still carry the dropped load data.
+fn steady_step(state: Loaded, r: Int) -> Loaded =
+  let kept = if modulo(r, survive_every) == 0 then Cons(item_of(r), state.keep) else state.keep
+  in Loaded(total = modulo(state.total + churn(r), 1000000007), keep = kept)
+
+# Runs the load and returns only its checksum and the survivors, so the load data is garbage
+# once this returns.
+fn load_phase() -> Loaded =
+  let held = range_fold(load_step, Held(data = Nil, keep = Nil, stage = Nil), 1..load_items)
+  in Loaded(total = weight_sum(held.data), keep = held.keep)
+
+fn main() -> Unit !{IO} =
+  let loaded = load_phase()
+      done = range_fold(steady_step, Loaded(total = 0, keep = loaded.keep), 1..rounds)
+  in print(`checksum=${loaded.total} churn=${done.total} kept=${list_length(done.keep)} kept_sum=${weight_sum(done.keep)}`)

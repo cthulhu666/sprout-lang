@@ -888,9 +888,9 @@ static inline void sprout_obj_write_tag(void* payload, long long tag, int arity)
  * drain's remembered rule, and cleared by a minor collection or the sweep before a major
  * (docs/gc-generational-v0.md §14.4, docs/gc-stage2-v0.md §5.1).  The sweeps read the age:
  * a survivor keeps its colour (becomes old) only when its age before the sweep is at least
- * g_gen.promote_age - 1 (SPROUT_GC_PROMOTE_AGE), so an old object's age is at least
- * promote_age.  SPROUT_GC_AGEPROF also reads it.  aux starts at bit 14, via sprout_hdr_make.
- * The age field's maximum bounds SPROUT_GC_PROMOTE_AGE. */
+ * g_gen.promote_age - 1, so an old object's age is at least promote_age.
+ * SPROUT_GC_AGEPROF also reads it.  aux starts at bit 14, via sprout_hdr_make.
+ * The age field's maximum bounds g_gen.promote_age. */
 #define SPROUT_GC_AGE_SHIFT 9
 #define SPROUT_GC_AGE_MAX   15                      /* 4 bits: 0..15, saturating */
 #define SPROUT_GC_AGE_MASK  ((uint64_t)SPROUT_GC_AGE_MAX << SPROUT_GC_AGE_SHIFT)
@@ -905,7 +905,7 @@ static inline uint64_t sprout_hdr_age_bump(uint64_t h) {
   if (age >= SPROUT_GC_AGE_MAX) return h;
   return (h & ~SPROUT_GC_AGE_MASK) | ((uint64_t)(age + 1) << SPROUT_GC_AGE_SHIFT);
 }
-/* The one "stays young" test.  `young_below` is SPROUT_GC_PROMOTE_AGE - 1 when the sweep keeps
+/* The one "stays young" test.  `young_below` is g_gen.promote_age - 1 when the sweep keeps
  * colour, 0 when it clears it (nothing stays young).  `age + 1 < K` is `age < K - 1`. */
 static inline int sprout_gc_stays_young(uint64_t h, unsigned young_below) {
   return sprout_hdr_age(h) < young_below;
@@ -955,19 +955,36 @@ typedef struct {
   int       colorless;           /* no object is old: the last sweep cleared every color bit */
   long long minors_since_major;
   long long n_minor, n_major;    /* collections run, by kind */
-  /* A/B switches (docs/gc-stage2-v0.md §5); the defaults are stage 1's behaviour. */
-  unsigned  promote_age;         /* SPROUT_GC_PROMOTE_AGE: 1..SPROUT_GC_AGE_MAX */
-  int       nursery;             /* SPROUT_GC_NURSERY: size minors from the baseline, not the heap */
+  /* Promotion age K and the nursery's share s and survivor floor c (docs/gc-stage2-v0.md §5).
+     Fixed defaults; no environment variable sets K or c (a C test sets them directly). */
+  unsigned  promote_age;         /* K: 1..SPROUT_GC_AGE_MAX */
+  double    nursery_share;       /* s: SPROUT_GC_NURSERY_SHARE, the nursery's share of the heap */
+  double    nursery_survive;     /* c: the nursery outlasts c x the last minor's marked set */
+  long long last_minor_marked;   /* marked count of the last MINOR (m); a major leaves it alone */
 } SproutGenState;
-static SproutGenState g_gen = { .major_every = 19, .colorless = 1, .promote_age = 1 };
+static SproutGenState g_gen = { .major_every = 19, .colorless = 1, .promote_age = 3,
+                                .nursery_share = 1.0, .nursery_survive = 2.0 };
+
+/* A switch removed when its value became fixed: a non-empty setting fails, so a stale one is seen. */
+static void sprout_gc_retired_switch(const char* name, const char* message) {
+  const char* v = getenv(name);
+  if (v != NULL && v[0] != '\0') sprout_fail(message);
+}
 
 /* Reads the generational switches at startup (sprout_set_argv), so a bad value fails before
  * the program runs, not inside the atexit collection.  SPROUT_GC_MINOR is on when unset or
- * empty, `1` is on, `0` is off, and anything else fails.  SPROUT_GC_GENCHECK and
- * SPROUT_GC_MAJOR_EVERY are read only with the mode on, so a bad value is ignored while it is
- * off.  SPROUT_GC_MAJOR_EVERY=0 makes every collection a major.  SPROUT_GC_PROMOTE_AGE
- * (1..SPROUT_GC_AGE_MAX) and SPROUT_GC_NURSERY (0 or 1) are read the same way. */
+ * empty, `1` is on, `0` is off, and anything else fails.  SPROUT_GC_GENCHECK,
+ * SPROUT_GC_MAJOR_EVERY and SPROUT_GC_NURSERY_SHARE (a number in (0, 4]) are read only with the
+ * mode on, so a bad value is ignored while it is off.  SPROUT_GC_MAJOR_EVERY=0 makes every
+ * collection a major.  The retired switches fail with the mode on or off. */
 static void sprout_gc_gen_init(void) {
+  sprout_gc_retired_switch("SPROUT_GC_PROMOTE_AGE",
+    "SPROUT_GC_PROMOTE_AGE was removed: promotion age is fixed at 3");
+  sprout_gc_retired_switch("SPROUT_GC_NURSERY",
+    "SPROUT_GC_NURSERY was removed: the nursery rule is always on with minor collections;"
+    " tune it with SPROUT_GC_NURSERY_SHARE");
+  sprout_gc_retired_switch("SPROUT_GC_NURSERY_SURVIVE",
+    "SPROUT_GC_NURSERY_SURVIVE was removed: the survivor floor is fixed at 2");
   const char* m = getenv("SPROUT_GC_MINOR");
   if (m == NULL || m[0] == '\0' || strcmp(m, "1") == 0) g_gen.on = 1;
   else if (strcmp(m, "0") == 0) g_gen.on = 0;
@@ -983,19 +1000,13 @@ static void sprout_gc_gen_init(void) {
       sprout_fail("SPROUT_GC_MAJOR_EVERY: expected non-negative integer");
     g_gen.major_every = parsed;
   }
-  const char* age = getenv("SPROUT_GC_PROMOTE_AGE");
-  if (age != NULL && age[0] != '\0') {
+  const char* share = getenv("SPROUT_GC_NURSERY_SHARE");
+  if (share != NULL && share[0] != '\0') {
     char* end = NULL;
-    long long parsed = strtoll(age, &end, 10);
-    if (end == age || *end != '\0' || parsed < 1 || parsed > SPROUT_GC_AGE_MAX)
-      sprout_fail("SPROUT_GC_PROMOTE_AGE: expected integer in [1, 15]");
-    g_gen.promote_age = (unsigned)parsed;
-  }
-  const char* nursery = getenv("SPROUT_GC_NURSERY");
-  if (nursery != NULL && nursery[0] != '\0') {
-    if (strcmp(nursery, "0") != 0 && strcmp(nursery, "1") != 0)
-      sprout_fail("SPROUT_GC_NURSERY: expected 0 or 1");
-    g_gen.nursery = nursery[0] == '1';
+    double parsed = strtod(share, &end);
+    if (end == share || *end != '\0' || !(parsed > 0.0 && parsed <= 4.0))
+      sprout_fail("SPROUT_GC_NURSERY_SHARE: expected a number in (0, 4]");
+    g_gen.nursery_share = parsed;
   }
 }
 
@@ -2607,7 +2618,7 @@ static int sprout_prof_edge_bucket(void* payload, size_t i) {
  * not yet processed) into its children until all reachable nodes are black.
  * Must be called after sprout_gc_mark_roots() and before sprout_gc_sweep().
  *
- * With SPROUT_GC_PROMOTE_AGE=K > 1 it also applies the remembered rule (docs/gc-stage2-v0.md
+ * With g_gen.promote_age = K > 1 it also applies the remembered rule (docs/gc-stage2-v0.md
  * §5.1): a parent that is old or will be old after this sweep (age + 1 >= K, true of both) and
  * has a child that stays young (age + 1 < K) is remembered, since the sweep leaves an old
  * parent pointing at a young child.  K = 1 never fires: no survivor stays young. */
@@ -2746,7 +2757,7 @@ static int sprout_gc_gen_choose_minor(const char* reason) {
 /* Called after the mark, before the sweep: records this collection in g_gen and returns
  * whether the NEXT one is a major.  The post-sweep heap count is known exactly: a minor frees
  * no old object, so it is the old objects after the previous sweep (`old_count`) plus the
- * objects just marked; a major keeps only the marked.  At SPROUT_GC_PROMOTE_AGE = 1 every
+ * objects just marked; a major keeps only the marked.  At g_gen.promote_age = 1 every
  * survivor is old, so `old_count` equals the previous `last_live`.  Major next when the heap
  * has more than doubled since the last major, and every SPROUT_GC_MAJOR_EVERY minors (the
  * doubling rule alone never fires when the live set shrinks). */
@@ -3346,7 +3357,7 @@ static inline int sprout_gc_sweep_large(SproutRegion* r, uint64_t clear, unsigne
  * no poison, dropping its staged freelist entries.  There is no third pass —
  * the freelists are complete when Pass 1 ends. */
 /* `keep_color`: a survivor keeps its color bit, which then means old (minor collections), once
- * its age before this sweep is at least SPROUT_GC_PROMOTE_AGE - 1; a younger one has the bit
+ * its age before this sweep is at least g_gen.promote_age - 1; a younger one has the bit
  * cleared and its youngmap bit set, and stays young.  Otherwise the sweep clears the bit and no
  * object is old between collections. */
 static void sprout_gc_sweep(int keep_color) {
@@ -3541,7 +3552,7 @@ static void sprout_gc_sweep(int keep_color) {
  * A minor whose next collection is also a minor visits only the slots whose youngmap bit is
  * set, a word at a time, in regions with young_count > 0.  A young slot with its colour set
  * is promoted (it keeps the colour) once its age before the sweep is at least
- * SPROUT_GC_PROMOTE_AGE - 1, else it stays young: colour cleared, bit kept.  One without the
+ * g_gen.promote_age - 1, else it stays young: colour cleared, bit kept.  One without the
  * colour is dead and freed exactly as the full
  * sweep frees it, except that the slot goes straight onto the live free lists, which this
  * sweep keeps: nothing is wiped or rebuilt, and g_gc_freelist_len is updated as slots
@@ -3812,6 +3823,8 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   sprout_gc_mark_roots(sprout_gc_mark_ptr);
   if (minor) sprout_gc_mark_remembered();
   sprout_gc_drain_marks();
+  /* The survivor floor's m (gc-stage2-v0 §5.5): only a minor's count is the young working set. */
+  if (minor) g_gen.last_minor_marked = g_gc_marked_count;
   if (minor && g_gen.check) sprout_gc_gen_verify();
   int next_major = gen_on && sprout_gc_gen_record(minor);
   /* A minor followed by a minor sweeps only the young slots, unless that would keep a region the
@@ -3855,20 +3868,25 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   if (g_gc_adapt_ratio > 0.0) {
     long long target;
     int floor_on;
-    if (g_gen.nursery && !g_gc_threshold_pinned) {
-      /* SPROUT_GC_NURSERY=1 (read only with the mode on): every collection runs the next one
-         after a nursery of allocations, sized from the live set at the last major, which no dead
-         old object inflates (gc-stage2-v0 §5.2).  The footprint floor stays a lower bound
-         before a major and at the major, whose successors walk the free pool. */
-      long long nursery = (long long)((double)g_gen.baseline * (g_gc_adapt_factor - 1.0));
-      if (nursery < g_gc_threshold_base) nursery = g_gc_threshold_base;
+    if (gen_on && !g_gc_threshold_pinned) {
+      /* With minor collections on, every collection runs the next one after a nursery of
+         allocations: a share s of the heap (gc-stage2-v0 §5.5), or c x the last minor's marked
+         set when that is larger.  The nursery is floored at base / factor and the target at the
+         base.  The footprint floor stays a lower bound before a major and at the major, whose
+         successors walk the free pool.  Minors off, or a pinned threshold, take heap x factor. */
+      double raw = g_gen.nursery_share * (double)g_managed_heap_count;
+      double surv = g_gen.nursery_survive * (double)g_gen.last_minor_marked;
+      if (surv > raw) raw = surv;
+      long long nursery = (long long)raw;
+      long long nursery_min = (long long)((double)g_gc_threshold_base / g_gc_adapt_factor);
+      if (nursery < nursery_min) nursery = nursery_min;
       target = g_managed_heap_count + nursery;
       floor_on = next_major || !minor;
     } else {
       target = (long long)((double)g_managed_heap_count * g_gc_adapt_factor);
-      if (target < g_gc_threshold_base) target = g_gc_threshold_base;
       floor_on = !g_gc_threshold_pinned;
     }
+    if (target < g_gc_threshold_base) target = g_gc_threshold_base;
     if (floor_on) {
       long long footprint_floor = g_managed_heap_count
         + (g_managed_heap_count + g_gc_freelist_len) / g_gc_footprint_k;

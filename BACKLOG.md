@@ -385,15 +385,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 
 **GC and runtime**
 
-- [ ] `P2` **GC generational step** — bump-region nursery over the phase-2 regions, minor
-  collections, write barrier, age/remembered bits already reserved. **Measured 2026-08-09, and it
-  re-scoped the item:** the nursery ceiling is 97% for the compiler but 13-48% elsewhere, and
-  outside the compiler GC is not the bottleneck at all (`SPROUT_GC_DISABLE=1` makes nqueens
-  *slower*). Build it as a compiler/self-hosting optimisation or not at all. Barrier surface is
-  `ref_write` + `vector_mutset` + `vector_push` and must be TYPED, not unconditional; non-moving
-  caps the churn workloads regardless (Immix §5.3); the remembered set must be per-domain-shaped
-  from day one. `docs/gc-generational-v0.md`. **Stage 1 (§14) is on by default (2026-11-04);**
-  open: §14.6, a minor sweep proportional to the young set (RSS up to 1.25, mutvec_int's pauses).
 - [ ] `P2` **GC-safety tooling follow-ups.** (5) Single source of truth for operand protection —
   `op_exposes_operands` is a hand-maintained list that can drift from runtime reality. (6) A
   GC-safety linter at the IR-rooting layer, modelling "allocates-then-stores ⇒ heap operands must
@@ -2376,6 +2367,14 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
 > timings drift ~1.6× between sessions, so only interleaved same-session A/B is meaningful; and
 > `region_find`/`sprout_heap_lookup` are `static` and fully inlined at `-O2`, so **no profiler can
 > attribute to them** — size them by sensitivity probes instead.
+
+- [ ] `P2` **GC A/B set lacks a long-running server with a large, slowly churning live set.**
+  Promotion age K = 3 re-marks each survivor up to three times before it is old, and a cache-like
+  heap (big live set, a trickle of replacement) pays that on every survivor while minors free
+  little. None of the A/B workloads has that shape; digit_recognizer's GC time (1.31 ~ of
+  minor-off at s = 1) is the one row that could point at it. Add the workload to
+  `bench/gc_minor/ab.sh` against minor-off; other K need `g_gen.promote_age` patched.
+  `docs/gc-stage2-v0.md` §7 step 2b.
 
 - [ ] `P2` **DECISION: what consumers should depend on for whole-program linking.**
   `uncharted-suns` now calls `$SPROUT_ROOT/scripts/link_whole_program.sh` directly (its PR #387,
