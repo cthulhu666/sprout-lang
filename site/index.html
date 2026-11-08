@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sprout Articles</title>
+<meta name="description" content="Articles about the Sprout programming language.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;700;800&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+:root {
+  --paper: #f6f7f2; --ink: #1b211d; --muted: #59625c; --rule: #d6dbd2; --accent: #2b6e4f; --link: #3c63a0;
+  --display: "Schibsted Grotesk", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body: "Source Serif 4", "Iowan Old Style", Georgia, serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --paper: #141816; --ink: #e2e7e2; --muted: #9ba59e; --rule: #2c3530; --accent: #74c49b; --link: #8fb2e8; color-scheme: dark; }
+}
+:root[data-theme="dark"] { --paper: #141816; --ink: #e2e7e2; --muted: #9ba59e; --rule: #2c3530; --accent: #74c49b; --link: #8fb2e8; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 1.07rem; line-height: 1.65; padding: 0 16px 4rem; }
+main { max-width: 40rem; margin: 0 auto; }
+header { padding: 3.5rem 0 1.5rem; border-bottom: 1px solid var(--rule); }
+h1 { font-family: var(--display); font-weight: 800; font-size: clamp(2.2rem, 6vw, 3.2rem); line-height: 1.05; margin: 0 0 .6rem; letter-spacing: -.02em; }
+header p { color: var(--muted); margin: 0; }
+ul { list-style: none; padding: 0; margin: 1.5rem 0; }
+li { padding: 1rem 0; border-bottom: 1px solid var(--rule); }
+li a { font-family: var(--display); font-weight: 700; font-size: 1.25rem; color: var(--link); text-decoration: none; }
+li a:hover, li a:focus-visible { text-decoration: underline; }
+li p { margin: .3rem 0 0; color: var(--muted); }
+footer { font-size: .9rem; color: var(--muted); }
+footer a { color: var(--link); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>Sprout</h1>
+  <p>A statically typed, functional-first language. Articles about how it works.</p>
+</header>
+<ul>
+  <li>
+    <a href="linearity.html">Linear Types in Sprout</a>
+    <p>What linear types are and why functional languages want them, then Sprout's borrowing, <code>once</code> and <code>local</code> closures, <code>LinVec</code> and in-place reuse.</p>
+  </li>
+</ul>
+<footer><p>Source and spec: <a href="https://github.com/cthulhu666/sprout-lang">github.com/cthulhu666/sprout-lang</a></p></footer>
+</main>
+</body>
+</html>
