@@ -11,7 +11,7 @@
 # the http_pg_server demo in the sprout-postgres repo.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DRV="$ROOT/build/compile_driver_bin_stage1"
+DRV="${SPROUT_STAGE1:-$ROOT/build/compile_driver_bin_stage1}"
 STDLIB="$ROOT/stdlib"
 FIX="$ROOT/tests/conformance/package_resolution"
 PKG_ROOT="$FIX/roots"
@@ -23,8 +23,21 @@ fail=0
 # precisely (case-sensitive `ERROR:` / `Unknown variable`), not a bare `error`.
 errors() { echo "$1" | grep -E 'ERROR:|Unknown variable'; }
 
+# Runs the stage-1 check phase; on a crash or an output with no verdict, notes the exit
+# code and output tail on stderr (not captured by `$(...)`). Prints the output on stdout.
+check() {
+  local out rc
+  out="$("$DRV" --phase check "$STDLIB" "$@" 2>&1)"
+  rc=$?
+  if [ "$rc" -gt 1 ] || ! echo "$out" | grep -qE '^OK$|ERROR:|Unknown variable'; then
+    echo "NOTE check ended with no verdict (exit $rc): $*" >&2
+    echo "$out" | tail -5 >&2
+  fi
+  printf '%s\n' "$out"
+}
+
 # Positive: registered extra root -> import resolves, check reports OK, no errors.
-pos="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$APP" 2>&1)"
+pos="$(check --package-root "$PKG_ROOT" "$APP")"
 if echo "$pos" | grep -q '^OK$' && ! errors "$pos" >/dev/null; then
   echo "PASS positive: second-root import resolved and type-checked"
 else
@@ -34,7 +47,7 @@ else
 fi
 
 # Negative: no extra root -> the import of demo.greet is itself the error.
-neg="$("$DRV" --phase check "$STDLIB" "$APP" 2>&1)"
+neg="$(check "$APP")"
 if echo "$neg" | grep -q 'import demo.greet: unknown module'; then
   echo "PASS negative: unregistered dotted import correctly failed to resolve"
 else
@@ -49,7 +62,7 @@ fi
 # diagnostic is that it names the file and the cause, where the old behaviour
 # reported `... is defined more than once in this module` about whichever symbol
 # happened to collide with the prelude — or nothing at all.
-hdr="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_headerless.spr" 2>&1)"
+hdr="$(check --package-root "$PKG_ROOT" "$FIX/app_headerless.spr")"
 if echo "$hdr" | grep -q 'no `module` header' && echo "$hdr" | grep -q 'headerless.sprout'; then
   echo "PASS header: headerless imported file diagnosed by path and cause"
 else
@@ -63,7 +76,7 @@ fi
 # keys on the class, and a short-name-only key collapses the two — rejecting a
 # legal program while naming a class that declares the opposite effect.
 # Here because the shape needs two sibling modules, which needs a package root.
-col="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_class_name_collision.spr" 2>&1)"
+col="$(check --package-root "$PKG_ROOT" "$FIX/app_class_name_collision.spr")"
 if echo "$col" | grep -q '^OK$' && ! errors "$col" >/dev/null; then
   echo "PASS collision: same-short-named classes from two modules judged separately"
 else
@@ -75,7 +88,7 @@ fi
 # The firing half of the same lookup. The assertion above is acceptance-only, so a
 # key that never matches an imported class passes it; this one fails unless the
 # effect declared by a class in ANOTHER module is found and enforced.
-rej="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_cross_module_class_reject.spr" 2>&1)"
+rej="$(check --package-root "$PKG_ROOT" "$FIX/app_cross_module_class_reject.spr")"
 if echo "$rej" | grep -qF 'of class `demo.enc_quiet.Enc`: declared !{IO}, but the class declares pure'; then
   echo "PASS cross-module reject: an imported class's declared effect is enforced"
 else
@@ -89,7 +102,7 @@ fi
 # live here. Construction and the destructor pattern resolve on different paths and
 # report different diagnostics, so each is asserted separately — a gate on one alone
 # would let an importer unwrap a value it cannot build.
-ctor="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_wrap_ctor_construct.spr" 2>&1)"
+ctor="$(check --package-root "$PKG_ROOT" "$FIX/app_wrap_ctor_construct.spr")"
 if echo "$ctor" | grep -qF 'Unknown variable: sealed.Sealed'; then
   echo "PASS wrap opacity: an abstract wrap's constructor is unreachable cross-module"
 else
@@ -98,7 +111,7 @@ else
   fail=1
 fi
 
-pat="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_wrap_ctor_pattern.spr" 2>&1)"
+pat="$(check --package-root "$PKG_ROOT" "$FIX/app_wrap_ctor_pattern.spr")"
 if echo "$pat" | grep -qF 'Unknown constructor: sealed.Sealed'; then
   echo "PASS wrap opacity: the destructor pattern is hidden with the constructor"
 else
@@ -135,7 +148,7 @@ done
 # The two halves are settled by DIFFERENT components — construction by the bundler
 # (the name is never bound), field access by inference (the name resolved; the
 # type is what is private) — so one passing says nothing about the other.
-rcon="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_record_construct.spr" 2>&1)"
+rcon="$(check --package-root "$PKG_ROOT" "$FIX/app_record_construct.spr")"
 if echo "$rcon" | grep -qF 'Unknown record type or field: recop.Opaque' &&
    echo "$rcon" | grep -qF 'exported only with `(..)`'; then
   echo "PASS record opacity: an abstract record cannot be constructed cross-module"
@@ -145,7 +158,7 @@ else
   fail=1
 fi
 
-rfld="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_record_field.spr" 2>&1)"
+rfld="$(check --package-root "$PKG_ROOT" "$FIX/app_record_field.spr")"
 if echo "$rfld" | grep -qF 'is abstract here' &&
    echo "$rfld" | grep -qF 'demo.recop'; then
   echo "PASS record opacity: an abstract record's field is unreadable cross-module"
@@ -157,7 +170,7 @@ fi
 
 # A `wrap linear` is linear in its importer too, and an abstract one stays shut: its
 # field is not linear, so unwrapping it would let an importer copy what it holds.
-lwl="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_linear_wrap_leak.spr" 2>&1)"
+lwl="$(check --package-root "$PKG_ROOT" "$FIX/app_linear_wrap_leak.spr")"
 if echo "$lwl" | grep -qF "linear value 't' is never used"; then
   echo "PASS linear wrap: an importer sees the wrap as linear"
 else
@@ -166,7 +179,7 @@ else
   fail=1
 fi
 
-lwp="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_linear_wrap_pattern.spr" 2>&1)"
+lwp="$(check --package-root "$PKG_ROOT" "$FIX/app_linear_wrap_pattern.spr")"
 if echo "$lwp" | grep -qF 'Unknown constructor: linwrap.Token'; then
   echo "PASS linear wrap: an abstract linear wrap cannot be unwrapped cross-module"
 else
@@ -177,7 +190,7 @@ fi
 
 # A published linear type is allowed when every field is linear, and refused in
 # the module that declares it when one is not (docs/linear-publish-v0.md §4).
-lpo="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_linear_publish_ok.spr" 2>&1)"
+lpo="$(check --package-root "$PKG_ROOT" "$FIX/app_linear_publish_ok.spr")"
 if echo "$lpo" | grep -q '^OK$' && ! errors "$lpo" >/dev/null; then
   echo "PASS linear publish: an importer destructures a published all-linear Pair"
 else
@@ -186,7 +199,7 @@ else
   fail=1
 fi
 
-lpb="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_linear_publish_bad.spr" 2>&1)"
+lpb="$(check --package-root "$PKG_ROOT" "$FIX/app_linear_publish_bad.spr")"
 if echo "$lpb" | grep -qF '`Ticket` is linear, and `(..)` publishes its constructor, but its field `Int` is not linear'; then
   echo "PASS linear publish: a published linear wrap over Int is refused at its module"
 else
@@ -198,7 +211,7 @@ fi
 # The batch CLI's half of the canonical-name rule. The env front end has its own
 # (tests/stdlib/compiler/test_canonical_name_rejected.spr); the two have diverged
 # before over package roots, which is why neither stands in for the other.
-can="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_canonical_name.spr" 2>&1)"
+can="$(check --package-root "$PKG_ROOT" "$FIX/app_canonical_name.spr")"
 if echo "$can" | grep -qF 'is a canonical name, not a way to reach a module'; then
   echo "PASS canonical name: a private binding is unreachable by its bundled name"
 else
@@ -210,7 +223,7 @@ fi
 # The one-constructor clash (#422) reads the prelude's types as in scope everywhere.
 # A `no_prelude` entry has the prelude's empty module name, so its own types must
 # not count for a module it imports. Needs a second module, hence here.
-npc="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_no_prelude_ctor_clash.spr" 2>&1)"
+npc="$(check --package-root "$PKG_ROOT" "$FIX/app_no_prelude_ctor_clash.spr")"
 if echo "$npc" | grep -q '^OK$' && ! errors "$npc" >/dev/null; then
   echo "PASS no_prelude: an entry's own type does not clash with an imported constructor"
 else
@@ -220,7 +233,7 @@ else
 fi
 
 # `no_prelude` is a header line, so an import after it is still read.
-npi="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_no_prelude_then_import.spr" 2>&1)"
+npi="$(check --package-root "$PKG_ROOT" "$FIX/app_no_prelude_then_import.spr")"
 if echo "$npi" | grep -q '^OK$' && ! errors "$npi" >/dev/null; then
   echo "PASS no_prelude: an import after the directive resolves"
 else
@@ -231,7 +244,7 @@ fi
 
 # A clash inside an IMPORTED module is still reported, but without its position: a
 # line:col from demo.clashdep would be read against the entry file.
-dep="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_dep_ctor_clash.spr" 2>&1)"
+dep="$(check --package-root "$PKG_ROOT" "$FIX/app_dep_ctor_clash.spr")"
 if echo "$dep" | grep -q '^ERROR: bundle: type `demo.clashdep.Bad` has one constructor'; then
   echo "PASS dependency clash: reported by module, with no position from the other file"
 else
@@ -244,7 +257,7 @@ fi
 # one with a top-level `local` parameter: `local` inside the return type or a
 # parameter's type lends a borrowed value to a closure the C body may keep.
 for shape in return param_type; do
-  pex="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_private_extern_local_in_$shape.spr" 2>&1)"
+  pex="$(check --package-root "$PKG_ROOT" "$FIX/app_private_extern_local_in_$shape.spr")"
   if echo "$pex" | grep -qF 'is private to `demo.locext`'; then
     echo "PASS private extern ($shape): a nested \`local\` makes the extern private to its module"
   else
@@ -257,7 +270,7 @@ done
 # `local` reached through a type alias counts: in the extern's own module, and from
 # another module through a chain of two aliases.
 for shape in alias imported_alias; do
-  pal="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_private_extern_local_via_$shape.spr" 2>&1)"
+  pal="$(check --package-root "$PKG_ROOT" "$FIX/app_private_extern_local_via_$shape.spr")"
   if echo "$pal" | grep -qF 'is private to `demo.alias'; then
     echo "PASS private extern ($shape): \`local\` behind an alias makes the extern private"
   else
@@ -271,7 +284,7 @@ done
 # field, a record field, a wrap. The recursive type has no `local`, so its extern
 # stays public: that guards the cycle check and against over-marking.
 for shape in adt record wrap; do
-  pty="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_private_extern_local_in_$shape.spr" 2>&1)"
+  pty="$(check --package-root "$PKG_ROOT" "$FIX/app_private_extern_local_in_$shape.spr")"
   if echo "$pty" | grep -qF 'is private to `demo.adtext`'; then
     echo "PASS private extern ($shape): \`local\` in a type definition makes the extern private"
   else
@@ -281,7 +294,7 @@ for shape in adt record wrap; do
   fi
 done
 
-rec="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_extern_recursive_type_stays_public.spr" 2>&1)"
+rec="$(check --package-root "$PKG_ROOT" "$FIX/app_extern_recursive_type_stays_public.spr")"
 if echo "$rec" | grep -q '^OK$' && ! errors "$rec" >/dev/null; then
   echo "PASS private extern: a recursive type with no \`local\` leaves its extern public"
 else
@@ -291,7 +304,7 @@ else
 fi
 
 # Two declarations of one extern that differ only in variable names agree.
-rn="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_extern_redeclare_renamed_vars.spr" 2>&1)"
+rn="$(check --package-root "$PKG_ROOT" "$FIX/app_extern_redeclare_renamed_vars.spr")"
 if echo "$rn" | grep -q '^OK$' && ! errors "$rn" >/dev/null; then
   echo "PASS extern redeclaration: renamed type and effect variables are the same signature"
 else
@@ -303,7 +316,7 @@ fi
 # An extern is private to its module unless that module writes `export extern fn`
 # (docs/extern-visibility-v0.md). The `local` cases above are the special case: those
 # stay private whether or not `export` is written, and `export` on one is an error.
-pge="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_private_extern_general_reached.spr" 2>&1)"
+pge="$(check --package-root "$PKG_ROOT" "$FIX/app_private_extern_general_reached.spr")"
 if echo "$pge" | grep -qF '`__priv_add` is private to `demo.privext`. Mark it `export extern fn` there, or declare it in this module'; then
   echo "PASS extern visibility: an unexported extern is private to its module"
 else
@@ -314,7 +327,7 @@ fi
 
 # A headerless `no_prelude` entry has module name "" but is not the prelude: its own
 # extern declaration must not export the name to another module.
-pne="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_no_prelude_entry_extern_stays_private.spr" 2>&1)"
+pne="$(check --package-root "$PKG_ROOT" "$FIX/app_no_prelude_entry_extern_stays_private.spr")"
 if echo "$pne" | grep -qF '`__priv_add` is private to'; then
   echo "PASS extern visibility: a no_prelude entry's extern stays private"
 else
@@ -324,7 +337,7 @@ else
 fi
 
 for shape in own_and_exported redeclared; do
-  pgo="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_private_extern_$shape.spr" 2>&1)"
+  pgo="$(check --package-root "$PKG_ROOT" "$FIX/app_private_extern_$shape.spr")"
   if echo "$pgo" | grep -q '^OK$' && ! errors "$pgo" >/dev/null; then
     echo "PASS extern visibility ($shape): accepted"
   else
@@ -338,7 +351,7 @@ done
 # not hide another module's exported extern from a third. Both import orders, so the
 # private declaration is last in one bundle and first in the other.
 for order in ab ba; do
-  col="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_extern_collision_$order.spr" 2>&1)"
+  col="$(check --package-root "$PKG_ROOT" "$FIX/app_extern_collision_$order.spr")"
   if echo "$col" | grep -q '^OK$' && ! errors "$col" >/dev/null; then
     echo "PASS extern visibility (collision $order): a private redeclaration does not hide an exported extern"
   else
@@ -350,7 +363,7 @@ done
 
 # The prelude's externs and the `no_prelude` floor's are exported implicitly.
 for shape in prelude_extern_reachable no_prelude_floor_extern; do
-  pre="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_$shape.spr" 2>&1)"
+  pre="$(check --package-root "$PKG_ROOT" "$FIX/app_$shape.spr")"
   if echo "$pre" | grep -q '^OK$' && ! errors "$pre" >/dev/null; then
     echo "PASS extern visibility ($shape): accepted"
   else
@@ -360,7 +373,7 @@ for shape in prelude_extern_reachable no_prelude_floor_extern; do
   fi
 done
 
-exl="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_export_extern_local.spr" 2>&1)"
+exl="$(check --package-root "$PKG_ROOT" "$FIX/app_export_extern_local.spr")"
 if echo "$exl" | grep -qF '`export` on extern `__bad_export_local` has no effect: its signature writes `local`, so it is reachable only from `demo.exportlocal`. Remove `export`'; then
   echo "PASS extern visibility: \`export\` on an extern that writes \`local\` is an error"
 else
@@ -371,7 +384,7 @@ fi
 
 # An importer's instance is not in scope in the module it imports, which is
 # checked first. Two halves: a method call, and a `try` whose instance is fusable.
-inst="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_importer_instance_not_in_import.spr" 2>&1)"
+inst="$(check --package-root "$PKG_ROOT" "$FIX/app_importer_instance_not_in_import.spr")"
 if echo "$inst" | grep -qF 'No instance of ToString for demo.orphan_show.Foo in function demo.orphan_show.describe'; then
   echo "PASS instance scope: an importer's instance does not reach the module it imports"
 else
@@ -380,7 +393,7 @@ else
   fail=1
 fi
 
-prop="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_importer_propagate_not_in_import.spr" 2>&1)"
+prop="$(check --package-root "$PKG_ROOT" "$FIX/app_importer_propagate_not_in_import.spr")"
 if echo "$prop" | grep -qF '`demo.orphan_try.Fetch Int` has no `Propagate` instance in function demo.orphan_try.bump'; then
   echo "PASS instance scope: an importer's Propagate instance does not fuse a \`try\` it imports"
 else
@@ -392,7 +405,7 @@ fi
 # A method is reached as a value is (docs/qualified-class-methods-v0.md, rule 3):
 # a module bundled but not imported gives no method, and a class import binds its
 # methods, so one beside a function import of the same name is bound twice.
-mni="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_method_not_imported.spr" 2>&1)"
+mni="$(check --package-root "$PKG_ROOT" "$FIX/app_method_not_imported.spr")"
 if echo "$mni" | grep -qF 'Unknown variable: tally'; then
   echo "PASS method scope: a method of a module not imported here is unknown"
 else
@@ -401,7 +414,7 @@ else
   fail=1
 fi
 
-mcf="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_class_import_method_conflict.spr" 2>&1)"
+mcf="$(check --package-root "$PKG_ROOT" "$FIX/app_class_import_method_conflict.spr")"
 if echo "$mcf" | grep -qF '`tally` is imported twice in this file'; then
   echo "PASS method scope: a class import binds its methods"
 else
@@ -410,7 +423,7 @@ else
   fail=1
 fi
 
-hid="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_import_hidden_method.spr" 2>&1)"
+hid="$(check --package-root "$PKG_ROOT" "$FIX/app_import_hidden_method.spr")"
 if echo "$hid" | grep -qF '`peek` is a method of class `Hidden`, which is not exported'; then
   echo "PASS method scope: importing a hidden class's method names the class"
 else
@@ -424,7 +437,7 @@ fi
 # declaring module; without the rule the sum's exported `Token` bound to the same
 # canonical name as the abstract record's constructor, and an importer could build
 # the record directly.
-rfc="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_record_forge_via_ctor.spr" 2>&1)"
+rfc="$(check --package-root "$PKG_ROOT" "$FIX/app_record_forge_via_ctor.spr")"
 if echo "$rfc" | grep -qF '`demo.recforge.Token` is defined more than once in this module'; then
   echo "PASS record ctor clash: an abstract record sharing a sum constructor's name is rejected"
 else

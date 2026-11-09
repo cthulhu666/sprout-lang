@@ -1218,6 +1218,14 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   and no test could. That is a second use for the gate beyond regression detection, currently
   reachable only by reading 60 files of diff by hand. Have the report name added/removed
   `__sprout_ir_eta___tc_*` definitions on their own line.
+- [ ] `P2` **`package-resolution` checks intermittently end with no verdict in CI.** Twice a
+  `--phase check` printed neither `OK` nor an `ERROR:` line and the re-run passed: the "linear
+  publish" case (run 42688757655, a PR) and the positive `--package-root` case (run 42803379778,
+  the nightly), both on Linux under `ci-fast-gates` load, both after `832f5482`. Two cases failing
+  alike points at the compiler process, not a fixture. Locally the positive check gave `OK` 300/300
+  on macOS and 600/600 in the Linux container with six in parallel, `SPROUT_GC_HDRCHECK=1`. Every
+  check in the gate now prints its exit code and output tail when it ends with no verdict; on the
+  next failure read them (an exit above 128 is a signal).
 - [ ] `P2` **`just gate` misses 32 of `ci-fast-gates`' entries, though it claims CI parity.** Its
   comment says a green `gate` "means CI will not surprise you", yet it never runs six
   `gc-*-check`s, the `overflow`/`negative-shift`/`closure-arity`/`runtime-diag` smokes,
