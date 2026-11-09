@@ -1,0 +1,18 @@
+module main
+
+# The binder keeps the `!{IO}` arrow through a list pattern on an annotated
+# top-level `let`, so calling it in a pure fn performs IO.
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print(n)
+    n
+
+let handlers: List (Int -> Int !{IO}) = [shout]
+
+fn pure_f(x: Int) -> Int =
+  match handlers with
+  | [g | _] -> g(x)
+  | [] -> 0
+
+fn main() -> Unit !{IO} = print(pure_f(3))

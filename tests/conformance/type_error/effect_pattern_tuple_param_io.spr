@@ -1,0 +1,15 @@
+module main
+
+# The binder keeps the `!{IO}` arrow through a tuple pattern on a concretely
+# typed parameter, so calling it in a pure fn performs IO.
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print(n)
+    n
+
+fn pure_f(p: (Int -> Int !{IO}, Int)) -> Int =
+  match p with
+  | (g, k) -> g(k)
+
+fn main() -> Unit !{IO} = print(pure_f((shout, 2)))

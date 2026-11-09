@@ -1,0 +1,16 @@
+module main
+
+# `g` is the `!{IO}` function stored in the Maybe. The binder keeps that arrow, so
+# calling it in a pure fn performs IO. Rule 8 (spec-v0.md §7) must reject `pure_f`.
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print(n)
+    n
+
+fn pure_f(m: Maybe (Int -> Int !{IO})) -> Int =
+  match m with
+  | Just g -> g(1)
+  | Nothing -> 0
+
+fn main() -> Unit !{IO} = print(pure_f(Just(shout)))

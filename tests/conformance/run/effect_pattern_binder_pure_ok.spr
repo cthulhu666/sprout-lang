@@ -1,0 +1,52 @@
+module main
+
+# The ACCEPT twin of tests/conformance/type_error/effect_pattern_*_io.spr.
+#
+# A pattern binder takes the scrutinee's own type (unfreshened, via
+# `unify_scrutinee`), so a pure callback stays pure. Sound uses must be accepted:
+# a pure callback destructured in a pure fn, an IO callback destructured in an
+# `!{IO}` fn, and a binder from a pure-typed scrutinee passed into a pure callback
+# slot.
+
+fn inc(n: Int) -> Int = n + 1
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print("io")
+    n + 1
+
+# Pure callback, constructor pattern, called in a pure fn.
+fn pure_call(m: Maybe (Int -> Int)) -> Int =
+  match m with
+  | Just g -> g(1)
+  | Nothing -> 0
+
+# Pure callback, tuple pattern, called in a pure fn.
+fn pure_tuple(p: (Int -> Int, Int)) -> Int =
+  match p with
+  | (g, k) -> g(k)
+
+# IO callback, constructor pattern, called in an `!{IO}` fn.
+fn io_call(m: Maybe (Int -> Int !{IO})) -> Int !{IO} =
+  match m with
+  | Just g -> g(2)
+  | Nothing -> 0
+
+# IO callback, tuple literal let, called in an `!{IO}` fn.
+fn io_let(x: Int) -> Int !{IO} =
+  let (g, _) = (shout, 1)
+  in g(x)
+
+# Binder from a pure-typed scrutinee passed into a pure callback slot.
+fn pure_slot(m: Maybe (Int -> Int), xs: List Int) -> List Int =
+  match m with
+  | Just g -> list_map(g, xs)
+  | Nothing -> xs
+
+fn main() -> Unit !{IO} =
+  do
+    print(pure_call(Just(inc)))
+    print(pure_tuple((inc, 5)))
+    print(io_call(Just(shout)))
+    print(io_let(7))
+    print(pure_slot(Just(inc), [1, 2, 3]))

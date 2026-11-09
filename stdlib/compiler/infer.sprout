@@ -5714,14 +5714,14 @@ fn check_pattern_type(
   pos: source.SourcePos,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
-  expected: types.Type,
-  expected_type: types.Type,
+  scrutinee: types.Type,
+  pattern_type: types.Type,
   label: String
 ) -> InferResult =
-  match unifier.unify_expect_actual(subst, eff_subst, expected, expected_type) with
+  match unifier.unify_scrutinee(subst, eff_subst, scrutinee, pattern_type) with
   | unifier.UnifyErr e -> InferErr(pos, label ++ " pattern: " ++ e)
   | unifier.UnifyOk s1 es1 ->
-      InferOk(typed_ast.TUnit(expected_type, no_pos()), s1, es1, types.EffectPure)
+      InferOk(typed_ast.TUnit(pattern_type, no_pos()), s1, es1, types.EffectPure)
 
 fn infer_tuple_pattern(
   pos: source.SourcePos,
@@ -5742,11 +5742,11 @@ fn infer_tuple_pattern_unified(
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
-  expected: types.Type,
+  scrutinee: types.Type,
   elem_vars: List types.Type,
   pats: List ast.Pattern
 ) -> InferResult !{IO} =
-  match unifier.unify_expect_actual(subst, eff_subst, expected, types.TTuple(elem_vars)) with
+  match unifier.unify_scrutinee(subst, eff_subst, scrutinee, types.TTuple(elem_vars)) with
   | unifier.UnifyErr e -> InferErr(pos, "Tuple pattern: " ++ e)
   | unifier.UnifyOk s1 es1 ->
       check_pattern_list(pos, state, env, s1, es1, elem_vars, pats)
@@ -5851,12 +5851,12 @@ fn infer_ctor_pattern_typed(
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
-  expected: types.Type,
+  scrutinee: types.Type,
   name: String,
   fields: List ast.Pattern,
   ctor_type: types.Type
 ) -> InferResult !{IO} =
-  match unifier.unify_expect_actual(subst, eff_subst, expected, ctor_result_type(ctor_type)) with
+  match unifier.unify_scrutinee(subst, eff_subst, scrutinee, ctor_result_type(ctor_type)) with
   | unifier.UnifyErr e -> InferErr(pos, "Constructor " ++ name ++ ": " ++ e)
   | unifier.UnifyOk s1 es1 ->
       check_pattern_list(pos, state, env, s1, es1, ctor_param_types(ctor_type), fields)

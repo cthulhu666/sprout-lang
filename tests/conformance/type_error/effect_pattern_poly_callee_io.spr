@@ -1,0 +1,19 @@
+module main
+
+# The IO counterpart of `into_poly` in run/effect_pattern_binder_meets_slot_ok.spr:
+# the binder keeps the scrutinee's `!{IO}` arrow, so passing it to an
+# effect-polymorphic callee makes the call perform IO, and rule 8 rejects `pure_f`.
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print(n)
+    n
+
+fn app(f: Int -> Int !{e}, x: Int) -> Int !{e} = f(x)
+
+fn pure_f(m: Maybe (Int -> Int !{IO})) -> Int =
+  match m with
+  | Just g -> app(g, 1)
+  | Nothing -> 0
+
+fn main() -> Unit !{IO} = print(pure_f(Just(shout)))
