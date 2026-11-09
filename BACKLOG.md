@@ -2460,16 +2460,13 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   writes that header today); coalesce adjacent FREE slots in the sweep walk, which needs a
   `slotmap_clear` or HDRCHECK's "no start bit inside a step" assert fires; or make regions
   single-class, as five of six comparable heaps do. Unmeasured; needs the entry above's instrument.
-- [ ] `P1` **The galaxy game spends 7.7 ms of a 17.1 ms frame in GC, and 97% of its live set is
-  one map.** Measured 2026-09-27, `docs/gc-generational-v0.md` §13.6: `game/app.sprout` in the
-  uncharted-suns repo holds 77,653 live objects, of which `map=75,640`, collecting about every 17
-  frames at p50 7,746 µs against that repo's 58 fps baseline. Pause tracks total slots and is
-  floored by the live set (§13.2–3). **The "shrink the map" route was taken and backfired:** #407
-  reports p50 7,713 → 797 µs but *total* GC 207 → 888 µs/frame — the trigger re-based onto the
-  smaller live set while the swept footprint did not follow. This entry named only pause; the two
-  are traded. Untried: move the map off the managed heap. Open: make the sweep proportional to
-  something other than total slots (generation-scoped freelists are the prerequisite). The trigger
-  half landed as the footprint floor (`docs/gc-trigger-v0.md` §9): GC per allocation 12–16× lower.
+- [ ] `P3` **After a load spike, every full collection walks the peak's slots.** The galaxy client
+  (uncharted-suns `game/app.sprout`) peaks near 185k objects while loading, then holds ~1,550
+  live. Its 9 regions stay, since the survivors are spread over all of them and the sweep frees a
+  region only when it holds none, so each major walks 265k slots: p50 1,057 µs, max 1,945, 49 per
+  1,200 frames. Minors skip the walk (p50 30 µs); GC is ~142 µs per frame. Every region holds a
+  live slot, so skipping empty regions saves nothing; the walk must skip free runs inside a
+  region, or the survivors must move. Unmeasured. `bench/results-2026-11-09-galaxy-gc.md`.
 - [ ] `P3` **`http_log_middleware` overflows in `wall_loop`.** The bench sums `time.wall_micros()`
   (~1.76e15) over 1,000,000 iterations in `bench/http_log_middleware/`, so the fifth of its six
   phases traps on Int overflow (since 61fd1617, 2026-09-23) and `fmt_loop` never runs. Every GC
@@ -2484,8 +2481,8 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   artifacts from `SPROUT_DEBUG_GC`'s `elapsed_us`, and does **not** explain the unattributable
   pause tail filed below — both clocks count descheduled time.
 - [ ] `P3` **A program cannot place a collection in its own frame — `sprout_gc_collect` is
-  `static`.** A game with a 17.1 ms budget and a 7.7 ms pause would rather take it after present
-  than wherever the allocation threshold lands, and OCaml exposes exactly this as
+  `static`.** A game with a 17.1 ms budget would rather take a major (~1 ms on the galaxy client)
+  after present than wherever the allocation threshold lands, and OCaml exposes exactly this as
   `Gc.major_slice n`. Useful before any incremental work, since it costs nothing and needs no
   barrier. **Requires approval and is NOT approved**: exposing it is a new builtin (AGENTS.md
   "Builtin vs Stdlib" 4–6), justified on the impossible-in-Sprout ground rather than performance.
@@ -2514,8 +2511,8 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   whole-program linking landed, so push/pop no longer dominates, and the malloc/free family plus
   `madvise` was 23% of nqueens CPU, not ~10% (2026-09-25). Inlining small vectors' elements took
   the largest single contributor out of that share — nqueens now allocates 33.4M objects, not 50.1M
-  — so re-measure before pricing this. See also the generational-step entry in §1, whose
-  measurements re-scope it as compiler-only.
+  — so re-measure before pricing this. Scope against the landed non-moving generational
+  collector: `docs/gc-generational-v0.md` §8.
 - [ ] `P2` **Branded indices for `LinVec`, so a write cannot be out of range.** Today
   `linvec.set`, `linvec.scatter` and `linvec.accum` trap on a bad index. An existential brand
   `s` on `Len s`, `Idx s` and `BVec s a`, with `Idx s` made only by a check against `Len s`,

@@ -765,6 +765,11 @@ objects of each other here, which makes the mistake invisible if you only measur
 the client is the one with the frame budget, and it is also the one whose log carries the
 type census above.
 
+**Re-measured 2026-11-09** on the stage-2 default
+([results](../bench/results-2026-11-09-galaxy-gc.md)): the steady live set is ~1,550 objects
+(`map=2`), the p50 pause 31 µs, GC ~142 µs per frame. A major still walks the load peak's 265k
+slots, ~1 ms.
+
 ## 14. Stage 1 design — sticky mark bits, object barrier, verifier (2026-10-31)
 
 ### 14.1 The prize, re-measured
