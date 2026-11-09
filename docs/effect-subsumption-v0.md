@@ -601,10 +601,26 @@ close it.
 > expect, not a checklist.
 
 So there *is* a dominant convention and an earlier draft of this section overstated the
-chaos: it claimed "only the call site follows" the left=expected convention documented in `unifier.sprout`, which is wrong — the pattern-checking sites follow it too. The
+chaos: it claimed "only the call site follows" the left=expected convention documented in `unifier.sprout`, which is wrong — the pattern-checking sites followed it too, until the 2026-11-09 update
+below moved them to a peer meet. The
 conclusion survives regardless: two conventions plus a peer category mean argument order
-cannot carry direction. `unifier.list_vec_hint` already works around the same flip for
+cannot carry direction. (At the time of writing; today there is one directed convention,
+(actual, expected), beside the peer meets.) `unifier.list_vec_hint` already works around the same flip for
 types by writing a direction-agnostic diagnostic.
+
+**Update 2026-11-09 — pattern sites are a peer meet.** `check_pattern_type`,
+`infer_tuple_pattern_unified` and `infer_ctor_pattern_typed` first used (expected, actual)
+with the scrutinee as `expected`: the binder got a ceiling, which never floors its arrow
+effect, so a pure fn could destructure an `!{IO}` function out of a concretely typed value
+and call it. Flipping to (actual, expected) gave a floor instead, but a floor drops a pure
+arrow's purity, so a binder from a pure scrutinee then took `!{IO}` from the next slot it
+met. Floor-only and ceiling-only each broke one direction, because a binder that shares a
+freshened variable with the scrutinee shares its bound with whatever it meets next. A
+binder is the value itself, as a depth-0 `VarPattern` already is, so these sites now call
+`unify_scrutinee`: a peer meet (`NoExpectation`), no freshening, no bound. The scrutinee
+is still the left operand. Two concrete arrows never meet there: a pattern type is a
+literal, a tuple of fresh variables, or a constructor result over fresh variables (spec
+§7 rule 7). `unify_expect_actual` had no caller left and was removed.
 
 **So the design passes polarity explicitly** rather than inferring it from position. The
 peer category is the one that breaks a two-valued flag — see §6.5.
@@ -670,14 +686,16 @@ violations — so a green suite is not evidence the audit was done right. Two me
 both cheap:
 
 1. **Remove the symmetric spelling.** Make the bare `unify_types` private and expose
-   `unify_expect_actual`, `unify_actual_expected`, `unify_join`. An unconverted site then
+   `unify_expect_actual`, `unify_actual_expected`, `unify_join`. (Now `unify_actual_expected`,
+   `unify_join` and `unify_scrutinee`; see the 2026-11-09 update above.) An unconverted site then
    fails to compile instead of silently inheriting a default, and each call site states its
    convention where a reviewer reads it. Precedent: `unify_tfunc_owned` already hard-rejects
    ownership mismatches at the same layer.
-2. **Flip-test the minority buckets.** The `(expected, actual)` and peer buckets are ~7 and
-   ~6 sites. One fixture each that goes red when that site's annotation is flipped — the
-   generalisation of §9's branch-swap pairs. The dominant bucket stays unpinned per-site,
-   but every site is at least *forced to declare*.
+2. **Flip-test the minority bucket.** No site is (expected, actual) now; the pattern sites
+   are peer meets via `unify_scrutinee`, beside `unify_join`'s. The peer sites get one
+   fixture each that goes red when that site's annotation is flipped — the generalisation
+   of §9's branch-swap pairs. The dominant (actual, expected) bucket stays unpinned
+   per-site, but every site is at least *forced to declare*.
 
 ### 6.4a What a code review found in part 1's first implementation
 

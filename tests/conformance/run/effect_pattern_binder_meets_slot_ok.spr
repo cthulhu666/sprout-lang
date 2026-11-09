@@ -1,0 +1,80 @@
+# sprout-ignore-all lint/hand-rolled-combinator: conformance fixture — the `match` patterns are the program under test
+module main
+
+# A pattern binder is the scrutinee's value, so it meets later slots and joins
+# exactly as a plain variable of that type would. Neither a floor nor a ceiling
+# taken from the scrutinee may leak into what the binder is used with next.
+#
+# Every function here is ACCEPTED. The rejecting twins are
+# tests/conformance/type_error/effect_pattern_*_io.spr.
+
+type Pair a = | Pair a a
+
+fn quiet(n: Int) -> Int = n + 1
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print(n)
+    n
+
+# Takes an `!{IO}` callback slot and ignores it.
+fn keep(cb: Int -> Int !{IO}) -> Int = 0
+
+fn g2(cb: Int -> Int, n: Int) -> Int = cb(n)
+
+fn app(f: Int -> Int !{e}, x: Int) -> Int !{e} = f(x)
+
+# A binder from a pure scrutinee goes into an `!{IO}` slot, then is called.
+fn into_io_slot(m: Maybe (Int -> Int)) -> Int =
+  match m with
+  | Just g -> keep(g) + g(1)
+  | Nothing -> 0
+
+fn into_io_slot_tuple(p: (Int -> Int, Int)) -> Int =
+  match p with
+  | (g, k) -> keep(g) + g(k)
+
+# A pure binder joined with an `!{IO}` arm, under an `!{IO}` result.
+fn join_io_result(m: Maybe (Int -> Int)) -> (Int -> Int !{IO}) =
+  match m with
+  | Just g -> g
+  | Nothing -> shout
+
+# A binder with an `!{IO}` callback parameter joined with a pure-callback fn.
+fn join_slot(m: Maybe ((Int -> Int !{IO}) -> Int -> Int), c: Bool) -> ((Int -> Int) -> Int -> Int) =
+  match m with
+  | Just h -> if c then h else g2
+  | Nothing -> g2
+
+fn join_slot_mirror(m: Maybe ((Int -> Int !{IO}) -> Int -> Int), c: Bool) -> ((Int -> Int) -> Int -> Int) =
+  match m with
+  | Just h -> if c then g2 else h
+  | Nothing -> g2
+
+# A binder passed to an effect-polymorphic callee at purity.
+fn into_poly(m: Maybe (Int -> Int)) -> Int =
+  match m with
+  | Just g -> app(g, 1)
+  | Nothing -> 0
+
+# Two binders share one type variable: one into the `!{IO}` slot, the other called.
+fn shared_var(p: Pair (Int -> Int)) -> Int =
+  match p with
+  | Pair a b -> keep(a) + b(1)
+
+fn hh(cb: Int -> Int !{IO}, n: Int) -> Int = n * 2
+
+fn use2(k: (Int -> Int) -> Int -> Int, n: Int) -> Int = k(quiet, n)
+
+fn run_io(cb: Int -> Int !{IO}, n: Int) -> Int !{IO} = cb(n)
+
+fn main() -> Unit !{IO} =
+  do
+    print(into_io_slot(Just(quiet)))
+    print(into_io_slot_tuple((quiet, 5)))
+    r <- run_io(join_io_result(Just(quiet)), 3)
+    print(r)
+    print(use2(join_slot(Just(hh), true), 5))
+    print(use2(join_slot_mirror(Just(hh), true), 5))
+    print(into_poly(Just(quiet)))
+    print(shared_var(Pair(quiet, quiet)))

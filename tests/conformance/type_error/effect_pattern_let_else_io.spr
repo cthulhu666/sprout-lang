@@ -1,0 +1,15 @@
+module main
+
+# The binder keeps the `!{IO}` arrow through a refutable `let` pattern
+# (constructor around a tuple), so calling it in a pure fn performs IO.
+
+fn shout(n: Int) -> Int !{IO} =
+  do
+    print(n)
+    n
+
+fn pure_f(p: Maybe (Int -> Int !{IO}, Int)) -> Int =
+  let Just(h, n) = p else 0
+  in h(n)
+
+fn main() -> Unit !{IO} = print(pure_f(Just((shout, 2))))

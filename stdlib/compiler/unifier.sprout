@@ -199,12 +199,12 @@ export type Unified (..) =
 
 # Which side of a unification carries the EXPECTED type. Argument order cannot
 # say it: the same (pure, IO) pair means opposite things at a parameter and at a
-# return, and `infer`'s call sites use both orders
+# return, so each site names its side with `unify_actual_expected`
 # (docs/effect-subsumption-v0.md §6.2).
 #
-# `NoExpectation` is a join — an `if` branch meeting its sibling, where neither
-# side is the contract. It binds without rejecting, which is what every site did
-# before this change; part 2 gives joins their own LUB/GLB rule.
+# `NoExpectation` is a peer meet — a join, or a pattern against its scrutinee —
+# where neither side is the contract. It binds without rejecting, which is what
+# every site did before this change; part 2 gives joins their own LUB/GLB rule.
 export type Polarity (..) =
   | ExpectedLeft
   | ExpectedRight
@@ -834,18 +834,13 @@ fn bind_var(name: String, t: types.Type, subst: Dict types.Type) -> Result Strin
 # Callers that need to thread state must pass the updated subst to the next
 # unification — this function is IO-free.
 
-# Three spellings, no symmetric one. Every caller states which side is the
-# contract, because a site left on the wrong direction is a silent hole or a
-# false rejection and neither shows up in a corpus with no violations — a green
-# suite is not evidence the audit was done (docs/effect-subsumption-v0.md §6.3).
-export fn unify_expect_actual(
-  subst: Dict types.Type,
-  eff_subst: Dict types.Effect,
-  expected: types.Type,
-  actual: types.Type
-) -> Unified =
-  unify_directed(subst, eff_subst, ExpectedLeft, expected, actual)
-
+# Three spellings, no symmetric one: `unify_actual_expected` (directed) and two
+# peer meets, `unify_join` and `unify_scrutinee`. Every caller states which side,
+# if any, is the contract, because a site left on the wrong direction is a silent
+# hole or a false rejection and neither shows up in a corpus with no violations —
+# a green suite is not evidence the audit was done
+# (docs/effect-subsumption-v0.md §6.3). Argument order is not polarity, but the
+# left operand is the one that stays canonical in a variable-to-variable bind.
 export fn unify_actual_expected(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
@@ -870,6 +865,21 @@ export fn unify_join(
   right: types.Type
 ) -> Unified =
   unify_directed(subst, eff_subst, NoExpectation, left, right)
+
+# A pattern against its scrutinee. A binder aliases the value, so it takes the
+# scrutinee's type unfreshened, as a depth-0 `VarPattern` does: a bound would
+# either drop a pure arrow's purity (floor) or leak it into later joins (ceiling).
+# Kept apart from `unify_join` for that reason, not for different behavior.
+# A pattern type is a literal `TConst`, a tuple of fresh variables, or a
+# constructor result `T <fresh vars>` (spec §7 rule 7), so two concrete arrows
+# never meet here and the total arrow meet is not taken. The scrutinee is left.
+export fn unify_scrutinee(
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  scrutinee: types.Type,
+  pattern_type: types.Type
+) -> Unified =
+  unify_directed(subst, eff_subst, NoExpectation, scrutinee, pattern_type)
 
 fn unify_directed(
   subst: Dict types.Type,
@@ -1154,7 +1164,8 @@ fn unify_applied(
 ) -> Unified =
   match (l, r) with
   | (types.TVar a, types.TVar b) ->
-      # Bind right→left so the left (expected/older) TVar stays canonical.
+      # Bind right→left so the left TVar stays canonical (at a pattern site it
+      # is the scrutinee's).
       # This ensures @fwd markers (keyed by the instantiation TVar) remain
       # reachable after tuple pattern matching introduces fresh element vars.
       if types.tyvar_eq(a, b) then UnifyOk(subst, eff_subst)

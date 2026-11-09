@@ -1,0 +1,1 @@
+`main.pure_f` performs IO but is declared pure — add `!{IO}` after its return type (spec-v0.md §7 rule 8)
