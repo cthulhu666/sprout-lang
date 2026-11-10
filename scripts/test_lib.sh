@@ -30,6 +30,6 @@ NO_VERDICT_MSG='NO VERDICT: suite printed no "SUITE PASSED" line (did main call 
 suite_verdict() {
   local text
   text="$(cat "${1:--}")"
-  if grep -q "^SUITE FAILED" <<<"$text"; then return 1; fi
-  grep -q "^SUITE PASSED$" <<<"$text" || return 2
+  if has "$text" "^SUITE FAILED"; then return 1; fi
+  has "$text" "^SUITE PASSED$" || return 2
 }

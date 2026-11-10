@@ -319,6 +319,7 @@ check-iface-all: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
   STAGE1="{{build_dir}}/compile_driver_bin_stage1"
+  source scripts/test_lib.sh
   IFACE_DIR="{{build_dir}}/iface"
   if [[ ! -d "$IFACE_DIR" ]]; then
     echo "ERROR: $IFACE_DIR not found; run: just refresh-iface" >&2; exit 1
@@ -327,7 +328,7 @@ check-iface-all: bootstrap-from-seed
   ok_count=0
   while IFS= read -r -d '' f; do
     count=$((count + 1))
-    if "$STAGE1" --check-iface "$f" 2>&1 | grep -q "^OK:"; then
+    if res="$("$STAGE1" --check-iface "$f" 2>&1)" && has "$res" "^OK:"; then
       ok_count=$((ok_count + 1))
     else
       echo "FAIL: $f"
@@ -1787,6 +1788,7 @@ spec-census-smoke: bootstrap-from-seed (_census-diff "spec-census-smoke" "spec-k
 effect-report-smoke: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
+  source scripts/test_lib.sh
   FIX=tests/effects/canaries.spr
   [ -f "$FIX" ] || { echo "effect-report-smoke: missing fixture $FIX" >&2; exit 1; }
   TMPD=$(mktemp -d /tmp/sprout_eff_XXXXXX)
@@ -1853,21 +1855,19 @@ effect-report-smoke: bootstrap-from-seed
   # declaration — it could not, being a file that must keep reporting rather
   # than failing to compile.
   ROWFIX=tests/conformance/type_error/effect_two_variables.spr
-  if ! "{{build_dir}}/compile_driver_bin_stage1" --phase effects "{{stdlib_root}}" "$ROWFIX" 2>&1 \
-       | grep -qE '^effect ROW .*two_hofs'; then
+  if ! rowout="$("{{build_dir}}/compile_driver_bin_stage1" --phase effects "{{stdlib_root}}" "$ROWFIX" 2>&1)" \
+     || ! has "$rowout" -E '^effect ROW .*two_hofs'; then
     echo "effect-report-smoke: no ROW verdict for the two-effect-variable fixture" >&2
-    "{{build_dir}}/compile_driver_bin_stage1" --phase effects "{{stdlib_root}}" "$ROWFIX" 2>&1 \
-      | grep -E 'two_hofs' >&2 || echo "  (no line at all)" >&2
+    grep -E 'two_hofs' <<<"$rowout" >&2 || echo "  (no line at all)" >&2
     failed=$((failed + 1))
   fi
   # `LET` (spec §5.2) likewise: canaries.spr cannot hold an impure top-level
   # `let`, since the rejected program would stop reporting.
   LETFIX=tests/conformance/type_error/toplevel_let_print.spr
-  if ! "{{build_dir}}/compile_driver_bin_stage1" --phase effects "{{stdlib_root}}" "$LETFIX" 2>&1 \
-       | grep -qE '^effect LET .*boom'; then
+  if ! letout="$("{{build_dir}}/compile_driver_bin_stage1" --phase effects "{{stdlib_root}}" "$LETFIX" 2>&1)" \
+     || ! has "$letout" -E '^effect LET .*boom'; then
     echo "effect-report-smoke: no LET verdict for the impure top-level let fixture" >&2
-    "{{build_dir}}/compile_driver_bin_stage1" --phase effects "{{stdlib_root}}" "$LETFIX" 2>&1 \
-      | grep -E 'boom' >&2 || echo "  (no line at all)" >&2
+    grep -E 'boom' <<<"$letout" >&2 || echo "  (no line at all)" >&2
     failed=$((failed + 1))
   fi
   if ! grep -qE "^effect-summary: [0-9]+ declarations, [0-9]+ gaps" "$TMPD/out"; then

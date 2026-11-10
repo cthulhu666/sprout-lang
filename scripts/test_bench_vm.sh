@@ -120,8 +120,8 @@ deleted_own_name() { # exactly one delete of the created name
 }
 every_call_scoped() {
   [ "$(calls)" -gt 0 ] \
-    && ! grep -v -e '--project=test-project' "$CASE_LOG" | grep -q . \
-    && ! grep -v -e '--account=tester@example.invalid' "$CASE_LOG" | grep -q .
+    && [ -z "$(grep -v -e '--project=test-project' "$CASE_LOG")" ] \
+    && [ -z "$(grep -v -e '--account=tester@example.invalid' "$CASE_LOG")" ]
 }
 
 # ── 1. all three vars missing ────────────────────────────────────────────────
