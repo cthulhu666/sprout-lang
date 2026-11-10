@@ -111,7 +111,7 @@ cleanup() {
     gcloud compute instances delete "$NAME" --quiet "${GFLAGS[@]}" "${ZFLAG[@]}" >&2
     local out
     if out="$(gcloud compute instances list --filter="name=$NAME" --format="value(name)" "${GFLAGS[@]}" 2>/dev/null)"; then
-      if printf '%s\n' "$out" | grep -qxF "$NAME"; then leftover=1; fi
+      if grep -qxF "$NAME" <<<"$out"; then leftover=1; fi
     else
       unverified=1
     fi

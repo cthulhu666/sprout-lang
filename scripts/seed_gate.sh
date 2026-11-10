@@ -18,7 +18,7 @@ CMD=$(printf '%s' "$INPUT" | python3 -c \
 if [[ -z "$CMD" ]]; then exit 0; fi
 
 # Only act when the command is a git commit.
-if ! printf '%s' "$CMD" | grep -qE '(^|[ \t&|;`(])git[ \t]+([^ \t]+[ \t]+)*commit($|[ \t&|;`)])'; then
+if ! grep -qE '(^|[ \t&|;`(])git[ \t]+([^ \t]+[ \t]+)*commit($|[ \t&|;`)])' <<<"$CMD"; then
   exit 0
 fi
 
