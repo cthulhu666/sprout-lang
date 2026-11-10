@@ -9,6 +9,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SPROUTD="$ROOT/build/sproutd"
 fail=0
 
+# shellcheck source=scripts/test_lib.sh
+source "$ROOT/scripts/test_lib.sh"
+
 if [ ! -x "$SPROUTD" ]; then
   echo "ERROR: $SPROUTD not found; run: just build-sproutd" >&2
   exit 1
@@ -20,26 +23,26 @@ check() { # label, condition-already-evaluated (0 = pass)
 
 # Control: the same block, every line readable, declares f.
 out="$(printf ':{\nfn f() -> Int = 1\n:}\nf()\n' | "$SPROUTD" 2>&1)"
-echo "$out" | grep -qx '1'
+has "$out" -x '1'
 check "a block of readable lines declares its function" $?
 
 # The block with a line that is not valid UTF-8 is cancelled, with a message.
 out="$(printf ':{\nfn f() -> Int = 1\n\351\n:}\nf()\n' | "$SPROUTD" 2>&1)"
-echo "$out" | grep -q 'input line is not valid UTF-8; block cancelled'
+has "$out" 'input line is not valid UTF-8; block cancelled'
 check "an unreadable line inside a block cancels it, with a message" $?
 # ... and the function is not defined: calling it is an error, not the value 1.
-! echo "$out" | grep -qx '1'
+! has "$out" -x '1'
 check "the cancelled block's function is not defined" $?
-echo "$out" | grep -q 'Unknown variable: f'
+has "$out" 'Unknown variable: f'
 check "the session went on and answered the later line" $?
-! echo "$out" | grep -q 'parse'
+! has "$out" 'parse'
 check "the rest of the cancelled block was not read as input" $?
 
 # Outside a block the line is skipped with a message and the session goes on.
 out="$(printf '\351\n1 + 1\n' | "$SPROUTD" 2>&1)"
-echo "$out" | grep -q 'input line is not valid UTF-8; skipped'
+has "$out" 'input line is not valid UTF-8; skipped'
 check "an unreadable line outside a block is skipped, with a message" $?
-echo "$out" | grep -qx '2'
+has "$out" -x '2'
 check "the line after a skipped one is evaluated" $?
 
 if [ "$fail" -eq 0 ]; then echo "==> repl smoke: OK"; else echo "==> repl smoke: FAILED"; fi

@@ -8,6 +8,10 @@ limited() {
   perl -e 'alarm shift; exec @ARGV or exit 127' "$secs" "$@"
 }
 
+# <text> [grep-flags...] <pattern>: quiet grep over a string, matched via a here-string.
+# `echo "$text" | grep -q` fails under pipefail: grep exits on its first match, the writer gets SIGPIPE.
+has() { local text="$1"; shift; grep -q "$@" <<<"$text"; }
+
 # [default-seconds]: echo the per-step limit, SPROUT_TEST_TIMEOUT or the default (300).
 # Only a positive integer is valid: `0` disables the alarm and `5m` would become 5 s.
 test_timeout() {
