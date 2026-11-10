@@ -102,10 +102,10 @@ check_ir() {
         if [ -z "$body" ]; then echo "  FAIL: $fx: $mode: no define for @$fnname"; fail=1; continue; fi
         case "$what" in
           has)
-            if printf '%s\n' "$body" | grep -qF -- "$text"; then echo "  ok: $fx: $mode body $fnname has $text"
+            if has "$body" -F -- "$text"; then echo "  ok: $fx: $mode body $fnname has $text"
             else echo "  FAIL: $fx: $mode body $fnname missing: $text"; fail=1; fi ;;
           lacks)
-            if printf '%s\n' "$body" | grep -qF -- "$text"; then echo "  FAIL: $fx: $mode body $fnname unwanted: $text"; fail=1
+            if has "$body" -F -- "$text"; then echo "  FAIL: $fx: $mode body $fnname unwanted: $text"; fail=1
             else echo "  ok: $fx: $mode body $fnname lacks $text"; fi ;;
           *) echo "  FAIL: $fx: bad body directive: $line"; fail=1 ;;
         esac ;;

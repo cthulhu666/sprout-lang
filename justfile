@@ -1222,7 +1222,7 @@ _test-reject stage dir noun xfail="" phase="check":
       if [[ $rc -eq 142 ]]; then
         echo "  TIMEOUT after ${TEST_TO}s (--phase {{phase}})" >> "$TMPD/$idx.out"; echo fail > "$TMPD/$idx.st"; exit 0
       fi
-      if echo "$out" | grep -qF -- "$expected"; then
+      if has "$out" -F -- "$expected"; then
         if [[ $is_xfail -eq 1 ]]; then
           echo "  UNEXPECTED MATCH (remove from xfail)" >> "$TMPD/$idx.out"; echo fail > "$TMPD/$idx.st"
         else
@@ -1234,8 +1234,8 @@ _test-reject stage dir noun xfail="" phase="check":
           fixed="tests/conformance/{{dir}}/$name.fixed.spr"
           if [[ -f "$fixed" ]]; then
             fout="$(limited "$TEST_TO" "./$STAGE" --phase {{phase}} "{{stdlib_root}}" "$fixed" 2>&1)"; fst=$?
-            if [[ $fst -ne 0 ]] || echo "$fout" | grep -q 'ERROR:'; then
-              first="$(echo "$fout" | grep -m1 'ERROR:' || echo "exit $fst")"
+            if [[ $fst -ne 0 ]] || has "$fout" 'ERROR:'; then
+              first="$(grep -m1 'ERROR:' <<<"$fout" || echo "exit $fst")"
               [[ $fst -eq 142 ]] && first="TIMEOUT after ${TEST_TO}s"
               echo "  FAILED: $name.fixed.spr does not check clean: $first" >> "$TMPD/$idx.out"; echo fail > "$TMPD/$idx.st"
             fi
