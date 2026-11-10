@@ -27,22 +27,36 @@ source "$ROOT/scripts/test_lib.sh"
 # precisely (case-sensitive `ERROR:` / `Unknown variable`), not a bare `error`.
 errors() { grep -E 'ERROR:|Unknown variable' <<<"$1"; }
 
-# Runs the stage-1 check phase on the given args; sets `out` (stdout+stderr) and `rc`.
-# A crash or an output with no verdict is noted on stderr; it does not fail the gate.
+# Runs the stage-1 check phase on the given args; sets `out` (stdout+stderr), `rc`,
+# `checked` (the args) and `noverdict` (1 when it crashed or printed no verdict line).
+# A no-verdict check still passes or fails on its output: `passed` notes it on stderr,
+# `failed` prints the tail.
 check_out() {
   out="$("$DRV" --phase check "$STDLIB" "$@" 2>&1)"
   rc=$?
-  if [ "$rc" -gt 1 ] || ! has "$out" -E '^OK$|ERROR:|Unknown variable'; then
-    echo "NOTE check ended with no verdict (exit $rc): $*" >&2
+  checked="$*"
+  noverdict=0
+  if [ "$rc" -gt 1 ] || ! has "$out" -E '^OK$|ERROR:|Unknown variable'; then noverdict=1; fi
+}
+
+# Reports a passed check: PASS <msg>, then a stderr note if the check ended with no
+# verdict, so a crash after the expected text still leaves a trace.
+passed() {
+  echo "PASS $1"
+  if [ "$noverdict" -eq 1 ]; then
+    echo "NOTE check ended with no verdict (exit $rc): $checked" >&2
     tail -5 <<<"$out" >&2
+    noverdict=0
   fi
 }
 
-# Reports a failed check: the message and exit code, then the ERROR lines if there are
-# any, otherwise the last 5 lines of output. Reads `out` and `rc`.
+# Reports a failed check: the message and exit code, an optional detail line, then the
+# ERROR lines if there are any, otherwise the last 5 lines of output. Reads `out` and `rc`.
+#   failed <msg> [<detail>]
 failed() {
   local errs
   echo "FAIL $1 (exit $rc)"
+  if [ -n "${2:-}" ]; then echo "  $2"; fi
   errs="$(errors "$out" | head -5)"
   if [ -n "$errs" ]; then
     printf '%s\n' "$errs"
@@ -52,29 +66,26 @@ failed() {
   fail=1
 }
 
-# Judge `out`; <pass-msg> and <fail-msg> follow PASS and FAIL.
-#   out_clean <pass-msg> <fail-msg>                      an `OK` line and no errors
-#   out_has <-F|-G> <pass-msg> <fail-msg> <needle>...    every needle present (-F fixed, -G regex)
-out_clean() {
-  if has "$out" '^OK$' && ! errors "$out" >/dev/null; then echo "PASS $1"; else failed "$2"; fi
-}
+# Judge `out`: PASS <pass-msg> when every needle is present (-F fixed, -G regex), else
+# FAIL <fail-msg> naming the first missing needle. An empty <fail-msg> reuses <pass-msg>.
+#   out_has <-F|-G> <pass-msg> <fail-msg> <needle>...
 out_has() {
   local mode="$1" pass="$2" msg="$3" needle
   shift 3
   for needle in "$@"; do
-    has "$out" "$mode" -e "$needle" || { failed "$msg"; return; }
+    has "$out" "$mode" -e "$needle" || { failed "${msg:-$pass}" "missing: $needle"; return; }
   done
-  echo "PASS $pass"
+  passed "$pass"
 }
 
 # Run a check, then judge it. `--` ends expect_has's needles (fixed strings unless -G).
-#   expect_clean <pass-msg> <fail-msg> <check args...>
+#   expect_clean <pass-msg> <fail-msg> <check args...>     an `OK` line and no errors
 #   expect_has [-G] <pass-msg> <fail-msg> <needle>... -- <check args...>
 expect_clean() {
   local pass="$1" msg="$2"
   shift 2
   check_out "$@"
-  out_clean "$pass" "$msg"
+  if has "$out" '^OK$' && ! errors "$out" >/dev/null; then passed "$pass"; else failed "$msg"; fi
 }
 expect_has() {
   local mode=-F pass msg needles=()
@@ -93,7 +104,7 @@ expect_clean "positive: second-root import resolved and type-checked" \
   --package-root "$PKG_ROOT" "$APP"
 
 # Negative: no extra root -> the import of demo.greet is itself the error.
-expect_has -G "negative: unregistered dotted import correctly failed to resolve" \
+expect_has "negative: unregistered dotted import correctly failed to resolve" \
   "negative: expected an unknown-module error on the demo.greet import without --package-root" \
   'import demo.greet: unknown module' -- "$APP"
 
@@ -104,7 +115,7 @@ expect_has -G "negative: unregistered dotted import correctly failed to resolve"
 # diagnostic is that it names the file and the cause, where the old behaviour
 # reported `... is defined more than once in this module` about whichever symbol
 # happened to collide with the prelude — or nothing at all.
-expect_has -G "header: headerless imported file diagnosed by path and cause" \
+expect_has "header: headerless imported file diagnosed by path and cause" \
   "header: expected a 'no \`module\` header' diagnostic naming headerless.sprout" \
   'no `module` header' 'headerless.sprout' \
   -- --package-root "$PKG_ROOT" "$FIX/app_headerless.spr"
@@ -138,9 +149,10 @@ expect_has "cross-module reject: an imported class's declared effect is enforced
 # A canonical name is not a spelling the reader may write (spec-v0 §3), so a
 # diagnostic offering one would answer "how do I reach this?" with a rejected
 # form. Name the module and the symbol separately.
-# Judges `out` for one case: <case> <rejection-needle> <pass-msg> <fail-msg>.
+# Runs the check on <fixture>, expects <rejection-needle>, then the note's two needles.
+#   wrap_opacity <case> <pass-msg> <fixture> <rejection-needle>
 wrap_opacity() {
-  out_has -F "$3" "$4" "$2"
+  expect_has "$2" "" "$4" -- --package-root "$PKG_ROOT" "$3"
   out_has -F "wrap opacity ($1): the diagnostic names the module and the marker" \
     "wrap opacity ($1): expected a note naming demo.sealed and \`(..)\`" \
     'declares `Sealed`, which is not in scope here' 'exported only with `(..)`'
@@ -149,15 +161,11 @@ wrap_opacity() {
   fi
 }
 
-check_out --package-root "$PKG_ROOT" "$FIX/app_wrap_ctor_construct.spr"
-wrap_opacity construct 'Unknown variable: sealed.Sealed' \
-  "wrap opacity: an abstract wrap's constructor is unreachable cross-module" \
-  "wrap opacity: expected 'Unknown variable: sealed.Sealed'"
+wrap_opacity construct "wrap opacity: an abstract wrap's constructor is unreachable cross-module" \
+  "$FIX/app_wrap_ctor_construct.spr" 'Unknown variable: sealed.Sealed'
 
-check_out --package-root "$PKG_ROOT" "$FIX/app_wrap_ctor_pattern.spr"
-wrap_opacity pattern 'Unknown constructor: sealed.Sealed' \
-  "wrap opacity: the destructor pattern is hidden with the constructor" \
-  "wrap opacity: expected 'Unknown constructor: sealed.Sealed'"
+wrap_opacity pattern "wrap opacity: the destructor pattern is hidden with the constructor" \
+  "$FIX/app_wrap_ctor_pattern.spr" 'Unknown constructor: sealed.Sealed'
 
 # A record exported without `(..)` publishes its type and not its representation.
 # The two halves are settled by DIFFERENT components — construction by the bundler
@@ -181,7 +189,7 @@ expect_has "linear wrap: an importer sees the wrap as linear" \
   -- --package-root "$PKG_ROOT" "$FIX/app_linear_wrap_leak.spr"
 
 expect_has "linear wrap: an abstract linear wrap cannot be unwrapped cross-module" \
-  "linear wrap: expected 'Unknown constructor: linwrap.Token'" \
+  "" \
   'Unknown constructor: linwrap.Token' \
   -- --package-root "$PKG_ROOT" "$FIX/app_linear_wrap_pattern.spr"
 
@@ -319,12 +327,12 @@ expect_has "instance scope: an importer's Propagate instance does not fuse a \`t
 # a module bundled but not imported gives no method, and a class import binds its
 # methods, so one beside a function import of the same name is bound twice.
 expect_has "method scope: a method of a module not imported here is unknown" \
-  "method scope: expected 'Unknown variable: tally'" \
+  "" \
   'Unknown variable: tally' \
   -- --package-root "$PKG_ROOT" "$FIX/app_method_not_imported.spr"
 
 expect_has "method scope: a class import binds its methods" \
-  "method scope: expected \`tally\` imported twice" \
+  "" \
   '`tally` is imported twice in this file' \
   -- --package-root "$PKG_ROOT" "$FIX/app_class_import_method_conflict.spr"
 
@@ -339,7 +347,7 @@ expect_has "method scope: importing a hidden class's method names the class" \
 # canonical name as the abstract record's constructor, and an importer could build
 # the record directly.
 expect_has "record ctor clash: an abstract record sharing a sum constructor's name is rejected" \
-  "record ctor clash: expected \`demo.recforge.Token\` is defined more than once in this module" \
+  "" \
   '`demo.recforge.Token` is defined more than once in this module' \
   -- --package-root "$PKG_ROOT" "$FIX/app_record_forge_via_ctor.spr"
 

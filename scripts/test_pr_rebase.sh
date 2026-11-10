@@ -126,9 +126,10 @@ hash_at() {  # commit -> fingerprint of its compiler sources
 
 # Every compiler commit in base..HEAD carries a seed that matches its sources.
 seeds_match() {
-  local d="$1" c n=0 bad=0
+  local d="$1" c n=0 bad=0 files
   for c in $(git -C "$d" rev-list origin/master..HEAD); do
-    git -C "$d" diff-tree --no-commit-id --name-only -r "$c" | grep -q '^stdlib/compiler/' || continue
+    files="$(git -C "$d" diff-tree --no-commit-id --name-only -r "$c")" \
+      && grep -q '^stdlib/compiler/' <<<"$files" || continue
     n=$((n + 1))
     [ "$(git -C "$d" show "$c:bootstrap/compile_driver.ll" | head -1)" = "; seed-fingerprint: $(hash_at "$d" "$c")" ] || bad=$((bad + 1))
   done

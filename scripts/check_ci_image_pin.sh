@@ -43,7 +43,8 @@ done < <(grep -E '^[[:space:]]*runs-on:' "$ci")
 ((ubuntu_seen)) || fail "$ci has no ubuntu runs-on line"
 
 # A COPY of the script is not a use of it: skip comment, COPY and ADD lines.
-grep -vE '^[[:space:]]*(#|COPY[[:space:]]|ADD[[:space:]])' "$dockerfile" | grep -q 'ci_install_llvm\.sh' \
+uses="$(grep -vE '^[[:space:]]*(#|COPY[[:space:]]|ADD[[:space:]])' "$dockerfile")"
+grep -q 'ci_install_llvm\.sh' <<<"$uses" \
   || fail "$dockerfile has no RUN using ci_install_llvm.sh"
 
 echo "==> ci-image-pin ✓ (ubuntu $version)"

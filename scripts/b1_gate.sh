@@ -130,7 +130,8 @@ for ty in int bool char double; do
   fi
 done
 for fn in string generic; do
-  if fn_body "main\\.store_$fn" <<<"$store_ir" | grep -qF '@vector_mutset'; then
+  body="$(fn_body "main\\.store_$fn" <<<"$store_ir")"
+  if grep -qF '@vector_mutset' <<<"$body"; then
     echo "  ok: $fn store keeps the call"
   else
     echo "  FAIL: $fn store lost its vector_mutset call (barrier skipped on a heap value)"; fail=1

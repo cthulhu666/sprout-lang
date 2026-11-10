@@ -58,7 +58,7 @@ while IFS= read -r class_file; do
   rel="${class_file#"$CLASSES"/}"
   # The constant pool carries every referenced type, so -p (all members) plus -c
   # (disassemble) covers signatures and bodies alike.
-  if javap -p -c -cp "$CLASSES" "${rel%.class}" 2>/dev/null | grep -q "$LSP_API"; then
+  if disasm="$(javap -p -c -cp "$CLASSES" "${rel%.class}" 2>/dev/null)" && grep -q "$LSP_API" <<<"$disasm"; then
     referencing=$((referencing + 1))
     case "$rel" in
       "$LSP_PACKAGE_PATH"*) ;;
