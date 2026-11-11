@@ -349,12 +349,7 @@ fn underdetermined_missing(c: ast.TypeConstraint, v: String, pos: source.SourceP
   match policy with
   | MissingDeferred -> VerifySkip(constraint_class(c) ++ " " ++ v ++ ": underdetermined by source signature")
   | MissingFinal method_name ->
-      # `short` on the class: post-bundling it carries a module prefix
-      # (`main.Codec`), which is noise in a message naming a class the user wrote.
-      VerifyMismatch(pos,
-        "ambiguous type variable in `" ++ short(method_name) ++ "`: nothing determines which `"
-        ++ short(constraint_class(c)) ++ "` instance to use. Annotate the "
-        ++ "expression with the type you mean.")
+      VerifyMismatch(pos, typed_ast.ambiguous_method_message(method_name, constraint_class(c)))
 
 fn check_one(c: ast.TypeConstraint, dict_head: (String, Maybe String), theta: Dict types.Type, pos: source.SourcePos) -> VerifyOutcome =
   match dict_head with
@@ -384,9 +379,9 @@ fn check_one(c: ast.TypeConstraint, dict_head: (String, Maybe String), theta: Di
 #
 # The two kinds differ only in how an ABSENT dict is read; see MissingPolicy.
 #
-# Residual gap: a class method invoked through a TMethodRef callee (rather than a
-# named TVar) is still not covered — check_call keys the callee by TVar name, so a
-# method-ref callee is never looked up.
+# A class method reached through a TMethodRef (rather than a named TVar) is never
+# looked up here — check_call keys the callee by TVar name. Its ambiguity is rejected
+# by resolve (resolve_method_ref); its dictionary is not re-derived from a source signature.
 
 # Signature entry: the callee's param type annotations (in order) + its where-clause.
 # verify_program surfaces the first mismatch (the gate's failure); verify_stats

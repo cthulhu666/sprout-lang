@@ -1,0 +1,22 @@
+module main
+
+# A bare method whose class variable is fixed by how the result is used (`+ 1` makes
+# it Int), or forwarded from the caller by `where Make a`, is accepted.
+
+class Make t
+  fn from_int(n: Int) -> t
+
+instance Make Int
+  fn from_int(n: Int) -> Int = n + 100
+
+instance Make String
+  fn from_int(n: Int) -> String = "made"
+
+fn apply_int(f: Int -> a, n: Int) -> a = f(n)
+
+fn gen(n: Int) -> a where Make a = apply_int(from_int, n)
+
+fn main() -> Unit !{IO} = do
+  print(apply_int(from_int, 1) + 1)
+  print(gen(1) + 1)
+  print(gen(1) ++ "!")

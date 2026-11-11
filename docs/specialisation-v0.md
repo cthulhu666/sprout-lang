@@ -166,7 +166,7 @@ allocations.
    Forward keys are `typed_ast.dict_slot_key(class, type_args)` (`resolve.sprout`, `forwarded_slot`),
    superclass-expanded in `build_hidden_for_constraints` order. Recurse into `EvInstance` children
    and into `TMethodRef` evidence. A method used as a value at a signature variable has
-   `EvUnresolved` (`method_ref_constraint` needs a constructor head) and lowering rebuilds it from hidden
+   `EvUnresolved` (`resolve_method_ref` gives evidence only for a constructor head) and lowering rebuilds it from hidden
    parameters, which the copy lacks, so the copy fills it from the slot its class type names.
 4. Name the copy `<generic IR name>$spec_<mangled args>`, where the args are the type arguments
    of the declaration's `where` constraints in written order (superclasses not included) after

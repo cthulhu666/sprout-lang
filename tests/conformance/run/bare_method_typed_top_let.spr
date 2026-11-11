@@ -1,0 +1,20 @@
+module main
+
+# A type annotation on a top-level `let` fixes the class variable of a bare method.
+
+class Make t
+  fn from_int(n: Int) -> t
+
+instance Make Int
+  fn from_int(n: Int) -> Int = n + 100
+
+instance Make String
+  fn from_int(n: Int) -> String = "made"
+
+let make_int: Int -> Int = from_int
+
+let make_string: Int -> String = from_int
+
+fn main() -> Unit !{IO} = do
+  print(make_int(1))
+  print(make_string(1))

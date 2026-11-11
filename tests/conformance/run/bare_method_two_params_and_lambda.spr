@@ -1,0 +1,30 @@
+module main
+
+# Bare methods of two parameters, inside a lambda, and as a `let`-bound lambda's result:
+# each is accepted when its class variable is fixed by use or forwarded by `where`.
+
+class Make t
+  fn from_int(n: Int) -> t
+  fn from_pair(a: Int, b: Int) -> t
+
+instance Make Int
+  fn from_int(n: Int) -> Int = n + 100
+  fn from_pair(a: Int, b: Int) -> Int = a * 10 + b
+
+instance Make String
+  fn from_int(n: Int) -> String = "made"
+  fn from_pair(a: Int, b: Int) -> String = "pair"
+
+fn apply_int(f: Int -> a, n: Int) -> a = f(n)
+
+fn apply_two(f: Int -> Int -> a, x: Int, y: Int) -> a = f(x, y)
+
+fn gen(n: Int) -> a where Make a = (\u -> apply_int(from_int, n))(0)
+
+fn main() -> Unit !{IO} =
+  let g = \u -> from_int
+  in do
+    print(apply_two(from_pair, 1, 2) + 1)
+    print(apply_int(from_pair(1, _), 2) + 1)
+    print(g(0)(1) + 1)
+    print(gen(1) + 1)

@@ -3442,12 +3442,23 @@ fn main() -> Unit !{IO} = print(to_str(from_int(7)))
 `a` appears nowhere but between the two calls, so every `Codec` instance
 satisfies the constraint and different ones give different answers.  Sprout
 rejects this with a located **`ambiguous type variable in `<method>`: nothing
-determines which `<Class>` instance to use`**.  Both the type and the value must
-be pinned down by something the call can see; annotate the intermediate
-(`to_str(from_int(7) : Int)`) or an enclosing binding to resolve it.
+determines which `<Class>` instance to use`**.  Something the call can see must
+pin the type down: a declared return type, a typed parameter the value passes
+through, a typed top-level `let`, or a `where Codec a` clause so the caller
+decides.  Sprout has no expression type ascription and no typed local `let`.
 
 The rule is not scoped to `fn` bodies: a top-level `let` initializer is checked
 the same way, so `let s = to_str(from_int(7))` is rejected identically.
+
+A class method **used as a value** is checked too, at the mention: `apply_int(from_int, 1)`
+into a parameter nothing constrains, `let f = from_int`, or `fn pick() = from_int` used.
+Such a mention is accepted when use fixes its class variable, or when the enclosing
+declaration forwards that variable's instance: a `where` constraint (or a superclass of
+one), the context of the instance whose method it is in, or the dictionary a `match` arm
+unpacks from an existential.  A `where` clause on another variable or another class does
+not count.  A method whose own type never mentions the class variable (`fn tag(n: Int) ->
+String`) has no use that fixes it: its mention is accepted only inside a declaration that
+forwards exactly one constraint of its class, and is rejected as ambiguous otherwise.
 
 The rule is *not* "a class-method call must dispatch on a concrete type" —
 forwarding is still fine.  Inside `fn describe(x: b) -> String where Codec b`, a
@@ -3588,9 +3599,12 @@ The variable must be one the declaration **generalizes**.  A free variable it do
 not is unaffected: `list_map(label, [])` inside a monomorphic function leaves an
 element type undetermined, but the enclosing signature is not polymorphic and the
 dictionary is never invoked, so the dead dictionary stays inert rather than
-becoming an error.  Coverage is judged per variable, so a variable a `where`
-clause constrains is exempt here even when the body needs a *different* class of
-it; that case is rejected by dispatch verification instead.
+becoming an error.  A bare class method is not such a case: its mention is the
+instance's implementation, so there is nothing to leave inert and an unfixed
+instance is an error (*Ambiguous class-method dispatch*, above).  Coverage is
+judged per variable, so a variable a `where` clause constrains is exempt here
+even when the body needs a *different* class of it; that case is rejected by
+dispatch verification instead.
 
 **An instance method is held to the same rule, with two remedies.**  A method
 that generalizes a type variable of its own and needs a dictionary for it is
@@ -3722,6 +3736,8 @@ function value is therefore unsatisfiable and is rejected at the call site with
 call on a function (`to_string(f)`) and a constrained regular function whose
 argument forces a function-typed head — e.g. `describe(describe)` where
 `describe : a -> String where ToString a` demands `ToString (b -> String)`.  A
+bare method mention whose class type is a function type is covered too, at
+the mention.  A
 function passed beside the value dispatched on — the callback in `app(x, \n -> n * 2)`
 — demands nothing of the class and is not rejected.  The
 rejection is a type error, consistent with the constraint well-formedness rules

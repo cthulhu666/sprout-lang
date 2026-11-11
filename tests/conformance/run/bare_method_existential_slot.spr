@@ -1,0 +1,13 @@
+module main
+
+# The `ToString` dictionary an arm unpacks from `Pack` covers the bare `to_string` there.
+
+type Pack = | exists a. Pack a where ToString a
+
+fn apply_str(f: a -> String, x: a) -> String = f(x)
+
+fn show(p: Pack) -> String =
+  match p with
+  | Pack x -> apply_str(to_string, x)
+
+fn main() -> Unit !{IO} = print(show(Pack(3)))

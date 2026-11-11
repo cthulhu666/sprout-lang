@@ -1,0 +1,21 @@
+module main
+
+# Fixed: a declared return type fixes the class variable.
+
+# A function whose body is a bare method and whose return type is inferred: its class
+# variable is neither declared nor constrained, so the caller cannot choose an instance.
+
+class Make t
+  fn from_int(n: Int) -> t
+
+instance Make Int
+  fn from_int(n: Int) -> Int = n + 100
+
+instance Make String
+  fn from_int(n: Int) -> String = "made"
+
+fn ignore_it(x: t) -> Int = 0
+
+fn pick() -> Int -> Int = from_int
+
+fn main() -> Unit !{IO} = print(ignore_it(pick()(1)))

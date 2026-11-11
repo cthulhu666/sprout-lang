@@ -1,0 +1,14 @@
+module main
+
+# Fixed: `where Enum a` constrains the variable the bare method needs.
+
+# `where ToString a` forwards a `ToString` instance, not the `Enum` that the bare
+# `ordinal` needs for the same variable: a different class is not covered.
+
+type Color (..) deriving (Enum, ToString) = Red | Green
+
+fn apply_to(f: a -> Int, x: a) -> Int = f(x)
+
+fn wrong(x: a) -> Int where ToString a, Enum a = apply_to(ordinal, x)
+
+fn main() -> Unit !{IO} = print(wrong(Green))

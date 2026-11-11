@@ -399,15 +399,19 @@ fn match_type_var_lists(patterns: List Type, actuals: List Type, acc: Dict Type)
   | (Cons p prest, Cons a arest) -> match_type_var_lists(prest, arest, match_type_vars(p, a, acc))
 
 # The class-parameter type a value-position method is used at: its scheme aligned
-# with `actual`, read at the class parameter. `fallback` when the class, the
-# method or the binding is missing. Lowering's eta expansion and resolve's
-# Evidence both read it, with the class's full name.
+# with `actual`, read at the class parameter. Nothing when the class, the method or
+# the binding is missing, as for a method whose type does not mention the class
+# variable. Resolve reads it with the class's full name.
+export fn eta_class_type_of(class_params: Dict String, scheme_env: Dict Scheme, class_name: String,
+                            method_name: String, actual: Type) -> Maybe Type =
+  let Just class_param = dict_get(class_name, class_params) else Nothing
+      Just scheme = dict_get_or_short(method_name, scheme_env) else Nothing
+  in dict_get(class_param, match_type_vars(scheme_type(scheme), actual, dict_empty()))
+
+# eta_class_type_of, or `fallback` when it finds nothing; lowering's eta expansion reads it.
 export fn eta_class_type(class_params: Dict String, scheme_env: Dict Scheme, class_name: String,
                          method_name: String, actual: Type, fallback: Type) -> Type =
-  let Just class_param = dict_get(class_name, class_params) else fallback
-      Just scheme = dict_get_or_short(method_name, scheme_env) else fallback
-      Just class_type = dict_get(class_param, match_type_vars(scheme_type(scheme), actual, dict_empty())) else fallback
-  in class_type
+  maybe_with_default(fallback, eta_class_type_of(class_params, scheme_env, class_name, method_name, actual))
 
 fn dict_get_or_short(name: String, d: Dict v) -> Maybe v =
   match dict_get(name, d) with
@@ -423,6 +427,20 @@ export fn first_concrete_head_str(t: Type) -> Maybe String =
   | TVar _ -> Nothing
   | TFunc _ _ _ _ -> Nothing
   | TThunk _ _ -> Nothing
+
+# The identity of the type variable at the head, through any applications (`a`, `f Int`).
+export fn head_var(t: Type) -> Maybe String =
+  match t with
+  | TVar name -> Just(tyvar_identity(name))
+  | TApp base _ -> head_var(base)
+  | TConst _ -> Nothing
+  | TTuple _ -> Nothing
+  | TFunc _ _ _ _ -> Nothing
+  | TThunk _ _ -> Nothing
+
+# True when the head, through any applications, is a type variable.
+export fn head_is_var(t: Type) -> Bool =
+  head_var(t) != Nothing
 
 # Ordered witness slots for ONE existential constraint's class: one (eff_class,
 # method) pair per method across the class and its transitive superclasses, in

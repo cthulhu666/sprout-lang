@@ -1240,7 +1240,7 @@ fn discharge_against_record(
 # Nothing while the head is a variable, bare or applied (`f Int` from `pure(3)`):
 # a later use may still name the record.
 fn record_receiver(t: types.Type) -> Maybe (String, List types.Type) =
-  if type_head_open(t) then Nothing
+  if types.head_is_var(t) then Nothing
   else
     let Just rec_name = record_head_name(t) else Nothing
     in Just((rec_name, extract_tapp_args(t)))
@@ -2546,7 +2546,7 @@ fn check_instance_fwd(
           # `@to_string`). A dispatch type still a variable is left for the post-pass:
           # a callback beside it (`app(e, \n -> n * 2)`) is not what dispatch is on.
           if dispatches_on_function(dispatch_t, typed_args, s3)
-          then InferErr(pos, "No instance of " ++ class_name ++ " for a function type")
+          then InferErr(pos, typed_ast.function_instance_message(class_name))
           else InferOk(typed_ast.TCall(typed_callee, typed_args, ret_t, pos), s3, es3, call_eff)
 
 # Only an argument's type is judged directly. A return type that is a function
@@ -2650,7 +2650,7 @@ fn find_fwd_tdict_in_args(class_name: String, args: List typed_ast.TypedExpr, en
   match args with
   | Nil -> Nothing
   | Cons arg rest ->
-      match tvar_head_of_type(typed_ast.typed_expr_type(arg)) with
+      match types.head_var(typed_ast.typed_expr_type(arg)) with
       | Nothing -> find_fwd_tdict_in_args(class_name, rest, env, pos)
       | Just tvar_name ->
           match dict_get(types.fwd_marker_key(tvar_name, class_name), env) with
@@ -2921,13 +2921,7 @@ fn fwd_scheme_prog_var(scheme: types.Scheme) -> ast.TypeExpr =
 # "t364", which has no @fwd marker — the marker was registered for "t360".
 # Using the raw type preserves the original TVar name so the @fwd lookup works.
 fn first_tvar_head(typed_args: List typed_ast.TypedExpr) -> Maybe String =
-  find_map(\a -> tvar_head_of_type(typed_ast.typed_expr_type(a)), typed_args)
-
-fn tvar_head_of_type(t: types.Type) -> Maybe String =
-  match t with
-  | types.TVar name -> Just(types.tyvar_identity(name))
-  | types.TApp base _ -> tvar_head_of_type(base)
-  | _ -> Nothing
+  find_map(\a -> types.head_var(typed_ast.typed_expr_type(a)), typed_args)
 
 fn type_head_str(t: types.Type) -> String =
   match t with
@@ -6324,7 +6318,7 @@ fn decide_bind_mode(state: unifier.InferState, t: types.Type, pos: source.Source
   | Just fam -> if fam == "Maybe" then typed_ast.MaybeBind else typed_ast.ResultBind
   | Nothing ->
       do
-        if type_head_open(t) then unifier.park_bind(state, unifier.ParkedBind(t, pos)) else ()
+        if types.head_is_var(t) then unifier.park_bind(state, unifier.ParkedBind(t, pos)) else ()
         typed_ast.PlainBind
 
 fn bind_mode_family(m: typed_ast.BindMode) -> Maybe String =
@@ -6332,12 +6326,6 @@ fn bind_mode_family(m: typed_ast.BindMode) -> Maybe String =
   | typed_ast.PlainBind -> Nothing
   | typed_ast.MaybeBind -> Just("Maybe")
   | typed_ast.ResultBind -> Just("Result")
-
-fn type_head_open(t: types.Type) -> Bool =
-  match t with
-  | types.TVar _ -> true
-  | types.TApp f _ -> type_head_open(f)
-  | _ -> false
 
 # The first parked plain bind whose type the final substitution made `Maybe`/`Result`.
 fn check_parked_binds(binds: List unifier.ParkedBind, subst: Dict types.Type) -> DischargeResult =

@@ -1,0 +1,22 @@
+module main
+
+# A `where Make b` covers `b` only. The bare `from_int` here is at an unrelated
+# variable, so the constraint on `b` does not make it unambiguous.
+
+class Make t
+  fn from_int(n: Int) -> t
+
+instance Make Int
+  fn from_int(n: Int) -> Int = n + 100
+
+instance Make String
+  fn from_int(n: Int) -> String = "made"
+
+fn apply_int(f: Int -> a, n: Int) -> a = f(n)
+
+fn ignore_it(x: t) -> Int = 0
+
+fn borrow(w: b, n: Int) -> Int where Make b = ignore_it(apply_int(from_int, n))
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(borrow(1, 2))

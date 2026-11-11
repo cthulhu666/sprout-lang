@@ -1,0 +1,9 @@
+module main
+
+# `where Ord a` also forwards `Eq a`, its superclass, so the bare `eq` is covered.
+
+fn same(f: a -> a -> Bool, x: a) -> Bool = f(x, x)
+
+fn check(x: a) -> Bool where Ord a = same(eq, x)
+
+fn main() -> Unit !{IO} = print(check(3))

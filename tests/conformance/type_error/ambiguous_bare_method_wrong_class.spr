@@ -1,0 +1,11 @@
+module main
+
+# `where ToString a` forwards a `ToString` instance, not the `Enum` that the bare
+# `ordinal` needs for the same variable: a different class is not covered.
+
+fn apply_to(f: a -> Int, x: a) -> Int = f(x)
+
+fn wrong(x: a) -> Int where ToString a = apply_to(ordinal, x)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(wrong(true))

@@ -1,0 +1,17 @@
+module main
+
+# Fixed: a `where` clause makes the caller choose the instance.
+
+class Named a
+  fn label(x: a) -> String
+  fn tag(n: Int) -> String
+
+instance Named Int
+  fn label(x: Int) -> String = "int"
+  fn tag(n: Int) -> String = "int tag"
+
+fn ap(f: Int -> String, n: Int) -> String = f(n)
+
+fn go(x: a) -> String where Named a = ap(tag, 1)
+
+fn main() -> Unit !{IO} = print(go(1))

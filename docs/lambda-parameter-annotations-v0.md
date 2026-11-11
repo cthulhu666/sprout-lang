@@ -295,8 +295,8 @@ larger than anything else here, and not worth it while the message names the
 offending parameter in its text.
 
 Second-order: §1.2 row 5's `ambiguous type variable in to_string` stops being
-reachable for an annotated lambda, and that diagnostic's advice — "Annotate the
-expression with the type you mean" — becomes actionable where it was not.
+reachable for an annotated lambda, and that diagnostic's advice — "a typed
+parameter" — becomes actionable where it was not.
 
 ## 8. Compatibility and migration
 

@@ -1,0 +1,18 @@
+module main
+
+# A bare method whose own type never mentions the class variable: nothing determines which
+# `Named` instance it belongs to, whatever it is passed to. It is the ambiguity a direct
+# `tag(1)` reports, not a missing function instance.
+
+class Named a
+  fn label(x: a) -> String
+  fn tag(n: Int) -> String
+
+instance Named Int
+  fn label(x: Int) -> String = "int"
+  fn tag(n: Int) -> String = "int tag"
+
+fn ap(f: Int -> String, n: Int) -> String = f(n)
+
+fn main() -> Unit !{IO} = print(ap(tag, 1))
+#~^ ERROR

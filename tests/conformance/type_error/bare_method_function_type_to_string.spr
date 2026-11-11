@@ -1,0 +1,11 @@
+module main
+
+# A class method mentioned as a value where its class type is a function: `apply_to`
+# gives `to_string` the type `a -> String`, so it would need `ToString a` with `a`
+# unified to a function. No instance exists for a function type, so the mention is
+# rejected where it is written, rather than at emit.
+
+fn apply_to(f: a -> String, x: a) -> String = f(x)
+
+fn main() -> Unit !{IO} = print(apply_to(to_string, \n -> n + 1))
+#~^ ERROR

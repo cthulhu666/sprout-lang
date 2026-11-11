@@ -1,0 +1,19 @@
+module main
+
+# A function returning a bare method is accepted once its return type names the class
+# variable and a `where` clause makes the caller choose the instance.
+
+class Make t
+  fn from_int(n: Int) -> t
+
+instance Make Int
+  fn from_int(n: Int) -> Int = n + 100
+
+instance Make String
+  fn from_int(n: Int) -> String = "made"
+
+fn pick() -> (Int -> t) where Make t = from_int
+
+fn main() -> Unit !{IO} = do
+  print(pick()(1) + 1)
+  print(pick()(1) ++ "!")

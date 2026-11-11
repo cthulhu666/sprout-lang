@@ -1,0 +1,21 @@
+module main
+
+# Fixed: a typed parameter fixes the class variable.
+
+# A bare method bound with `let` in a do block: the binding's type is an unfixed class
+# variable, so no instance is chosen.
+
+class Make t
+  fn from_int(n: Int) -> t
+
+instance Make Int
+  fn from_int(n: Int) -> Int = n + 100
+
+instance Make String
+  fn from_int(n: Int) -> String = "made"
+
+fn ignore_it(x: Int) -> Int = 0
+
+fn main() -> Unit !{IO} = do
+  let f = from_int
+  print(ignore_it(f(1)))
