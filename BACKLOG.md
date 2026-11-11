@@ -1406,15 +1406,6 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   would make the null-fill structurally unreachable — remain parked as M3b; see
   `docs/dict-resolution-north-star-plan-2026-06-30.md` for the sentinel-flow map and why M4/M5/M3b
   were parked.
-- [ ] `P1` **An ambiguous class-method reference is diagnosed at codegen, with no source location.**
-  A class method used as a value whose class variable is an unconstrained free type variable
-  (`ignore_it(apply_int(from_int, 1))`, pinned in
-  `tests/conformance/emit_error/ambiguous_unconstrained_method.spr`) passes `--phase check`
-  and then fails at emit with `ast_to_ir: unbound variable '__eta_unresolved_<Class>_<method>'` —
-  a compiler-internal sentinel, no line, no column. So the LSP and every check-phase gate accept
-  the program and the user learns at build time. Nothing names an instance, so the ambiguity
-  belongs where constraints are known, not at slot-selection time. (The cross-class shape is
-  now rejected at its declaration, `docs/qualified-class-methods-v0.md`.)
 - [ ] `P4` **`@eta_fwd:<tyvar>:<class>` markers are written and never read.**
   `infer.compute_eta_fwd_markers` puts them in the global env through `fold_fwd_markers`; nothing
   reads `types.eta_fwd_marker_key`. Lowering reads `@eta_fwdvar:` only. Delete the family, or
@@ -3097,7 +3088,7 @@ acting.
   §8.5 says it is rejected with "No instance of C for a function type". Neither
   `constraint_var_dict` nor the forward fills the hole, and `resolve` skips a `_` head. Master
   printed `true`. A class method's dispatch variable (`(\g -> to_string(g))(\n -> n + 1)`) is
-  rejected, but as "ambiguous type variable … Annotate the expression"; master said "No instance
+  rejected, but as "ambiguous type variable in `to_string`"; master said "No instance
   of C for a function type" or printed garbage. Fix: report a hole whose variable resolved to a
   function type.
 - [ ] `P3` **Local `let` bindings are not generalized.** A `let`-bound helper has one monomorphic
@@ -3117,7 +3108,9 @@ acting.
   seeded nor signature-checked. Its bare `b` in `instance Show2 (Box a) Int where ToString a` gets
   the `fn` remedy ("write that type out … add a `where`"), and with `b: Box a` the call fails as
   "No instance of Show2". The spec states neither limit. Fix: reject a multi-parameter class at its
-  declaration, or say in §8.5 what holds for one.
+  declaration, or say in §8.5 what holds for one. A bare method of such a class passes check and
+  fails at emit with `__eta_unresolved_`; under `where Mk t u` it gets the ambiguity hint asking
+  for that `where`.
 - [ ] `P3` **A `where` headed by a type alias is keyed by the alias.** `type alias M a = Maybe
   a` with `fn f(y: M a, z: M a) -> Bool where Eq (M a) = y == z` is rejected ("add `where Eq
   a`"): `resolve.add_eff_keys` keys it `Eq_M` from the written head while the use site looks up
@@ -3138,15 +3131,6 @@ acting.
   exercised at runtime**. Needs a minimal repro to confirm reachability, then either a namespace
   separator (reserve a prefix for fresh tyvars, distinct from any user-writable name) or a rename
   pass before pattern binding.
-- [ ] `P3` **A bare class-method mention with nothing to fix its instance reports a compiler
-  internal.** `fn pick() = to_string` emits
-  `ast_to_ir: unbound variable '__eta_unresolved_ToString_to_string'` with no source position,
-  preceded by `warning: alloc-summary pre-pass failed`. Loud rather than silent, so cosmetic in
-  severity, but the text names an internal symbol and points at no line — while every sibling
-  shape produces a proper located diagnostic (`fn f(x: a) = to_string(x)` reports the
-  ambiguous-type-variable error; the constrained-user-function equivalents go through the
-  uncovered-dictionary check). The eta-expansion path should reject with the same ambiguity message
-  the applied form uses, at the mention's position.
 - [ ] `P3` **Records are invisible to CPR.** `build_adt_ctor_index_go` matches `ast.TypeDecl` and
   drops `ast.RecordDecl` into its skip arm, so a record type gets no `adt_index` entry and a
   function returning a record is never given an unboxed worker however scalar its fields. Costs

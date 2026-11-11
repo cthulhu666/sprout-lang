@@ -1,0 +1,22 @@
+module main
+
+# The instance's own context (`where Make a`) covers a bare `from_int` inside its method.
+
+class Make t
+  fn from_int(n: Int) -> t
+
+instance Make Int
+  fn from_int(n: Int) -> Int = n + 100
+
+type Box a = Box a
+
+instance Make (Box a) where Make a
+  fn from_int(n: Int) -> Box a = Box(apply_int(from_int, n))
+
+fn apply_int(f: Int -> a, n: Int) -> a = f(n)
+
+fn unbox(b: Box Int) -> Int =
+  match b with
+  | Box x -> x
+
+fn main() -> Unit !{IO} = print(unbox(from_int(1)))

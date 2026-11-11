@@ -1,0 +1,20 @@
+module main
+
+# A bare method of two parameters passed as a two-argument function value, its class
+# variable unfixed: the same ambiguity as a one-parameter method.
+
+class Make t
+  fn from_pair(a: Int, b: Int) -> t
+
+instance Make Int
+  fn from_pair(a: Int, b: Int) -> Int = a * 10 + b
+
+instance Make String
+  fn from_pair(a: Int, b: Int) -> String = "pair"
+
+fn apply_two(f: Int -> Int -> a, x: Int, y: Int) -> a = f(x, y)
+
+fn ignore_it(x: t) -> Int = 0
+
+fn main() -> Unit !{IO} = print(ignore_it(apply_two(from_pair, 1, 2)))
+#~^ ERROR

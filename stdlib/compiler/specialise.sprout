@@ -115,8 +115,8 @@ fn make_copy(k: spec_keys.Key, rw: Rw) -> typed_ast.TypedDecl =
 fn ty(t: types.Type, rw: Rw) -> types.Type =
   if rw.typed then spec_keys.sub_type(t, rw.w.subst, rw.env) else t
 
-# A method used as a value, in a generic body, has no evidence (`resolve.method_ref_constraint`
-# needs a constructor head): lowering rebuilds it from the hidden parameters, which a copy
+# A method used as a value, in a generic body, has no evidence (`resolve.resolve_method_ref`
+# gives none for a variable head): lowering rebuilds it from the hidden parameters, which a copy
 # does not have. The copy knows the dictionary: it is the one in the slot the method's class
 # type names, as for a forwarded dictionary.
 fn method_ref_evidence(method: String, cls: String, t: types.Type, ev: typed_ast.Evidence,

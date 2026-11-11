@@ -1,0 +1,24 @@
+module main
+
+# A bare method whose own type never mentions the class variable, inside a function that
+# forwards the class: the mention takes the forwarded instance, as a direct call does.
+
+class Named a
+  fn label(x: a) -> String
+  fn tag(n: Int) -> String
+
+instance Named Int
+  fn label(x: Int) -> String = "int"
+  fn tag(n: Int) -> String = "int tag"
+
+instance Named String
+  fn label(x: String) -> String = "string"
+  fn tag(n: Int) -> String = "string tag"
+
+fn ap(f: Int -> String, n: Int) -> String = f(n)
+
+fn g(x: a) -> String where Named a = ap(tag, 1)
+
+fn main() -> Unit !{IO} = do
+  print(g(1))
+  print(g("s"))

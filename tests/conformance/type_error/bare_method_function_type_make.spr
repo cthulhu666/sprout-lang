@@ -1,0 +1,19 @@
+module main
+
+# A class method mentioned as a value whose class variable a parameter fixes to a
+# function type: `takes_fn` wants `Int -> Int`, so `apply_int(from_int, 1)` makes `Make`'s
+# variable that function type. No instance exists for it; the mention is rejected at its
+# position.
+
+class Make t
+  fn from_int(n: Int) -> t
+
+instance Make Int
+  fn from_int(n: Int) -> Int = n + 100
+
+fn apply_int(f: Int -> a, n: Int) -> a = f(n)
+
+fn takes_fn(g: Int -> Int) -> Int = 0
+
+fn main() -> Unit !{IO} = print(takes_fn(apply_int(from_int, 1)))
+#~^ ERROR

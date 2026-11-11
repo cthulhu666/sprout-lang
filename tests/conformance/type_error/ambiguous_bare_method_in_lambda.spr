@@ -1,0 +1,20 @@
+module main
+
+# A bare method returned from a lambda, bound by a local `let`: the lambda adds no
+# `where` clause, so its class variable is as unfixed as at top level.
+
+class Make t
+  fn from_int(n: Int) -> t
+
+instance Make Int
+  fn from_int(n: Int) -> Int = n + 100
+
+instance Make String
+  fn from_int(n: Int) -> String = "made"
+
+fn ignore_it(x: t) -> Int = 0
+
+fn main() -> Unit !{IO} =
+  let g = \u -> from_int
+  in print(ignore_it(g(0)(1)))
+#~^^ ERROR

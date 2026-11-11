@@ -1,0 +1,1 @@
+ERROR: check: ambiguous type variable in `from_pair`: nothing determines which `Make` instance to use. Give it a type from a declared return type, a typed parameter or a typed top-level `let`, or constrain its type variable with `where Make` so the caller decides.

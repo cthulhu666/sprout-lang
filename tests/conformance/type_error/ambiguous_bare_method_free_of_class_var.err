@@ -1,0 +1,1 @@
+ERROR: check: ambiguous type variable in `tag`: nothing determines which `Named` instance to use. Give it a type from a declared return type, a typed parameter or a typed top-level `let`, or constrain its type variable with `where Named` so the caller decides.

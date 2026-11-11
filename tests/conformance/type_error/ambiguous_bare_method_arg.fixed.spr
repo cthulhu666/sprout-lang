@@ -1,0 +1,22 @@
+module main
+
+# Fixed: a typed parameter fixes the class variable.
+
+# A class method passed as a value, whose class variable nothing fixes: `ignore_it`
+# never constrains it and no `where` clause names it. The mention is rejected where it is
+# written, rather than at emit.
+
+class Make t
+  fn from_int(n: Int) -> t
+
+instance Make Int
+  fn from_int(n: Int) -> Int = n + 100
+
+instance Make String
+  fn from_int(n: Int) -> String = "made"
+
+fn apply_int(f: Int -> a, n: Int) -> a = f(n)
+
+fn ignore_it(x: Int) -> Int = 0
+
+fn main() -> Unit !{IO} = print(ignore_it(apply_int(from_int, 1)))
