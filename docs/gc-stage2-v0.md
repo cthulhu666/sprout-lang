@@ -1,6 +1,7 @@
 # GC stage 2 — promotion age, nursery size, a young-only sweep (v0, 2026-11-04)
 
-Status: steps 1, 2, 2b and 3 of §7 are implemented; the defaults are K = 3, s = 1, c = 2. Stage 1
+Status: steps 1, 2, 2b and 3 of §7 are implemented; the defaults are K = 3, s = 1, c = 2. Step 4
+is implemented behind `SPROUT_GC_REGION_LISTS=1`. Stage 1
 is [gc-generational-v0.md §14](gc-generational-v0.md); this doc replaces its §14.6.
 
 ## 1. Problem
@@ -432,12 +433,13 @@ both arms. JSC and Whippet's density rules (§5.3, option C) are the prior art f
 The §2 goal that a minor's sweep follows the young set holds except in two places. §5.4 keeps
 one: the minor before a major. The other is `sprout_gc_young_sweep_ok`. A minor that would leave
 an ordinary region empty walks the whole heap, because the global lists interleave every region
-and only the full sweep's rebuild can drop one region's entries. MEASURE-FULLWALK.
+and only the full sweep's rebuild can drop one region's entries. On the default, per run:
+nqueens 559 such minors, mutvec_int 33, digit_recognizer 12, the self-compile 9, load_spike 2.
 
 The lists also decide where objects land (§5.5, out of scope there). LIFO lists hand out the most
-recently freed slot wherever it lies, so survivors spread over every region and few regions
-empty. The galaxy client keeps all 9 of its load-peak regions for ~1,550 live objects for that
-reason (`BACKLOG.md`, "After a load spike").
+recently freed slot wherever it lies, so survivors can spread over every region. Address order
+fills low regions first. On load_spike it released no region (12 in both arms), so it does not
+reach the galaxy client's walk after a load spike (`BACKLOG.md`); §5.7 does.
 
 **Per-region lists.** Each ordinary region owns its free lists: a head per class (1..256), in a
 block the region points to like `slotmap` (NULL for a large region), so region-table inserts and
@@ -626,7 +628,17 @@ Each premise has a test or a check that fails when it breaks.
    `g_gc_freelist_len`. The VM A/B on the §14.8 set reports all three, with each workload's
    spread, and the reuse path's cost with minors off.
 
-   MEASURE-RESULT
+   **Implemented behind the switch** ([results](../bench/results-2026-11-12-gc-region-lists.md)).
+   On a quiet VM at the default, against the global lists, stdout matched and every
+   full-walk minor that was not before a major is gone. Collection counts are equal on every
+   workload, and peak slots on every workload but the self-compile (1.01; 0.83 of minor-off).
+   - GC time: digit_recognizer 0.66 (p50 pause 244 → 56 µs), nqueens 0.96, the self-compile 0.97
+     (1,517 → 1,470 ms); gc_roots 1.03 and astar 1.02; the rest inside the spread.
+   - CPU: load_spike 0.98, the rest inside the spread; the self-compile is 4.81 s in both arms.
+   - The reuse path costs 0–2% CPU with minors off on every workload but compiler_test (1.08 ~, a
+     0.27 s run); only nqueens' 1.01 is outside the spread.
+
+   The young sweep's work per dead slot is unchanged; §5.7 is the step that moves it.
 5. **Lazy per-region sweep** (§5.7), designed once step 4's numbers are in.
 6. Retire `SPROUT_GC_REGION_LISTS` once steps 4 and 5 settle it, and update
    `compiler-internals.md` and `gates.md`. Retiring it removes the global lists with
