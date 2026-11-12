@@ -42,7 +42,7 @@ install-deps:
 [group('bootstrap')]
 install-hooks:
   git config core.hooksPath .githooks
-  @echo "Hooks installed — .githooks/pre-commit is now active."
+  @echo "Hooks installed — .githooks/pre-commit and .githooks/pre-push are now active."
 
 # Bypass the bootstrap seed gate for one commit when a compiler change does not
 # affect IR output.  Run `just verify-bootstrap-fixed-point` first to confirm.
@@ -865,6 +865,11 @@ test-review-ledger:
 [group('test')]
 test-pr-rebase:
   bash scripts/test_pr_rebase.sh
+
+# Exercise the `.githooks/pre-push` seed check against throwaway repos and a stub check command.
+[group('test')]
+test-pre-push:
+  bash scripts/test_pre_push.sh
 
 # Exercise `bench-vm` against a stub `gcloud`: the VM is deleted on every exit path, by name only.
 # Also covers the parsing helpers in scripts/bench_vm_remote.sh. No network, no cloud calls.
@@ -4769,6 +4774,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "shell-hooks|test-shell-hooks"
     "review-ledger|test-review-ledger"
     "pr-rebase|test-pr-rebase"
+    "pre-push|test-pre-push"
     "bench-vm|test-bench-vm"
     "error-line-marker|test-error-line-marker"
     "review-script|test-review-script"
