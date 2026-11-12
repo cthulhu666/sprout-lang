@@ -1,0 +1,36 @@
+module main
+import stdlib.mutable (MutVec, mutvec_new, mutvec_len, mutvec_fold)
+
+# Run by `just gc-gen-check`. Old data fills ordinary regions: each kept vector (508 Ints) takes a
+# whole 4096-byte slot, so about 256 fill a 1 MiB region. Each round also allocates a dead vector
+# of that class. Once the open region has no room left, the dead vector is bumped into a new
+# region of its own, and the next minor finds an ordinary region with no old and no live young
+# slot: a young-only minor would empty it. The checksum reads every kept vector back.
+
+fn sum_vec(v: MutVec Int) -> Int !{IO} =
+  mutvec_fold(\ (sum, x) -> sum + x, 0, v)
+
+fn sum_all(xs: List (MutVec Int), acc: Int) -> Int !{IO} =
+  match xs with
+  | Cons v rest ->
+      do
+        s <- sum_vec(v)
+        sum_all(rest, acc + s)
+  | Nil -> acc
+
+fn rounds(i: Int, n: Int, keep: List (MutVec Int), acc: Int) -> Int !{IO} =
+  if i >= n then
+    do
+      total <- sum_all(keep, 0)
+      acc + total
+  else
+    do
+      v <- mutvec_new(508, i)
+      g <- mutvec_new(508, 0 - i)
+      glen <- mutvec_len(g)
+      rounds(i + 1, n, Cons(v, keep), acc + glen)
+
+fn main() -> Unit !{IO} =
+  do
+    total <- rounds(0, 600, Nil, 0)
+    print(`gc-gen region_empty_minor ${int_to_string(total)}`)

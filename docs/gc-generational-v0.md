@@ -875,7 +875,7 @@ integer aborts at startup (`sprout_gc_gen_init`, called from `sprout_set_argv` w
 GC switches), before the program runs, but only with the mode on: with `SPROUT_GC_MINOR=0`,
 neither it nor `SPROUT_GC_GENCHECK` is read. The cycle line of `SPROUT_DEBUG_GC`
 gains a trailing `kind=minor|major`, printed only with the mode on, so its output is unchanged
-with it off. With it on, `marked` counts what that collection marked: a minor's figure leaves
+with it off (a minor's also carries `sweep=young|full`, from stage 2). With it on, `marked` counts what that collection marked: a minor's figure leaves
 out every old object. The "live after the previous collection" in the second rule is the heap
 count after the sweep, which after a minor still holds the old objects that died since the last
 major. The decision is taken before that sweep, from the predicted count, which equals the

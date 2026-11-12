@@ -1,0 +1,51 @@
+module main
+import stdlib.mutable (MutVec, mutvec_new, mutvec_push, mutvec_fold)
+
+# Run by `just gc-gen-check`. `mutvec_new(n, x)` is inline, so its first push past n moves the
+# elements out and frees the tail of the object's slot (`sprout_vec_release_inline_tail`) onto
+# the free list. The cells and records built right after are the same size class, so they take
+# those slots. Everything stays live and the checksum reads it all back: a tail handed out
+# while the vector still owned it would corrupt a sum.
+
+type Quad = Quad Int Int Int Int
+type Holder = Holder(MutVec Int) (List Int) Quad
+
+fn make(i: Int) -> Holder !{IO} =
+  do
+    v <- mutvec_new(4 + (i - (i / 5) * 5), i)
+    _ <- mutvec_push(v, i + 100)
+    _ <- mutvec_push(v, i + 200)
+    Holder(v, Cons(i, Cons(i + 1, Nil)), Quad(i, i + 1, i + 2, i + 3))
+
+fn list_sum(xs: List Int, acc: Int) -> Int =
+  match xs with
+  | Cons x rest -> list_sum(rest, acc + x)
+  | Nil -> acc
+
+fn weight(h: Holder) -> Int !{IO} =
+  match h with
+  | Holder v xs q ->
+      do
+        s <- mutvec_fold(\ (sum, x) -> sum + x, 0, v)
+        match q with
+        | Quad a b c d -> s + list_sum(xs, 0) + a + 2 * b + 3 * c + 4 * d
+
+fn sum_all(hs: List Holder, k: Int, acc: Int) -> Int !{IO} =
+  match hs with
+  | Cons h rest ->
+      do
+        w <- weight(h)
+        sum_all(rest, k + 1, acc + k * w)
+  | Nil -> acc
+
+fn rounds(i: Int, n: Int, keep: List Holder) -> Int !{IO} =
+  if i >= n then sum_all(keep, 1, 0)
+  else
+    do
+      h <- make(i)
+      rounds(i + 1, n, Cons(h, keep))
+
+fn main() -> Unit !{IO} =
+  do
+    total <- rounds(0, 60, Nil)
+    print(`gc-gen inline_tail_reuse ${int_to_string(total)}`)

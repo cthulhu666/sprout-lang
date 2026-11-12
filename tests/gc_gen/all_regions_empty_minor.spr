@@ -1,0 +1,14 @@
+no_prelude
+
+# Run by `just gc-gen-check`. `no_prelude` leaves out the prelude's rooted globals, so no object
+# stays live: the only ordinary region holds nothing old, and each round's strings are dead by
+# the next collection. A young-only minor would empty every ordinary region it holds.
+
+fn churn(n: Int, acc: Int) -> Int =
+  if n <= 0 then acc else churn(n - 1, acc + str_len(int_to_string(n)))
+
+fn rounds(i: Int, n: Int, acc: Int) -> Int =
+  if i >= n then acc else rounds(i + 1, n, acc + churn(3, i))
+
+fn main() -> Unit !{IO} =
+  print_str(str_concat("gc-gen all_regions_empty_minor ", int_to_string(rounds(0, 200, 0))))
