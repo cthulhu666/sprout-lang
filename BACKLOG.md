@@ -1418,15 +1418,15 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   itself, as GHC's `ConPatTc` carries `cpt_dicts`, and lowering would read them. First audit the
   passes after resolve that would see the binders: `verify_dispatch`, `linear_check`,
   `specialise`, `dce`, `bce`.
-- [ ] `P2` **Complete the M3b eta→single-authority collapse (blocked on tyvar canonicalization).**
-  Lowering's `try_eta_in_class`/`try_eta_forwarded_without_class` remain a second resolution
-  authority for one shape: a polymorphic (type-variable-head) forwarded value-position class method.
-  `resolve.method_ref_evidence` emits `EvUnresolved` for the non-concrete head; making it emit
-  `EvForward` produces a key that misses `ctx_fwd`'s source-name key — the name-vs-generalized
-  divergence. Durable fix is canonicalizing tyvar identity in the dict resolver, then deleting
-  `try_eta_*` and adding the deferred `TFunc` gate and marker-miss test. The canonical-identity work
-  landed a positional fix in `infer.sprout`; this is the one place in the subsystem it did not
-  reach, since it lives on the lowering side.
+- [ ] `P2` **Complete the M3b eta→single-authority collapse: delete lowering's `try_eta_*`.**
+  `resolve.method_evidence` gives a `TMethodRef` `EvInstance` or `EvForward`, except
+  `EvUnresolved` for an imported, unbundled instance (env marker only); over 1001 sources
+  (examples, conformance/run, tests/stdlib, smoke shapes, self-compile) the
+  `TMethodRef` arm of `lowering.lower_expr` never falls back to `lower_value_var`. Lowering's
+  `try_eta_in_class`/`try_eta_forwarded_without_class` (and `find_forwarded_method_any`) are
+  still a second authority reachable from that fallback and the `TVar` arm. Fix: make a
+  consumption miss a located panic, measure the `TVar` arm the same way, then delete `try_eta_*`
+  with the deferred `TFunc` gate and marker-miss test.
 - [ ] `P2` **Widen the `@inst:` key to full-head matching (GHC `FlexibleInstances` position).**
   Would make `instance C (List Int)` and `instance C (List Bool)` both legal *and* sound, lifting
   the distinct-type-variables restriction on instance heads. Exact-string widening does not work

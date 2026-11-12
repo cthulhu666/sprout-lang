@@ -381,7 +381,7 @@ fn check_one(c: ast.TypeConstraint, dict_head: (String, Maybe String), theta: Di
 #
 # A class method reached through a TMethodRef (rather than a named TVar) is never
 # looked up here — check_call keys the callee by TVar name. Its ambiguity is rejected
-# by resolve (resolve_method_ref); its dictionary is not re-derived from a source signature.
+# by resolve (resolve.method_evidence); its dictionary is not re-derived from a source signature.
 
 # Signature entry: the callee's param type annotations (in order) + its where-clause.
 # verify_program surfaces the first mismatch (the gate's failure); verify_stats

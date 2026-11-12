@@ -588,18 +588,20 @@ fn main() -> Unit !{IO} =
     assert_true(state, "thunk-fwd: uses forwarded slot (__tc_Blank_0_)",
       str_starts_with(lowered_fn_lambda_inner_callee(r_thunk_fwd, "test"), "__tc_Blank_0_"))
 
-    # Same, but the result is `List a` — the class variable is nested, so there is no
-    # tvar head to key on. The any-slot fallback would take the FIRST slot carrying
-    # the method, silently running another constraint's instance; declining keeps the
-    # loud `__eta_unresolved_` failure instead.
+    # Same, but the result is `List a`: the class variable is nested, so the type has no
+    # tvar head. Resolve names the slot by the class variable's binding, so the one
+    # constraint's slot is taken, and the second constraint's when the use is at `b`.
     r_thunk_nested <- run_lower("class Blank a {\n  fn blanks() -> List a\n}\nfn test(f: (() -> List a) -> Int) -> Int where Blank a = f(blanks)")
     assert_true(state, "thunk-nested: lowers ok", is_lower_ok(r_thunk_nested))
-    assert_true(state, "thunk-nested: declines rather than guessing a slot",
-      str_starts_with(lowered_fn_first_arg_var(r_thunk_nested, "test"), "__eta_unresolved_"))
+    assert_true(state, "thunk-nested: uses the forwarded slot",
+      str_starts_with(lowered_fn_lambda_inner_callee(r_thunk_nested, "test"), "__tc_Blank_0_"))
+    r_thunk_nested_two <- run_lower("class Blank a {\n  fn blanks() -> List a\n}\nfn test(f: (() -> List a) -> Int, g: (() -> List b) -> Int) -> Int where Blank a, Blank b = g(blanks)")
+    assert_true(state, "thunk-nested, two constraints: uses the slot of the variable the use names",
+      str_starts_with(lowered_fn_lambda_inner_callee(r_thunk_nested_two, "test"), "__tc_Blank_1_"))
 
     # `from_int`'s class variable is in its RESULT, so its own type carries no tvar
     # head. An ANNOTATED higher-order parameter still pins it, and these resolve
-    # through eta_class_type rather than the slot scan. A method that arrives through a
+    # through eta_class_type_of rather than the slot scan. A method that arrives through a
     # polymorphic helper has a fresh tvar type, named through `@eta_fwdvar`
     # (tests/conformance/run/ambiguous_forwarded_method.spr).
     r_pinned_one <- run_lower("class Make a {\n  fn from_int(n: Int) -> a\n}\nfn test(f: (Int -> a) -> Int) -> Int where Make a = f(from_int)")

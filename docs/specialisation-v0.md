@@ -165,9 +165,8 @@ allocations.
 3. Replace each `EvForward` with the caller's concrete evidence, **by key**, not by position.
    Forward keys are `typed_ast.dict_slot_key(class, type_args)` (`resolve.sprout`, `forwarded_slot`),
    superclass-expanded in `build_hidden_for_constraints` order. Recurse into `EvInstance` children
-   and into `TMethodRef` evidence. A method used as a value at a signature variable has
-   `EvUnresolved` (`resolve_method_ref` gives evidence only for a constructor head) and lowering rebuilds it from hidden
-   parameters, which the copy lacks, so the copy fills it from the slot its class type names.
+   and into `TMethodRef` evidence. A method used as a value at a signature variable carries
+   `EvForward` for the slot `method_evidence` found, so the copy substitutes it like any other.
 4. Name the copy `<generic IR name>$spec_<mangled args>`, where the args are the type arguments
    of the declaration's `where` constraints in written order (superclasses not included) after
    substitution, mangled by `lowering`'s `mangle_type_args`, which takes that `List ast.TypeExpr`:

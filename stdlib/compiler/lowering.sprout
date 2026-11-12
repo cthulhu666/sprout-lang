@@ -940,7 +940,8 @@ fn lookup_class_marker_scheme(method_name: String, scheme_env: Dict types.Scheme
 
 fn try_eta_in_class(class_name: String, name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   let types.TFunc param _ _ _ = t else Nothing
-  in eta_in_class_by_head(class_name, name, t, types.eta_class_type(ctx.env.class_params, ctx.env.scheme_env, class_name, name, t, param), ctx)
+      class_type = maybe_with_default(param, types.eta_class_type_of(ctx.env.class_params, ctx.env.scheme_env, class_name, name, t))
+  in eta_in_class_by_head(class_name, name, t, class_type, ctx)
 
 # Split on whether the class type has a concrete head: a concrete head resolves to an instance
 # (or its forwarded slot); an abstract (tvar) head forwards via the @eta_fwd marker.

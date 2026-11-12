@@ -805,36 +805,36 @@ fn constraint_args(c: ast.TypeConstraint) -> List ast.TypeExpr =
 # UNPACK order cannot drift apart — a divergence would mismap packed witnesses to
 # the wrong methods. See docs/gadts-v0.md §5b.
 
-# A class method used as a value, judged by its class type's head: a constructor is checked
-# like a TDict; a variable must be forwarded by the declaration (lowering's eta lambda takes
-# the slot) or nothing chooses the instance; a function or thunk type has no instance. A method
-# whose type does not mention the class variable has no class type: see forwarded_method_ref.
-fn resolve_method_ref(method: String, class_name: String, t: types.Type, pos: source.SourcePos,
-                      kind: DeclKind, fwd_keys: Forwarded,
-                      tables: Tables) -> Result(source.SourcePos, String) typed_ast.TypedExpr =
+# The evidence for a class method used as a value, judged by its class type's head: a
+# constructor is checked like a TDict; a variable must be forwarded by the declaration, and its
+# evidence is that slot, or nothing chooses the instance; a function or thunk type has no
+# instance. A method whose type does not mention the class variable has no class type: see
+# forwarded_method_evidence.
+fn method_evidence(method: String, class_name: String, t: types.Type, pos: source.SourcePos,
+                   kind: DeclKind, fwd_keys: Forwarded,
+                   tables: Tables) -> Result(source.SourcePos, String) typed_ast.Evidence =
   let Just class_type = types.eta_class_type_of(tables_class_params(tables), tables_env(tables), class_name, method, t)
-        else forwarded_method_ref(method, class_name, t, pos, fwd_keys)
+        else forwarded_method_evidence(method, class_name, pos, fwd_keys)
       slot_type = named_type_expr(class_type, tables_env(tables))
       c = ast.TypeConstraint(class_name, [slot_type])
   in
     match types.first_concrete_head_str(class_type) with
     | Just _ ->
         let Nothing = check_dictionary(c, pos, kind, fwd_keys, tables) else Just err -> Err(err)
-        in Ok(typed_ast.TMethodRef(method, class_name, t, pos,
-                                   produce_one_class(class_name, slot_type, [slot_type], fwd_keys, tables)))
+        in Ok(produce_one_class(class_name, slot_type, [slot_type], fwd_keys, tables))
     | Nothing ->
         if types.head_is_var(class_type) then
-          if forwards(class_name, [slot_type], fwd_keys)
-          then Ok(typed_ast.TMethodRef(method, class_name, t, pos, typed_ast.EvUnresolved))
-          else Err((pos, typed_ast.ambiguous_method_message(method, class_name)))
+          let Just slot = forwarded_slot(class_name, [slot_type], fwd_keys)
+                else Err((pos, typed_ast.ambiguous_method_message(method, class_name)))
+          in Ok(typed_ast.EvForward(class_name, slot))
         else Err((pos, typed_ast.function_instance_message(class_name)))
 
 # A method with no class type, whose use nothing can fix: accepted when the declaration
 # forwards exactly one slot for its class, which lowering's eta lambda then takes.
-fn forwarded_method_ref(method: String, class_name: String, t: types.Type, pos: source.SourcePos,
-                        fwd_keys: Forwarded) -> Result(source.SourcePos, String) typed_ast.TypedExpr =
+fn forwarded_method_evidence(method: String, class_name: String, pos: source.SourcePos,
+                             fwd_keys: Forwarded) -> Result(source.SourcePos, String) typed_ast.Evidence =
   match class_slots(class_name, fwd_keys) with
-  | [slot] -> Ok(typed_ast.TMethodRef(method, class_name, t, pos, typed_ast.EvForward(class_name, slot)))
+  | [slot] -> Ok(typed_ast.EvForward(class_name, slot))
   | _ -> Err((pos, typed_ast.ambiguous_method_message(method, class_name)))
 
 fn class_slots(class_name: String, fwd: Forwarded) -> List typed_ast.SlotKey =
@@ -844,7 +844,7 @@ fn class_slots(class_name: String, fwd: Forwarded) -> List typed_ast.SlotKey =
 # `@eta_fwdvar` markers, so a slot key built from it (typed_ast.dict_slot_key) is the one the
 # enclosing function's slot is under. Any other variable keeps its identity; an unpack's
 # skolem is named by its `$ex_` slot head.
-export fn named_type_expr(t: types.Type, env: Dict types.Scheme) -> ast.TypeExpr =
+fn named_type_expr(t: types.Type, env: Dict types.Scheme) -> ast.TypeExpr =
   match t with
   | types.TVar v ->
       match types.eta_written_var(v, env) with
@@ -930,7 +930,8 @@ fn resolve_expr(e: typed_ast.TypedExpr, kind: DeclKind, fwd_keys: Forwarded, tab
       let Nothing = check_dictionary(c, pos, kind, fwd_keys, tables) else Just err -> Err(err)
       in Ok(typed_ast.TDict(c, t, pos, produce_evidence(c, fwd_keys, tables)))
   | typed_ast.TMethodRef method class_name t pos _ ->
-      resolve_method_ref(method, class_name, t, pos, kind, fwd_keys, tables)
+      result_map(\ev -> typed_ast.TMethodRef(method, class_name, t, pos, ev),
+                 method_evidence(method, class_name, t, pos, kind, fwd_keys, tables))
   | typed_ast.TVar _ _ _ -> Ok(e)
   | typed_ast.TInt _ _ _ -> Ok(e)
   | typed_ast.TFloat _ _ _ -> Ok(e)
