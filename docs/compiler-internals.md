@@ -748,7 +748,7 @@ A request finds a slot by name, so every producer names its variables:
 `named_typeexpr` and `type_to_typeexpr_with_prog_vars` in `infer` (through `@fwdvar`, then
 the signature variable the substitution now identifies it with, `sig_var_now_named`), and
 `@eta_fwdvar` markers, one per signature variable of a function or an instance method, for the
-value-position paths in `resolve.method_ref_evidence`, `lowering.eta_slot_key` and
+value-position paths in `resolve.method_evidence`, `lowering.eta_slot_key` and
 `lowering.eta_class_var_name`, written after the body is inferred under both the seeded and the
 final variable, and all read through `types.eta_written_var`. A method
 used as a value under two same-class constraints has the unification representative as its

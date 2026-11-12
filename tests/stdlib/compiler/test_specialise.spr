@@ -93,14 +93,14 @@ fn class_decl() -> typed_ast.TypedDecl =
 fn method_env() -> Dict types.Scheme =
   dict_set("to_string", types.mono(types.TFunc(tvar("t"), string_t(), types.effect_pure, types.OwnConsume)), test_env())
 
-# fn show_it(x: a) -> String where ToString a = <to_string used as a value>, evidence unresolved
-# as the checker leaves it when the class type is a variable.
+# fn show_it(x: a) -> String where ToString a = <to_string used as a value>, evidence the
+# forwarded slot, as resolve leaves it when the class type is a variable.
 fn show_it_decl() -> typed_ast.TypedDecl =
   typed_ast.TFnDecl("show_it", [param("x", "a")], Just(tn("String")), Nothing,
                     [constraint("ToString", [tn("a")])],
                     typed_ast.TMethodRef("to_string", "ToString",
                                          types.TFunc(tvar("a"), string_t(), types.effect_pure, types.OwnConsume),
-                                         pos(), typed_ast.EvUnresolved))
+                                         pos(), typed_ast.EvForward("ToString", typed_ast.dict_slot_key("ToString", [tn("a")]))))
 
 fn show_it_at_int() -> typed_ast.TypedExpr =
   call("show_it", string_t(),
@@ -424,8 +424,8 @@ fn main() -> Unit !{IO} =
               "[spec] copy inner$spec_Int of inner for the call at 2:1"]),
     check_eq("run: a method used as a value gets its slot's evidence",
              method_ref_evidence_text(method_ref_specialised()), "ToString_Int"),
-    check_eq("run: the generic version's method reference stays unresolved",
-             generic_method_ref_text(method_ref_specialised()), "unresolved")
+    check_eq("run: the generic version's method reference keeps its forward",
+             generic_method_ref_text(method_ref_specialised()), "fwd:ToString_a")
   ])
 
 fn map_holder(name: String, out: specialise.Output) -> Maybe String =

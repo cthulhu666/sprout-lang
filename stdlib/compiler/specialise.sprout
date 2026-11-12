@@ -1,6 +1,5 @@
 module stdlib.compiler.specialise
 import stdlib.compiler.ast as ast
-import stdlib.compiler.resolve as resolve
 import stdlib.compiler.source as source
 import stdlib.compiler.spec_keys as spec_keys
 import stdlib.compiler.typed_ast as typed_ast
@@ -28,8 +27,7 @@ export type Output (..) = (program: typed_ast.TypedProgram, added: List typed_as
 
 # `typed` is false for the original program, which needs no substitution, only retargeted calls.
 # `env` holds the `@eta_fwdvar` markers that name a node type's variables (`spec_keys.sub_type`).
-type Rw = (w: spec_keys.Walk, seen: Dict spec_keys.Seen, typed: Bool, env: Dict types.Scheme,
-           class_params: Dict String)
+type Rw = (w: spec_keys.Walk, seen: Dict spec_keys.Seen, typed: Bool, env: Dict types.Scheme)
 
 export fn run(prog: typed_ast.TypedProgram, env: Dict types.Scheme) -> Output =
   match prog with
@@ -39,8 +37,7 @@ fn run_decls(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> Output 
   let closed = spec_keys.close(decls)
       cl = closed.closure
       keys = list_reverse(cl.order)
-      rw = Rw(w = closed.walk, seen = cl.seen, typed = false, env = env,
-              class_params = typed_ast.class_tables(decls).params)
+      rw = Rw(w = closed.walk, seen = cl.seen, typed = false, env = env)
       made = list_map(make_copy(_, rw), keys)
   in Output(
        program = typed_ast.TypedProgram(list_append(rewrite_decls(decls, closed.hits, rw, []), made)),
@@ -115,21 +112,6 @@ fn make_copy(k: spec_keys.Key, rw: Rw) -> typed_ast.TypedDecl =
 fn ty(t: types.Type, rw: Rw) -> types.Type =
   if rw.typed then spec_keys.sub_type(t, rw.w.subst, rw.env) else t
 
-# A method used as a value, in a generic body, has no evidence (`resolve.resolve_method_ref`
-# gives none for a variable head): lowering rebuilds it from the hidden parameters, which a copy
-# does not have. The copy knows the dictionary: it is the one in the slot the method's class
-# type names, as for a forwarded dictionary.
-fn method_ref_evidence(method: String, cls: String, t: types.Type, ev: typed_ast.Evidence,
-                       rw: Rw) -> typed_ast.Evidence =
-  match ev with
-  | typed_ast.EvUnresolved ->
-      if rw.typed then maybe_with_default(ev, forwarded_slot_of(method, cls, t, rw)) else ev
-  | _ -> ev_in(ev, rw)
-
-fn forwarded_slot_of(method: String, cls: String, t: types.Type, rw: Rw) -> Maybe typed_ast.Evidence =
-  let class_type = types.eta_class_type(rw.class_params, rw.env, cls, method, t, t)
-  in typed_ast.slot_get(typed_ast.dict_slot_key(cls, [resolve.named_type_expr(class_type, rw.env)]), rw.w.slots)
-
 fn ev_in(ev: typed_ast.Evidence, rw: Rw) -> typed_ast.Evidence =
   if rw.typed then spec_keys.ev_substitute(ev, rw.w.slots) else ev
 
@@ -149,7 +131,7 @@ fn rewrite(e: typed_ast.TypedExpr, locals: Dict Bool, rw: Rw) -> typed_ast.Typed
   | typed_ast.TDict c t pos ev ->
       typed_ast.TDict(if rw.typed then spec_keys.sub_constraint(c, rw.w.subst.te) else c, ty(t, rw), pos, ev_in(ev, rw))
   | typed_ast.TMethodRef method cls t pos ev ->
-      typed_ast.TMethodRef(method, cls, ty(t, rw), pos, method_ref_evidence(method, cls, t, ev, rw))
+      typed_ast.TMethodRef(method, cls, ty(t, rw), pos, ev_in(ev, rw))
   # A leaf is rebuilt only for a copy: the original program's keep their node.
   | typed_ast.TVar name t pos -> if rw.typed then typed_ast.TVar(name, ty(t, rw), pos) else e
   | typed_ast.TInt n t pos -> if rw.typed then typed_ast.TInt(n, ty(t, rw), pos) else e

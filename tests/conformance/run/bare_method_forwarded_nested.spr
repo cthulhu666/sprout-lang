@@ -1,0 +1,23 @@
+module main
+
+# A forwarded bare method inside a lambda, and passed down through two generic levels:
+# `outer` forwards its `Label a` to `inner`, which hands the bare method to a higher-order fn.
+
+class Label t
+  fn label(x: t) -> String
+
+instance Label Int
+  fn label(x: Int) -> String = "int " ++ to_string(x)
+
+instance Label Bool
+  fn label(x: Bool) -> String = if x then "yes" else "no"
+
+fn apply_to(f: a -> String, x: a) -> String = f(x)
+
+fn inner(x: b) -> String where Label b = (\u -> apply_to(label, x))(0)
+
+fn outer(x: a) -> String where Label a = inner(x) ++ "!"
+
+fn main() -> Unit !{IO} = do
+  print(outer(7))
+  print(outer(false))

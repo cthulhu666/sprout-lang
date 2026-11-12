@@ -12,17 +12,12 @@ fn bound(pattern: types.Type, actual: types.Type, v: String) -> String =
   | Nothing -> "-"
   | Just t -> types.type_to_string(t)
 
-# Class `Show a`, keyed by its full name, whose method `show` has the scheme `a String`.
-fn eta(class_name: String, method: String, used: types.Type) -> String =
-  types.type_to_string(types.eta_class_type(dict_set("Show", "a", dict_empty()),
-                                            dict_set("show", types.mono(app(var("a"), con("String"))), dict_empty()),
-                                            class_name, method, used, con("Fallback")))
-
 fn head(t: types.Type) -> String = maybe_with_default("-", types.first_concrete_head_str(t))
 
 fn var_head(t: types.Type) -> String = maybe_with_default("-", types.head_var(t))
 
-# The same class and method as `eta`, with no fallback: a binding that is not found is Nothing.
+# Class `Show a`, keyed by its full name, whose method `show` has the scheme `a String`;
+# a binding that is not found is "-".
 fn eta_of(class_name: String, method: String, used: types.Type) -> String =
   match types.eta_class_type_of(dict_set("Show", "a", dict_empty()),
                                 dict_set("show", types.mono(app(var("a"), con("String"))), dict_empty()),
@@ -65,12 +60,11 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "eta_class_type_of is Nothing for an unknown class", eta_of("Eq", "show", app(con("Int"), con("String"))), "-")
     assert_eq(state, "eta_class_type_of is Nothing for an unbound class parameter", eta_of("Show", "show", con("Int")), "-")
 
-    assert_eq(state, "eta type read at the class parameter, the method by its short name",
-      eta("Show", "prelude.show", app(con("Int"), con("String"))), "Int")
-    assert_eq(state, "a class is found by its full name only",
-      eta("main.Show", "show", app(con("Int"), con("String"))), "Fallback")
-    assert_eq(state, "an unknown class falls back", eta("Eq", "show", app(con("Int"), con("String"))), "Fallback")
-    assert_eq(state, "an unknown method falls back", eta("Show", "eq", app(con("Int"), con("String"))), "Fallback")
-    assert_eq(state, "an unbound class parameter falls back", eta("Show", "show", con("Int")), "Fallback")
+    assert_eq(state, "eta_class_type_of finds the method by its short name",
+      eta_of("Show", "prelude.show", app(con("Int"), con("String"))), "Int")
+    assert_eq(state, "eta_class_type_of finds a class by its full name only",
+      eta_of("main.Show", "show", app(con("Int"), con("String"))), "-")
+    assert_eq(state, "eta_class_type_of is Nothing for an unknown method",
+      eta_of("Show", "eq", app(con("Int"), con("String"))), "-")
 
     summary(state)

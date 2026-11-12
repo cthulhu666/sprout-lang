@@ -1,0 +1,22 @@
+module main
+
+# A bare method whose class variable is the method's argument type, forwarded by `where`,
+# passed to a higher-order function. Each type's specialised copy uses its own instance.
+
+class Label t
+  fn label(x: t) -> String
+
+instance Label Int
+  fn label(x: Int) -> String = "int " ++ to_string(x)
+
+instance Label Bool
+  fn label(x: Bool) -> String = if x then "yes" else "no"
+
+fn apply_to(f: a -> String, x: a) -> String = f(x)
+
+fn describe(x: a) -> String where Label a = apply_to(label, x)
+
+fn main() -> Unit !{IO} = do
+  print(describe(7))
+  print(describe(true))
+  print(describe(8))

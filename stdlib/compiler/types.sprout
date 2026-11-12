@@ -408,11 +408,6 @@ export fn eta_class_type_of(class_params: Dict String, scheme_env: Dict Scheme, 
       Just scheme = dict_get_or_short(method_name, scheme_env) else Nothing
   in dict_get(class_param, match_type_vars(scheme_type(scheme), actual, dict_empty()))
 
-# eta_class_type_of, or `fallback` when it finds nothing; lowering's eta expansion reads it.
-export fn eta_class_type(class_params: Dict String, scheme_env: Dict Scheme, class_name: String,
-                         method_name: String, actual: Type, fallback: Type) -> Type =
-  maybe_with_default(fallback, eta_class_type_of(class_params, scheme_env, class_name, method_name, actual))
-
 fn dict_get_or_short(name: String, d: Dict v) -> Maybe v =
   match dict_get(name, d) with
   | Just v -> Just(v)
