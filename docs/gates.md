@@ -1091,7 +1091,19 @@ unremembered object points at no young one; before a major the set is empty and 
 bit 13). The nursery share is not varied: under `SPROUT_GC_STRESS` every allocation collects, so
 the share is never read, and without it these programs run no minor at any share.
 `gc-adapt-check` covers the share. K and c have no switch; `tests/c_runtime/promote_age.c`
-sets them directly. The two static `sprout_analysis_*` helpers cannot be reached without a live
+sets them directly. Two more runs, with `SPROUT_GC_REGION_LISTS=1` (the second adds
+`SPROUT_FL_VERIFY=1`), read the `SPROUT_DEBUG_GC` cycle lines: every `kind=minor sweep=full`
+line must be followed by a `kind=major` one, because a minor walks everything only before a
+major ([gc-stage2-v0.md](gc-stage2-v0.md) §5.4, §5.6). Without per-region lists it would fail on
+`region_empty_minor` and `all_regions_empty_minor`, whose minors empty a region and so take the
+full sweep. Every program also runs with `SPROUT_GC_MINOR=0 SPROUT_GC_REGION_LISTS=1
+SPROUT_FL_VERIFY=1 SPROUT_GC_STRESS=1`, the other arm of the A/B. A program named `*_nostress`
+(`cursor_lower_nostress`) is excluded from the STRESS runs and runs with `SPROUT_GC_GENCHECK=1`
+only: default, region lists with `SPROUT_FL_VERIFY=1`, and the same with minors off. It frees a
+slot below a class cursor and allocates that class again, which a collection per allocation
+(resetting the cursors) cannot reach; with `SPROUT_FL_VERIFY=1` the reuse path aborts
+(`FL_VERIFY ... holds a free slot below the cursor`) if the push did not lower the cursor.
+Stdout only, no minor-count floor. The two static `sprout_analysis_*` helpers cannot be reached without a live
 analysis service, so `tests/c_runtime/analysis_strings.c` covers them under the same switches and
 the same 20-minor floor. `just c-runtime-test`
 holds the verifier's own test (`tests/c_runtime/gen_check.c`): an unbarriered old-to-young store

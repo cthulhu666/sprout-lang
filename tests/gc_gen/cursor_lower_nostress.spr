@@ -1,0 +1,48 @@
+module main
+import stdlib.mutable (MutVec, mutvec_new, mutvec_push, mutvec_len)
+
+# Run by `just gc-gen-check` WITHOUT SPROUT_GC_STRESS (the `_nostress` name: it builds ~40k live
+# cells, so collecting on every allocation would take quadratic time). Reaches the case where
+# `sprout_vec_release_inline_tail` frees a slot below a class cursor under per-region lists:
+#   1. `pusher` is allocated first, so it sits in the lowest region; its inline area leaves a
+#      32-byte tail (class 2) when its first push moves the elements out.
+#   2. `phase1` builds 40k live cells (two ordinary regions of class 2), keeps one cell from the
+#      second so that region survives, and drops the rest: the next collection frees them.
+#   3. `fill` allocates 200k more cells. They take the freed class-2 slots lowest region first,
+#      so the cursor passes the lowest region once its list is empty.
+#   4. The push then frees a class-2 slot in the lowest region, below the cursor, and `probe`
+#      allocates class 2 again: it must take that slot. SPROUT_FL_VERIFY=1 aborts if the push
+#      left the cursor above a region that holds the slot.
+
+type Two = Two(List Int) (List Int)
+
+fn build(i: Int, n: Int, mark_at: Int, acc: List Int, keep: List Int) -> Two =
+  if i >= n then Two(acc, keep)
+  else if i == mark_at then build(i + 1, n, mark_at, Cons(i, acc), Cons(i, keep))
+  else build(i + 1, n, mark_at, Cons(i, acc), keep)
+
+fn phase1() -> List Int =
+  match build(0, 40000, 34000, Nil, Nil) with
+  | Two big keep -> Cons(list_length(big), keep)
+
+fn fill_cells(n: Int) -> List Int =
+  match build(0, n, 0 - 1, Nil, Nil) with
+  | Two cells _ -> cells
+
+fn probe(x: Int) -> Int =
+  list_length(Cons(x, Cons(x + 1, Nil)))
+
+fn finish(pusher: MutVec Int, keep: List Int, fill: List Int) -> Int !{IO} =
+  do
+    _ <- mutvec_push(pusher, 9)
+    n <- mutvec_len(pusher)
+    n + list_length(keep) + probe(n) + list_length(fill)
+
+fn run(pusher: MutVec Int) -> Int !{IO} =
+  let keep = phase1() in finish(pusher, keep, fill_cells(450000))
+
+fn main() -> Unit !{IO} =
+  do
+    pusher <- mutvec_new(4, 7)
+    total <- run(pusher)
+    print(`gc-gen cursor_lower ${int_to_string(total)}`)

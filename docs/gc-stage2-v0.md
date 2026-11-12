@@ -427,6 +427,90 @@ cycle 101 then runs at 4,096, as minor-off does.
 is relative to minor-off, and placement that packs long-lived objects into fewer regions would help
 both arms. JSC and Whippet's density rules (§5.3, option C) are the prior art for that.
 
+### 5.6 Per-region free lists (step 4)
+
+The §2 goal that a minor's sweep follows the young set holds except in two places. §5.4 keeps
+one: the minor before a major. The other is `sprout_gc_young_sweep_ok`. A minor that would leave
+an ordinary region empty walks the whole heap, because the global lists interleave every region
+and only the full sweep's rebuild can drop one region's entries. MEASURE-FULLWALK.
+
+The lists also decide where objects land (§5.5, out of scope there). LIFO lists hand out the most
+recently freed slot wherever it lies, so survivors spread over every region and few regions
+empty. The galaxy client keeps all 9 of its load-peak regions for ~1,550 live objects for that
+reason (`BACKLOG.md`, "After a load spike").
+
+**Per-region lists.** Each ordinary region owns its free lists: a head per class (1..256), in a
+block the region points to like `slotmap` (NULL for a large region), so region-table inserts and
+removals still move a small `SproutRegion`. The block holds no mask and no count: a scan tests
+the head, and a released region has no live and no poisoned slot, so every slot below `bump` is
+FREE and listed. Releasing it drops its lists in O(1) and subtracts the popcount of its slotmap
+bits below `bump` from `g_gc_freelist_len`. The free count stays in slots, so the footprint
+floor, `just gc-trigger-check`, `bench/gc_trigger/measure.sh` and the peak-slots metric keep
+their unit.
+
+**Release in a minor.** A young-only minor releases an ordinary region left with no old, no
+young and no poisoned slot, so `sprout_gc_young_sweep_ok` always allows the young-only sweep. It
+decides after walking the region's young slots, since that walk frees dead objects' malloc'd
+data and clears their singleton slots, and it removes the regions from the table after the walk
+loop, as it already does for freed large objects, so the walk's indices do not shift. Only a
+region the minor walked can empty; an untouched one with `bump == 0` is the open region Pass 2
+reserves. If no ordinary region is left, the minor opens one, as Pass 2 does when `kept_normal`
+is 0.
+
+**Allocation order.** Class c allocates from the lowest-address region with a free slot of class
+c. A per-class cursor holds the region index where the last search stopped and only moves up
+between collections, relative to the regions. Every collection resets it to the first region. A
+region-table insert at or below it (a large object, a bumped region) moves it up one, and a
+removal below it moves it down one, so the regions below it stay the same. A push between
+collections into a region below the cursor (`vector_push`'s inline-tail split,
+`sprout_vec_release_inline_tail`) lowers the cursor to that region, so the slot is not stranded.
+A miss in every region bumps, as today.
+
+**The reuse path.** With the global lists it pops a list and calls `region_find` for the young
+bit. With per-region lists `g_fl_cur[c]` caches the block of the cursor's region
+(`g_fl_cur[c] == g_regions[g_fl_cursor[c]].fl`, NULL past the table). A hit pops that block's
+head and decrements `g_gc_freelist_len`, nothing else; the young bit takes the region as
+`g_regions[g_fl_cursor[c]]`, so `region_find` goes. A miss calls an out-of-line scan that tests
+one head per region from the cursor's successor, at most once per region per class between
+collections, and moves the cursor and the cached block. Blocks are heap-allocated, so a table
+shift keeps them; the cache changes when the cursor moves or the region under it is removed.
+
+**What stays.** The sweep is eager and per dead object; full sweeps list slots one by one, by
+region. Lookups, heap walks, census counts, singleton invalidation, lineage poisoning, HDRCHECK
+and the `just gc-trace` anchors see FREE headers exactly as before. Minor-off gets the same lists
+and allocation order, so the A/B measures both arms with and without them.
+
+| | Choice | Rejected, and why |
+|---|---|---|
+| list ownership | per region | global lists: interleave regions, force full walks to release one |
+| list storage | a block the region points to | inside `SproutRegion`: 2 KB per entry in every table memmove |
+| allocation order | lowest-address region first | LIFO: scatters survivors, few regions empty |
+| merging adjacent free slots | not done | needs a new free-count unit; the free count is in slots |
+
+Prior art, from source at the tags in §3: JSC keeps a free list per block and sweeps a block just
+before allocating from it (`FreeList`, `specializedSweep`). mimalloc keeps lists per page and
+retires a page whose `used` falls to 0 (`_mi_page_retire`). CRuby keeps a free list per page
+(`gc_sweep_plane` calls `heap_page_add_freeobj`). Immix uses partly free blocks in address order
+before free ones (PLDI 2008 §3.1), and Go's page allocator is address-ordered first-fit
+(`mpagealloc.go`).
+
+### 5.7 Lazy per-region sweep (step 5)
+
+Designed after step 4 is measured. A lazy sweep defers a region's dead slots until the allocator
+next takes a slot from it, so the young sweep's cost per dead slot leaves the collection, and so
+does a major's walk of free slots (the galaxy client's ~1 ms after a load spike). JSC, Go, bdwgc
+and CRuby all sweep a page or block before allocating from it, which needs step 4's per-region
+allocation. Requirements, from what the eager sweep does today:
+
+- a live bit per slot separate from the colour, since a young survivor's colour is clear;
+- lookups (`sprout_heap_lookup`, `sprout_heap_lookup_region`) that read it, so an unswept dead
+  slot is rejected like a FREE one;
+- singletons registered as roots or invalidated eagerly, since their slots are cleared by the
+  sweep today;
+- an eager visit to each dead object that owns malloc'd data (vector buffers), or that data
+  stays allocated until its region is swept;
+- census counts, lineage poisoning, HDRCHECK and the free count settled per region at sweep time.
+
 ## 6. Premises
 
 Each premise has a test or a check that fails when it breaks.
@@ -444,16 +528,27 @@ Each premise has a test or a check that fails when it breaks.
    `CtorMeta.field_kinds` marks scalar; for raw words (tuples, closure captures, unregistered
    OBJs) a scalar equal to a young address is a false positive, reported with owner kind and field
    index as §14.5 does.
-4. Free-list entries point only into live regions. No ordinary region is released outside a full
-   walk (a minor releases a dead young large object's region, which is never on a list).
-   `SPROUT_FL_VERIFY=1` checks the lists against a full walk after every collection, and
-   `just gc-gen-check` gains a run with it on, beside GENCHECK.
+4. Free-list entries point only into live regions. With the global lists no ordinary region is
+   released outside a full walk (a minor releases a dead young large object's region, which is
+   never on a list); with per-region lists (step 4) a minor releases one too, and its entries go
+   with its list block. `SPROUT_FL_VERIFY=1` checks the lists against a full walk after every
+   collection, and `just gc-gen-check` gains a run with it on, beside GENCHECK.
 5. The live prediction equals the post-sweep count — stage 1's GENCHECK count check, with §5.1's
    formula.
 6. The incremental free count equals a full walk's — GENCHECK, at each young-only minor, run
    with and without `SPROUT_GC_LINEAGE=1`.
 7. A young-only minor never keeps a region that master would release — the emptiness test of
    §5.3; GENCHECK's walk aborts on an ordinary region left with no live and no poisoned slot.
+   Per-region lists keep the premise and drop the full-walk fallback: the minor releases the
+   region. The check then exempts the one ordinary region with `bump == 0` the minor may open
+   (§5.6).
+8. **Step 4.** Every entry on a region's lists is a FREE slot of that region, of the list's class,
+   and `g_gc_freelist_len` equals the entries over all regions (a released region has every slot
+   below `bump` FREE and listed). `SPROUT_FL_VERIFY=1` checks each region's lists against a walk
+   of that region, and the total against `g_gc_freelist_len`.
+9. **Step 4.** Between collections, no region below a class's cursor has a free slot of that
+   class, and each cached block is its cursor region's. `SPROUT_FL_VERIFY=1` checks both at each
+   allocation that advances a cursor, and the cache after every collection.
 
 ## 7. Steps
 
@@ -521,6 +616,22 @@ Each premise has a test or a check that fails when it breaks.
    is the one setting that moves the memory-for-CPU trade by workload: s = 0.5 kept peak slots at
    or under 1.00× minor-off on every workload at 0.88 self-compile CPU, and s = 2 collects less
    often on `test_gc_trigger_adversary`. K and c have one measured best value across the set.
+4. **Per-region free lists** (§5.6), behind `SPROUT_GC_REGION_LISTS=1` for the A/B, with release
+   in young-only minors and address-ordered allocation (premises 7–9). Tests in `tests/gc_gen/`:
+   a program where an ordinary region empties in a young-only minor, one where every ordinary
+   region does, one where `sprout_vec_release_inline_tail` frees a slot that the next allocation
+   of its class reuses, and one that frees a slot below a class cursor between collections
+   (`cursor_lower_nostress`). Stdout must equal the global lists'. `free`, region and collection
+   counts may differ: allocation order changes which regions empty, and the footprint floor reads
+   `g_gc_freelist_len`. The VM A/B on the §14.8 set reports all three, with each workload's
+   spread, and the reuse path's cost with minors off.
+
+   MEASURE-RESULT
+5. **Lazy per-region sweep** (§5.7), designed once step 4's numbers are in.
+6. Retire `SPROUT_GC_REGION_LISTS` once steps 4 and 5 settle it, and update
+   `compiler-internals.md` and `gates.md`. Retiring it removes the global lists with
+   `sprout_gc_young_sweep_ok` and the staged build (`g_fl_saved`, `fl_push_staged`,
+   `fl_region_commit`, `fl_region_rollback`).
 
 ## 8. On landing
 
@@ -545,3 +656,12 @@ Steps 2b and 3:
 - `gates.md`: `just gc-gen-check`, `just gc-trigger-check` and `just gc-adapt-check` arms.
 - BACKLOG: the cache-like long-running workload the A/B set lacks; closes "GC generational step"
   (stage 2, `gc-generational-v0.md` §14.6, is done).
+
+Step 4:
+- `compiler-internals.md` §Non-moving GC: per-region lists, address-ordered allocation and release
+  in minors; the young-only sweep paragraph's `sweep=young|full` marker.
+- `development.md`: the `SPROUT_DEBUG_GC` row's minor marker.
+- `gates.md`: `just gc-gen-check`'s region-list runs and `*_nostress` programs.
+
+Step 6, for step 4's switch: `sprout_gc_young_sweep_ok`, the staged build, and the
+`fl_push_staged` warning in the comment above `sprout_vec_release_inline_tail`.

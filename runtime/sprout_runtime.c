@@ -687,7 +687,8 @@ static void sprout_gc_log_cycle(
   if (!g_debug_gc_enabled) return;
   /* walked= and free= go last: bench/gc_pause/pause_stats.py reads swept= and
      elapsed_us= as adjacent fields.  kind= follows them, and only with
-     the mode on (the default), so SPROUT_GC_MINOR=0 leaves the line unchanged. */
+     the mode on (the default), so SPROUT_GC_MINOR=0 leaves the line unchanged.
+     A minor adds sweep=young or sweep=full: which sweep it ran. */
   fprintf(
     stderr,
     "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld live=%lld roots=%lld marked=%lld alloc_since_gc=%lld swept=%lld elapsed_us=%lld arena_regions=%lld overflow_regions=%lld walked=%lld free=%lld%s\n",
@@ -961,6 +962,7 @@ typedef struct {
   double    nursery_share;       /* s: SPROUT_GC_NURSERY_SHARE, the nursery's share of the heap */
   double    nursery_survive;     /* c: the nursery outlasts c x the last minor's marked set */
   long long last_minor_marked;   /* marked count of the last MINOR (m); a major leaves it alone */
+  int       region_lists;        /* SPROUT_GC_REGION_LISTS: 1 = per-region free lists (step 2c) */
 } SproutGenState;
 static SproutGenState g_gen = { .major_every = 19, .colorless = 1, .promote_age = 3,
                                 .nursery_share = 1.0, .nursery_survive = 2.0 };
@@ -976,7 +978,9 @@ static void sprout_gc_retired_switch(const char* name, const char* message) {
  * empty, `1` is on, `0` is off, and anything else fails.  SPROUT_GC_GENCHECK,
  * SPROUT_GC_MAJOR_EVERY and SPROUT_GC_NURSERY_SHARE (a number in (0, 4]) are read only with the
  * mode on, so a bad value is ignored while it is off.  SPROUT_GC_MAJOR_EVERY=0 makes every
- * collection a major.  The retired switches fail with the mode on or off. */
+ * collection a major.  The retired switches fail with the mode on or off.
+ * SPROUT_GC_REGION_LISTS (0 or 1; 1 selects per-region free lists, docs/gc-stage2-v0.md §5.6)
+ * is read in both modes, so an A/B compares them under one allocator. */
 static void sprout_gc_gen_init(void) {
   sprout_gc_retired_switch("SPROUT_GC_PROMOTE_AGE",
     "SPROUT_GC_PROMOTE_AGE was removed: promotion age is fixed at 3");
@@ -989,6 +993,12 @@ static void sprout_gc_gen_init(void) {
   if (m == NULL || m[0] == '\0' || strcmp(m, "1") == 0) g_gen.on = 1;
   else if (strcmp(m, "0") == 0) g_gen.on = 0;
   else sprout_fail("SPROUT_GC_MINOR: expected 0 or 1");
+  const char* rl = getenv("SPROUT_GC_REGION_LISTS");
+  if (rl != NULL && rl[0] != '\0') {
+    if ((rl[0] != '0' && rl[0] != '1') || rl[1] != '\0')
+      sprout_fail("SPROUT_GC_REGION_LISTS: expected 0 or 1");
+    g_gen.region_lists = rl[0] - '0';
+  }
   if (!g_gen.on) return;
   const char* c = getenv("SPROUT_GC_GENCHECK");
   g_gen.check = (c != NULL && c[0] == '1');
@@ -1170,6 +1180,13 @@ __attribute__((destructor)) static void sprout_ap_report(void) {
   fprintf(stderr, "\n");
 }
 
+/* A region's own free lists (SPROUT_GC_REGION_LISTS=1, docs/gc-stage2-v0.md §5.6): a head per
+ * class.  No mask or count: a scan tests the head, and a released region's listed slots are
+ * its slotmap bits below bump. */
+typedef struct {
+  void*     head[SPROUT_FREELIST_CLASSES];  /* index 0 unused */
+} SproutRegionFl;
+
 typedef struct {
   char*     base;         /* malloc'd 1-MiB block (or single large object block) */
   size_t    cap;          /* bytes in block (SPROUT_REGION_SIZE or slot_bytes) */
@@ -1178,6 +1195,8 @@ typedef struct {
   long long poison_count; /* lineage corpses in this region (never released while > 0) */
   uint8_t*  slotmap;    /* 8192-byte bitmap (NULL for is_large) */
   int       is_large;   /* 1 = single large-object region */
+  int       emptied;    /* set by a young-only minor that left the region with no slot in use */
+  SproutRegionFl* fl;   /* NULL for is_large, and with SPROUT_GC_REGION_LISTS off */
   /* Young tracking, kept only with minor collections on (docs/gc-stage2-v0.md §5.3).  A bit per
    * 16-byte granule, set at allocation for a slot that is a young object and cleared by the sweep
    * that visits it.  A large region holds one object: young_count is 0 or 1, youngmap NULL. */
@@ -1441,6 +1460,131 @@ static inline void* fl_pop(size_t cls) {
   return payload;
 }
 
+static int g_fl_verify = -1;
+static int sprout_fl_verify_on(void) {
+  if (g_fl_verify < 0) {
+    const char* e = getenv("SPROUT_FL_VERIFY");
+    g_fl_verify = (e && e[0] == '1') ? 1 : 0;
+  }
+  return g_fl_verify;
+}
+
+/* Per-region lists (SPROUT_GC_REGION_LISTS=1).  Class c allocates from the lowest-address region
+ * with a free slot of class c.  g_fl_cursor[c] is the region index where the last search for c
+ * stopped: no region below it has a slot of class c (premise 9).  Every collection resets all
+ * cursors to 0, a table insert at `lo` moves every cursor >= lo up one, a removal at `i` moves
+ * every cursor > i down one, and a push below a cursor lowers it.
+ * g_fl_cur[c] caches the list block of the cursor's region, so a reuse reads one pointer:
+ * g_fl_cur[c] == (g_fl_cursor[c] < g_region_count ? g_regions[g_fl_cursor[c]].fl : NULL).
+ * Blocks are heap-allocated, so a table shift keeps a block's address; the pointer changes only
+ * when the cursor moves or the region under it is removed. */
+static size_t          g_fl_cursor[SPROUT_FREELIST_CLASSES];
+static SproutRegionFl* g_fl_cur[SPROUT_FREELIST_CLASSES];
+
+static inline SproutRegionFl* fl_block_at(size_t ri) {
+  return ri < g_region_count ? g_regions[ri].fl : NULL;
+}
+
+static inline void fl_cursors_reset(void) {
+  if (!g_gen.region_lists) return;
+  memset(g_fl_cursor, 0, sizeof(g_fl_cursor));
+  SproutRegionFl* first = fl_block_at(0);
+  for (size_t c = 1; c < SPROUT_FREELIST_CLASSES; c++) g_fl_cur[c] = first;
+}
+
+/* Push onto region r's lists; the caller has checked cls is in 1..256. */
+static inline void fl_rpush_raw(SproutRegion* r, size_t cls, void* payload) {
+  SproutRegionFl* b = r->fl;
+  memcpy(payload, &b->head[cls], sizeof(void*));  /* next-ptr in payload word 0 */
+  b->head[cls] = payload;
+  g_gc_freelist_len++;
+}
+
+/* The full sweep's push: it resets every cursor when it ends, so none is lowered here. */
+static inline void fl_rpush(SproutRegion* r, size_t cls, void* payload) {
+  if (cls < 1 || cls >= SPROUT_FREELIST_CLASSES) return;
+  fl_rpush_raw(r, cls, payload);
+}
+
+/* A push between or inside collections, where r is g_regions[ri]. */
+static inline void fl_rpush_at(SproutRegion* r, size_t ri, size_t cls, void* payload) {
+  if (cls < 1 || cls >= SPROUT_FREELIST_CLASSES) return;
+  fl_rpush_raw(r, cls, payload);
+  if (g_fl_cursor[cls] > ri) {
+    g_fl_cursor[cls] = ri;
+    g_fl_cur[cls] = r->fl;
+  }
+}
+
+/* The cached block of cls is the cursor region's (the invariant above). */
+__attribute__((noinline, cold))
+static void fl_verify_cur_ptr(size_t cls) {
+  if (g_fl_cursor[cls] > g_region_count || g_fl_cur[cls] != fl_block_at(g_fl_cursor[cls])) {
+    fprintf(stderr,
+            "[sprout] FL_VERIFY cycle=%lld class %zu: cached block %p is not the block of cursor "
+            "region %zu (of %zu)\n",
+            g_gc_cycle_count, cls, (void*)g_fl_cur[cls], g_fl_cursor[cls], g_region_count);
+    abort();
+  }
+}
+
+/* Premise 9, under SPROUT_FL_VERIFY=1: no region below `upto` has a slot of class cls; and the
+ * cached block of cls is the cursor region's. */
+__attribute__((noinline, cold))
+static void fl_verify_cursor(size_t cls, size_t upto) {
+  if (!sprout_fl_verify_on()) return;
+  fl_verify_cur_ptr(cls);
+  for (size_t rj = 0; rj < upto; rj++) {
+    const SproutRegionFl* b = g_regions[rj].fl;
+    if (b != NULL && b->head[cls] != NULL) {
+      fprintf(stderr,
+              "[sprout] FL_VERIFY cycle=%lld class %zu: region %zu holds a free slot below the "
+              "cursor %zu (a push did not lower it)\n",
+              g_gc_cycle_count, cls, rj, upto);
+      abort();
+    }
+  }
+}
+
+/* The cursor region lists no slot of cls (or there is none): scan on from the next region, move
+ * the cursor and its cached block there, and pop.  NULL, with the cursor at the end of the table,
+ * when no region lists the class.  The popped slot's region is g_regions[g_fl_cursor[cls]]. */
+__attribute__((noinline))
+static void* fl_region_pop_slow(size_t cls) {
+  size_t ri = g_fl_cursor[cls];
+  if (ri < g_region_count) {
+    for (ri++; ri < g_region_count; ri++) {
+      const SproutRegionFl* b = g_regions[ri].fl;
+      if (b != NULL && b->head[cls] != NULL) break;
+    }
+  }
+  g_fl_cursor[cls] = ri;
+  g_fl_cur[cls] = fl_block_at(ri);
+  if (__builtin_expect(g_fl_verify != 0, 0)) fl_verify_cursor(cls, ri);
+  if (ri == g_region_count) return NULL;
+  SproutRegionFl* b = g_fl_cur[cls];
+  void* payload = b->head[cls];
+  void* next;
+  memcpy(&next, payload, sizeof(void*));
+  b->head[cls] = next;
+  g_gc_freelist_len--;
+  return payload;
+}
+
+/* Pop the head of the cursor region's list for cls, else take the slow path. */
+static inline void* fl_region_pop(size_t cls) {
+  SproutRegionFl* b = g_fl_cur[cls];
+  void* payload;
+  if (b != NULL && (payload = b->head[cls]) != NULL) {
+    void* next;
+    memcpy(&next, payload, sizeof(void*));
+    b->head[cls] = next;
+    g_gc_freelist_len--;
+    return payload;
+  }
+  return fl_region_pop_slow(cls);
+}
+
 /* Round up to next multiple of 16. */
 static inline size_t round16(size_t n) {
   return (n + 15u) & ~(size_t)15u;
@@ -1499,6 +1643,10 @@ static void region_table_insert(SproutRegion r) {
   g_regions[lo] = r;
   g_region_count++;
   arena_reindex_from(lo);   /* indices at and above `lo` just shifted up by one */
+  /* A cursor that shifts keeps its region, so its cached block stays right. */
+  if (g_gen.region_lists)
+    for (size_t c = 1; c < SPROUT_FREELIST_CLASSES; c++)
+      if (g_fl_cursor[c] >= lo) g_fl_cursor[c]++;
   /* Widen the global bounds to cover this region.  Single choke point: both the
    * normal and large-object paths reach the table through here. */
   if (r.base != NULL) {
@@ -1519,6 +1667,12 @@ static void region_table_remove(size_t i) {
   memmove(&g_regions[i], &g_regions[i + 1], (g_region_count - i - 1) * sizeof(SproutRegion));
   g_region_count--;
   arena_reindex_from(i);   /* indices above `i` just shifted down by one */
+  /* A cursor above i shifts with its region; one at i now sits on the next region. */
+  if (g_gen.region_lists)
+    for (size_t c = 1; c < SPROUT_FREELIST_CLASSES; c++) {
+      if (g_fl_cursor[c] > i) g_fl_cursor[c]--;
+      else if (g_fl_cursor[c] == i) g_fl_cur[c] = fl_block_at(i);
+    }
 }
 
 /* Open a fresh 1-MiB region and append it to the table. */
@@ -1530,11 +1684,13 @@ static SproutRegion* open_new_region(void) {
   if (base == NULL) sprout_fail("open_new_region: out of memory");
   uint8_t* slotmap = (uint8_t*)calloc(SPROUT_SLOTMAP_BYTES, 1);
   uint64_t* youngmap = (uint64_t*)calloc(SPROUT_SLOTMAP_BYTES, 1);
+  SproutRegionFl* fl = g_gen.region_lists ? (SproutRegionFl*)calloc(1, sizeof(SproutRegionFl)) : NULL;
   /* base may be an arena chunk, which must NOT be passed to free(). */
-  if (slotmap == NULL || youngmap == NULL) {
+  if (slotmap == NULL || youngmap == NULL || (g_gen.region_lists && fl == NULL)) {
     if (arena_contains(base)) arena_chunk_release(base); else free(base);
     free(slotmap);
     free(youngmap);
+    free(fl);
     sprout_fail("open_new_region: out of memory for slotmap");
   }
   SproutRegion r;
@@ -1545,6 +1701,8 @@ static SproutRegion* open_new_region(void) {
   r.poison_count = 0;
   r.slotmap = slotmap;
   r.is_large = 0;
+  r.emptied = 0;
+  r.fl = fl;
   r.youngmap = youngmap;
   r.young_count = 0;
   r.old_count = 0;
@@ -1559,6 +1717,33 @@ static SproutRegion* open_new_region(void) {
   }
   g_open_region_hint = lo;
   return &g_regions[lo];
+}
+
+/* Slotmap bits set below `nbits`. */
+static long long slotmap_count_below(const SproutRegion* r, size_t nbits) {
+  long long n = 0;
+  size_t i = 0;
+  for (; i + 64 <= nbits; i += 64) {
+    uint64_t w;
+    memcpy(&w, r->slotmap + i / 8, 8);
+    n += __builtin_popcountll(w);
+  }
+  for (; i < nbits; i++) n += slotmap_test(r, i);
+  return n;
+}
+
+/* Release the ordinary region at index ri: its memory, maps and list block.  With region lists
+ * the region has no live and no poisoned slot, so every slot below bump is FREE and listed, and
+ * they leave the free count.  An arena chunk is recycled, not freed (free() on a non-malloc
+ * pointer is undefined); madvise inside arena_chunk_release still drops the physical pages. */
+static void region_release_ordinary(size_t ri) {
+  SproutRegion* r = &g_regions[ri];
+  if (r->fl != NULL) g_gc_freelist_len -= slotmap_count_below(r, r->bump / SPROUT_SLOT_GRAN);
+  if (arena_contains(r->base)) arena_chunk_release(r->base); else free(r->base);
+  free(r->slotmap);
+  free(r->youngmap);
+  free(r->fl);
+  region_table_remove(ri);
 }
 
 /* Address → region, in two parts.
@@ -1705,6 +1890,8 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
     r.poison_count = 0;
     r.slotmap = NULL;
     r.is_large = 1;
+    r.emptied = 0;
+    r.fl = NULL;
     r.youngmap = NULL;
     r.young_count = g_gen.on ? 1 : 0;
     r.old_count = 0;
@@ -1717,15 +1904,18 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
   }
   size_t cls = needed_slot / SPROUT_SLOT_GRAN;  /* class 1..256 */
   if (cls < 1) cls = 1;
-  /* Try freelist. */
-  if (g_freelist[cls] != NULL) {
-    void* payload = fl_pop(cls);
+  /* Try freelist: a region's own (the popped slot's region is known) or the global one. */
+  void* payload = NULL;
+  if (g_gen.region_lists) payload = fl_region_pop(cls);
+  else if (g_freelist[cls] != NULL) payload = fl_pop(cls);
+  if (payload != NULL) {
     /* Slotmap bit stayed set while the slot was FREE (sprout_heap_lookup
      * rejects FREE by header kind), so reuse is header-write only. */
     sprout_hdr_write(payload, kind, aux);
     SPROUT_PROF_HOT(g_prof_freelist_hits++);
     if (g_gen.on) {
-      SproutRegion* fr = region_find(payload);
+      /* A per-region pop came from the cursor's region. */
+      SproutRegion* fr = g_gen.region_lists ? &g_regions[g_fl_cursor[cls]] : region_find(payload);
       youngmap_set(fr, (size_t)((char*)payload - 8 - fr->base) / SPROUT_SLOT_GRAN);
       fr->young_count++;
     }
@@ -2337,7 +2527,8 @@ static long long* sprout_realloc_vector_data(long long* data, size_t count, cons
  * has to understand it.  Left in place the tail would be dead for the object's
  * lifetime — 4064 bytes of it for `mutvec_new(508, v)` followed by a push.
  *
- * The tail goes straight onto the live lists (fl_push_live).  The full sweep
+ * The tail goes straight onto the live lists (fl_push_live, or its region's under
+ * SPROUT_GC_REGION_LISTS, which lowers the class cursor to it).  The full sweep
  * memsets and rebuilds the lists, which re-lists it from the walk; a young-only
  * minor keeps them, so this push is the only one the tail gets.  Its youngmap
  * bit stays clear, so no minor frees it.  It must NOT go through fl_push_staged:
@@ -2381,7 +2572,8 @@ static void sprout_vec_release_inline_tail(VectorVal* v) {
    * allocated here as a first allocation, hiding that it aliases a vector's
    * old inline area — the aliasing that tool exists to find. */
   if (g_gc_stress == 1 || sprout_gc_lineage_on()) sprout_gc_trace_free(payload);
-  fl_push_live(rest / SPROUT_SLOT_GRAN, payload);
+  if (g_gen.region_lists) fl_rpush_at(r, (size_t)(r - g_regions), rest / SPROUT_SLOT_GRAN, payload);
+  else                    fl_push_live(rest / SPROUT_SLOT_GRAN, payload);
 }
 
 /* Declared here for the two JSON/file readers below, which build a vector by
@@ -3110,17 +3302,88 @@ static size_t         g_fl_va_cap = 0;
 static SproutFlEntry* g_fl_vb = NULL;
 static size_t         g_fl_vb_cap = 0;
 
-static int g_fl_verify = -1;
-static int sprout_fl_verify_on(void) {
-  if (g_fl_verify < 0) {
-    const char* e = getenv("SPROUT_FL_VERIFY");
-    g_fl_verify = (e && e[0] == '1') ? 1 : 0;
+__attribute__((noreturn, cold, noinline))
+static void sprout_fl_verify_fail(const char* what, size_t ri, size_t cls, void* p) {
+  fprintf(stderr, "[sprout] FL_VERIFY cycle=%lld region-lists: %s (region=%zu class=%zu entry=%p)\n",
+          g_gc_cycle_count, what, ri, cls, p);
+  fflush(stderr);
+  abort();
+}
+
+/* SPROUT_FL_VERIFY=1 with SPROUT_GC_REGION_LISTS=1 (premises 4 and 8).  Per ordinary region:
+ * every list entry is a FREE slot of that region of the list's class and appears once, every
+ * FREE slot of the region is listed.  The global lists are empty, g_gc_freelist_len equals the
+ * entries over all regions (so the FREE slots a full walk finds), and each class's cached
+ * cursor block is its cursor region's.  An entry is
+ * validated before it is dereferenced and a cycle ends at the first repeat, so a dangling or
+ * cyclic next-pointer reports instead of faulting or hanging. */
+static void sprout_fl_verify_region_lists(void) {
+  static uint8_t* listed = NULL;
+  if (listed == NULL) {
+    listed = (uint8_t*)malloc(SPROUT_SLOTMAP_BYTES);
+    if (listed == NULL) sprout_fail("SPROUT_FL_VERIFY: out of memory");
   }
-  return g_fl_verify;
+  for (size_t cls = 1; cls < SPROUT_FREELIST_CLASSES; cls++) {
+    if (g_freelist[cls] != NULL)
+      sprout_fl_verify_fail("global list is not empty", 0, cls, g_freelist[cls]);
+    fl_verify_cur_ptr(cls);
+  }
+  long long total = 0;
+  for (size_t ri = 0; ri < g_region_count; ri++) {
+    SproutRegion* r = &g_regions[ri];
+    if (r->is_large) {
+      if (r->fl != NULL) sprout_fl_verify_fail("large region has a list block", ri, 0, r->base);
+      continue;
+    }
+    const SproutRegionFl* b = r->fl;
+    if (b == NULL) sprout_fl_verify_fail("ordinary region has no list block", ri, 0, r->base);
+    size_t nslots = r->bump / SPROUT_SLOT_GRAN;
+    memset(listed, 0, (nslots + 7) / 8);
+    long long entries = 0;
+    for (size_t cls = 1; cls < SPROUT_FREELIST_CLASSES; cls++) {
+      void* p = b->head[cls];
+      while (p != NULL) {
+        uintptr_t lo = (uintptr_t)r->base + 8;
+        if ((uintptr_t)p < lo || (uintptr_t)p >= (uintptr_t)r->base + r->bump)
+          sprout_fl_verify_fail("entry is outside its region", ri, cls, p);
+        size_t idx = ((uintptr_t)p - lo) / SPROUT_SLOT_GRAN;
+        if (((uintptr_t)p - lo) % SPROUT_SLOT_GRAN != 0 || !slotmap_test(r, idx))
+          sprout_fl_verify_fail("entry is not a slot start", ri, cls, p);
+        uint64_t h;
+        memcpy(&h, (char*)p - 8, 8);
+        if ((h & 0xFF) != SPROUT_HEAP_FREE || sprout_slot_step(h) / SPROUT_SLOT_GRAN != cls)
+          sprout_fl_verify_fail("entry is not a FREE slot of the list's class", ri, cls, p);
+        if ((listed[idx / 8] >> (idx % 8)) & 1)
+          sprout_fl_verify_fail("slot is listed twice", ri, cls, p);
+        listed[idx / 8] |= (uint8_t)(1u << (idx % 8));
+        entries++;
+        memcpy(&p, p, sizeof(void*));
+      }
+    }
+    size_t off = 0;
+    while (off < r->bump) {
+      uint64_t h;
+      memcpy(&h, r->base + off, 8);
+      size_t ssize = sprout_slot_step(h);
+      size_t cls = ssize / SPROUT_SLOT_GRAN;
+      size_t idx = off / SPROUT_SLOT_GRAN;
+      if ((h & 0xFF) == SPROUT_HEAP_FREE && cls >= 1 && cls < SPROUT_FREELIST_CLASSES
+          && !((listed[idx / 8] >> (idx % 8)) & 1))
+        sprout_fl_verify_fail("FREE slot is on no list of its region", ri, cls, r->base + off + 8);
+      off += ssize;
+    }
+    total += entries;
+  }
+  if (total != g_gc_freelist_len) {
+    fprintf(stderr, "[sprout] FL_VERIFY cycle=%lld region-lists: g_gc_freelist_len=%lld, regions list %lld entries\n",
+            g_gc_cycle_count, g_gc_freelist_len, total);
+    abort();
+  }
 }
 
 static void sprout_fl_verify_against_full_walk(void) {
   if (!sprout_fl_verify_on()) return;
+  if (g_gen.region_lists) { sprout_fl_verify_region_lists(); return; }
 
   /* B (the oracle) is built FIRST: every FREE slot of every surviving region.
      Its size then bounds how far the staged chains may legitimately be walked,
@@ -3381,6 +3644,7 @@ static void sprout_gc_sweep(int keep_color) {
   int lineage_on = sprout_gc_lineage_on();
   int ageprof_on = sprout_gc_ageprof_on();
   int hdrcheck_on = sprout_gc_hdrcheck_on();
+  const int rl = g_gen.region_lists;
   if (ageprof_on) {
     /* live_by_age describes the CURRENT cycle only, so it resets here; the
      * marked/freed totals accumulate across the whole run. */
@@ -3406,7 +3670,10 @@ static void sprout_gc_sweep(int keep_color) {
     long long region_poison = 0;
     long long region_walked = 0;
     size_t off = 0;
-    fl_region_begin();
+    /* With per-region lists the region rebuilds its own, and a released region frees its block
+       and count, so there is no staged build to roll back. */
+    if (rl) memset(r->fl, 0, sizeof(*r->fl));
+    else    fl_region_begin();
     if (g_gen.on) memset(r->youngmap, 0, SPROUT_SLOTMAP_BYTES);
     while (off < r->bump) {
       region_walked++;
@@ -3417,7 +3684,8 @@ static void sprout_gc_sweep(int keep_color) {
       if (kind_bits == SPROUT_HEAP_FREE) {
         /* Freed in an EARLIER cycle and never reused: still belongs on the
            freelist, which is rebuilt from scratch each sweep. */
-        fl_push_staged(ssize / SPROUT_SLOT_GRAN, r->base + off + 8);
+        if (rl) fl_rpush(r, ssize / SPROUT_SLOT_GRAN, r->base + off + 8);
+        else    fl_push_staged(ssize / SPROUT_SLOT_GRAN, r->base + off + 8);
         off += ssize;
         continue;
       }
@@ -3453,10 +3721,12 @@ static void sprout_gc_sweep(int keep_color) {
           g_ap_freed_total++;
           if (sprout_hdr_age(h) == 0) g_ap_freed_age0++;
         }
-        if (sprout_gc_free_dead_slot(r->base + off, h, kind, aux, ssize, lineage_on, hdrcheck_on))
-          fl_push_staged(ssize / SPROUT_SLOT_GRAN, payload);
-        else
+        if (sprout_gc_free_dead_slot(r->base + off, h, kind, aux, ssize, lineage_on, hdrcheck_on)) {
+          if (rl) fl_rpush(r, ssize / SPROUT_SLOT_GRAN, payload);
+          else    fl_push_staged(ssize / SPROUT_SLOT_GRAN, payload);
+        } else {
           region_poison++;
+        }
       }
       SPROUT_PROF_HOT(g_prof_sweep_visits++);
       off += ssize;
@@ -3477,8 +3747,10 @@ static void sprout_gc_sweep(int keep_color) {
     old_total += r->old_count;
     /* Pass 2 releases a region exactly when it has no live and no poison, so
        drop this region's staged entries in precisely that case. */
-    if (region_live == 0 && region_poison == 0) fl_region_rollback();
-    else                                        fl_region_commit();
+    if (!rl) {
+      if (region_live == 0 && region_poison == 0) fl_region_rollback();
+      else                                        fl_region_commit();
+    }
   }
   g_gen.old_count = old_total;
 
@@ -3527,14 +3799,8 @@ static void sprout_gc_sweep(int keep_color) {
       continue;
     }
     if (r->live_count == 0 && r->poison_count == 0) {
-      /* An arena chunk is recycled, not freed: free() on a non-malloc pointer is
-       * undefined.  madvise inside arena_chunk_release still drops the physical
-       * pages, so RSS falls exactly as it did when regions were malloc'd. */
-      if (arena_contains(r->base)) arena_chunk_release(r->base); else free(r->base);
-      free(r->slotmap);
-      free(r->youngmap);
       kept_normal--;
-      region_table_remove(ri);
+      region_release_ordinary(ri);
     }
   }
 
@@ -3544,6 +3810,7 @@ static void sprout_gc_sweep(int keep_color) {
     open_new_region();
   }
 
+  fl_cursors_reset();
   sprout_fl_verify_against_full_walk();
 }
 
@@ -3559,14 +3826,17 @@ static void sprout_gc_sweep(int keep_color) {
  * are listed.  The old slots are not touched, so a young bit must never outlive its object:
  * a stale bit on a FREE slot would list it a second time.
  *
- * No region is released here, since the lists interleave every region's slots and dropping
- * one region's entries would walk them.  sprout_gc_young_sweep_ok says when a full sweep must
- * run instead, which releases exactly the regions it did before. */
+ * With global lists no region is released here, since they interleave every region's slots and
+ * dropping one region's entries would walk them.  sprout_gc_young_sweep_ok says when a full sweep
+ * must run instead, which releases exactly the regions it did before.  With per-region lists
+ * (SPROUT_GC_REGION_LISTS=1) a region's list block goes with the region, so this sweep releases
+ * a region it walked and left with no slot in use, and the full-walk fallback is gone. */
 
 /* Would the full sweep's Pass 2 release an ordinary region?  It does when the region ends the
  * collection with no live and no poisoned slot: no old object, none lineage-poisoned, and no
  * young one the mark reached. */
 static int sprout_gc_young_sweep_ok(void) {
+  if (g_gen.region_lists) return 1;
   for (size_t ri = 0; ri < g_region_count; ri++) {
     const SproutRegion* r = &g_regions[ri];
     if (r->is_large) continue;
@@ -3587,8 +3857,10 @@ static void sprout_gc_sweep_young(void) {
   int lineage_on = sprout_gc_lineage_on();
   int hdrcheck_on = sprout_gc_hdrcheck_on();
   const unsigned young_below = g_gen.promote_age - 1;
+  const int rl = g_gen.region_lists;
   long long promoted = 0;
   int freed_large = 0;
+  int emptied_any = 0;
   for (size_t ri = 0; ri < g_region_count; ri++) {
     SproutRegion* r = &g_regions[ri];
     if (r->young_count == 0) continue;
@@ -3645,10 +3917,12 @@ static void sprout_gc_sweep_young(void) {
           memcpy(r->base + off, &h, 8);
         } else {
           if (g_debug_gc_enabled && sprout_hdr_age(h) >= 1) sprout_gc_census_sub(kind, aux);
-          if (sprout_gc_free_dead_slot(r->base + off, h, kind, aux, ssize, lineage_on, hdrcheck_on))
-            fl_push_live(ssize / SPROUT_SLOT_GRAN, payload);
-          else
+          if (sprout_gc_free_dead_slot(r->base + off, h, kind, aux, ssize, lineage_on, hdrcheck_on)) {
+            if (rl) fl_rpush_at(r, ri, ssize / SPROUT_SLOT_GRAN, payload);
+            else    fl_push_live(ssize / SPROUT_SLOT_GRAN, payload);
+          } else {
             region_poison++;
+          }
         }
         SPROUT_PROF_HOT(g_prof_sweep_visits++);
       } while (bits != 0);
@@ -3660,16 +3934,32 @@ static void sprout_gc_sweep_young(void) {
     r->live_count = r->old_count + r->young_count;
     r->poison_count += region_poison;
     promoted += region_old;
+    /* Only a region this walk visited can have emptied (premise 7); it is released below. */
+    if (rl && r->old_count == 0 && r->young_count == 0 && r->poison_count == 0) {
+      r->emptied = 1;
+      emptied_any = 1;
+    }
   }
   g_gen.old_count += promoted;
 
-  if (freed_large) {
+  if (freed_large || emptied_any) {
+    int kept_normal = 0;
     size_t ri = g_region_count;
     while (ri > 0) {
       ri--;
-      if (g_regions[ri].is_large && g_regions[ri].base == NULL) region_table_remove(ri);
+      SproutRegion* r = &g_regions[ri];
+      if (r->is_large) {
+        if (r->base == NULL) region_table_remove(ri);
+      } else if (r->emptied) {
+        region_release_ordinary(ri);
+      } else {
+        kept_normal++;
+      }
     }
+    /* Pass 2's rule: the bump path needs an ordinary region. */
+    if (emptied_any && kept_normal == 0) open_new_region();
   }
+  fl_cursors_reset();
   sprout_fl_verify_against_full_walk();
 }
 
@@ -3777,7 +4067,8 @@ static void sprout_gc_check_sweep(int kept_color, int young_only) {
       if (r->young_count != young) sprout_gc_check_count_fail("young count", r, r->young_count, young);
       if (r->old_count != old) sprout_gc_check_count_fail("old count", r, r->old_count, old);
     }
-    if (young_only && live == 0 && poison == 0)
+    /* An ordinary region with bump == 0 is the one the sweep opens when none is left. */
+    if (young_only && live == 0 && poison == 0 && r->bump != 0)
       sprout_gc_check_count_fail("a young-only minor left a region with no live slot", r, 0, 0);
   }
   if (kept_color && bit13 != (long long)g_gen.remembered.len)
@@ -3847,7 +4138,8 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   /* O(regions); only pay for it when the line is actually printed. */
   if (g_debug_gc_enabled) arena_recount_regions();
   sprout_gc_log_cycle(reason, heap_before, g_managed_heap_count, root_count, g_gc_marked_count, alloc_since_gc, g_debug_gc_swept - swept_before, elapsed_us, g_debug_gc_walked - walked_before,
-                    !gen_on ? "" : minor ? " kind=minor" : " kind=major");
+                    !gen_on ? "" : !minor ? " kind=major"
+                                         : young_only ? " kind=minor sweep=young" : " kind=minor sweep=full");
   /* Adaptive threshold: re-base on the LIVE set after each collection so the heap
      (hence RSS) stays proportional to live data instead of ratcheting upward
      without bound.  The previous policy only ever GREW the threshold (x
