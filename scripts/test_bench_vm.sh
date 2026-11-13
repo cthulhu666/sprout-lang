@@ -406,7 +406,7 @@ check "gc happy: leftover check ran" grep -q '^compute instances list .*--filter
 # that this script does not ship fails here, not 20 minutes into a VM run).
 tarlist="$CASE_LOG.tar"
 check "gc happy: tarball holds seed, runtime, stdlib, link script, ab.sh, summarize.py, testsupport" \
-  bash -c 'for p in bootstrap/compile_driver.ll runtime/ stdlib/ scripts/check_clang_cpr.sh scripts/link_whole_program.sh bench/gc_minor/ab.sh bench/gc_minor/summarize.py testsupport/; do grep -qx "$p" "$1" || exit 1; done' _ "$tarlist"
+  bash -c 'for p in bootstrap/compile_driver.ll runtime/ stdlib/ scripts/check_clang_cpr.sh scripts/link_whole_program.sh scripts/compile_native.sh bench/gc_minor/ab.sh bench/gc_minor/summarize.py testsupport/; do grep -qx "$p" "$1" || exit 1; done' _ "$tarlist"
 check "gc happy: tarball holds the digit data the workload reads" \
   bash -c 'grep -qx examples/digit_recognizer/optdigits_train.txt "$1" && grep -qx examples/digit_recognizer/optdigits_test.txt "$1"' _ "$tarlist"
 check "gc happy: tarball has no docs/ entry" bash -c '[ -s "$1" ] && ! grep -q "^docs/" "$1"' _ "$tarlist"
@@ -458,6 +458,14 @@ gc_refused badn "-n must be" --gc HEAD "K1:X=1" -n 0
 gc_refused badoption "unknown ab.sh option" --gc HEAD "K1:X=1" -z
 gc_refused strayarg "unexpected ab.sh argument" --gc HEAD "K1:X=1" -n 2 stray
 gc_refused badref "no-such-ref-xyz" --gc no-such-ref-xyz "K1:X=1"
+gc_refused badsetting "bad -s 'sometimes'" --gc HEAD "K1:X=1" -s sometimes
+gc_refused badworkload "unknown workload 'nosuch'" --gc HEAD "K1:X=1" -w nqueens,nosuch
+# -s and -w values that ab.sh accepts still run.
+CASE_REFS=(--gc HEAD "K1:X=1" -s default -w nqueens,mutvec_int)
+run_case gc_valid_sw
+{ [ "$CASE_RC" -eq 0 ] && [ "$(calls_of 'instances create')" -eq 1 ]; } \
+  && ok "gc accepts -s default -w nqueens,mutvec_int" \
+  || fail "gc accepts -s default -w nqueens,mutvec_int (rc=$CASE_RC)"
 
 # galaxy_client is not named: the default workload set reaches the VM, where ab.sh drops it
 # (UNSUNS and CATALOG point nowhere). The remote script sets both.
@@ -499,7 +507,7 @@ mkdir -p "$FX/scripts"
 cp "$SCRIPT" "$FX/scripts/bench_vm.sh"
 fx_write() { mkdir -p "$FX/$(dirname "$1")"; echo "$2" > "$FX/$1"; }
 for p in bootstrap/compile_driver.ll runtime/a.c stdlib/a.sprout scripts/check_clang_cpr.sh \
-    scripts/link_whole_program.sh testsupport/a.sprout tests/stdlib/test_ir_codegen_match.spr \
+    scripts/link_whole_program.sh scripts/compile_native.sh testsupport/a.sprout tests/stdlib/test_ir_codegen_match.spr \
     examples/nqueens.sprout examples/astar.sprout examples/digit_recognizer/a.txt \
     bench/gc_roots/a bench/http_log_middleware/a bench/math_transcendental/a; do
   fx_write "$p" x
