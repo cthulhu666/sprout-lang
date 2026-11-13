@@ -4421,6 +4421,7 @@ gc-gen-check: bootstrap-from-seed
       || { echo "gc-gen-check: compile failed: $f" >&2; cat "$TMPD/$name.err" >&2; failed=1; continue; }
     clang "$TMPD/$name.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$name.bin" 2>"$TMPD/$name.err" \
       || { echo "gc-gen-check: link failed: $f" >&2; cat "$TMPD/$name.err" >&2; failed=1; continue; }
+    ok=1
     for mode in "SPROUT_GC_MINOR=1" \
                 "SPROUT_GC_MINOR=1 SPROUT_GC_REGION_LISTS=1 SPROUT_FL_VERIFY=1" \
                 "SPROUT_GC_MINOR=0 SPROUT_GC_REGION_LISTS=1 SPROUT_FL_VERIFY=1"; do
@@ -4432,10 +4433,10 @@ gc-gen-check: bootstrap-from-seed
         echo "  expected: $(cat "$want_file")" >&2
         echo "  actual:   $(cat "$TMPD/$name.mode.out")" >&2
         grep 'GENCHECK\|FL_VERIFY' "$TMPD/$name.mode.err" | head -4 >&2
-        failed=1
+        failed=1; ok=0
       fi
     done
-    echo "  $name: ok"
+    [ "$ok" = 1 ] && echo "  $name: ok"
   done
   clang tests/c_runtime/analysis_strings.c runtime/sprout_scheduler.c runtime/sprout_poll.c -O1 -g -D_GNU_SOURCE {{clang_extra}} \
       -o "$TMPD/analysis.bin" 2>"$TMPD/analysis.err" \

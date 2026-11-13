@@ -513,6 +513,17 @@ allocation. Requirements, from what the eager sweep does today:
   stays allocated until its region is swept;
 - census counts, lineage poisoning, HDRCHECK and the free count settled per region at sweep time.
 
+Step 4's allocation path, which this step rewrites, leaves four costs to settle here:
+
+- a class whose lists are exhausted still calls `fl_region_pop_slow` on every allocation; an
+  inline test of the cursor against `g_region_count` would skip it;
+- `sprout_gc_sweep_young` lowers cursors on each push (`fl_rpush_at`) and then resets them all,
+  so the next allocation of each class rescans from region 0;
+- a minor that empties every ordinary region releases them all and opens one; resetting one in
+  place would skip the `madvise`, the map allocations and the page faults;
+- `SproutRegion.emptied` carries a flag between two loops of the young sweep, where the release
+  loop could recompute it from the counts.
+
 ## 6. Premises
 
 Each premise has a test or a check that fails when it breaks.
