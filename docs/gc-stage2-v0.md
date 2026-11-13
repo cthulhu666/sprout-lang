@@ -524,6 +524,11 @@ Step 4's allocation path, which this step rewrites, leaves four costs to settle 
 - `SproutRegion.emptied` carries a flag between two loops of the young sweep, where the release
   loop could recompute it from the counts.
 
+It also leaves three copies to fold into the rewritten path: the young sweep's release loop
+repeats the full sweep's Pass 2; the list pop is written out in `fl_pop`, `fl_region_pop` and
+`fl_region_pop_slow`; and the choice between per-region and global lists is made at each push and
+pop site instead of inside the list layer.
+
 ## 6. Premises
 
 Each premise has a test or a check that fails when it breaks.

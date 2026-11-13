@@ -1091,8 +1091,8 @@ unremembered object points at no young one; before a major the set is empty and 
 bit 13). The nursery share is not varied: under `SPROUT_GC_STRESS` every allocation collects, so
 the share is never read, and without it these programs run no minor at any share.
 `gc-adapt-check` covers the share. K and c have no switch; `tests/c_runtime/promote_age.c`
-sets them directly. Two more runs, with `SPROUT_GC_REGION_LISTS=1` (the second adds
-`SPROUT_FL_VERIFY=1`), read the `SPROUT_DEBUG_GC` cycle lines: every `kind=minor sweep=full`
+sets them directly. One more run, with `SPROUT_GC_REGION_LISTS=1` and `SPROUT_FL_VERIFY=1`,
+reads the `SPROUT_DEBUG_GC` cycle lines: every `kind=minor sweep=full`
 line must be followed by a `kind=major` one, because a minor walks everything only before a
 major ([gc-stage2-v0.md](gc-stage2-v0.md) §5.4, §5.6). Without per-region lists it would fail on
 `region_empty_minor` and `all_regions_empty_minor`, whose minors empty a region and so take the

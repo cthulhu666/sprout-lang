@@ -21,8 +21,9 @@ CFG_VARS="BENCH_PROJECT BENCH_ACCOUNT BENCH_ZONE BENCH_MACHINE BENCH_IMAGE_FAMIL
 ARCHIVE_PATHS=(bootstrap/compile_driver.ll runtime stdlib scripts/check_clang_cpr.sh)
 # --gc: the same, plus what ab.sh needs to build and run its workloads (the compiler bundle for
 # selfcompile, the sources, the digit data, the testsupport package of compiler_test) and the
-# whole-program link script. galaxy_client is not shipped: it needs raylib and a display.
-GC_ARCHIVE_PATHS=("${ARCHIVE_PATHS[@]}" scripts/link_whole_program.sh testsupport
+# whole-program link script and its compile wrapper. galaxy_client is not shipped: it needs raylib
+# and a display.
+GC_ARCHIVE_PATHS=("${ARCHIVE_PATHS[@]}" scripts/link_whole_program.sh scripts/compile_native.sh testsupport
   tests/stdlib/test_ir_codegen_match.spr examples/nqueens.sprout examples/astar.sprout
   examples/digit_recognizer bench/gc_minor bench/gc_roots bench/http_log_middleware
   bench/math_transcendental)
@@ -34,7 +35,9 @@ usage() {
 
 # Rejects, before any gcloud call, what ab.sh would reject (or mishandle) only after the VM is
 # built: a malformed -a arm, an unknown option, -o/-B (the output dir is fixed, the VM is fresh),
-# and galaxy_client in -w.
+# a bad -n, a -s outside fixed|default|both|none, and galaxy_client in -w. The -w names are
+# collected in GC_WLS; the ref's ab.sh knows the valid ones, so they are checked once it is read.
+GC_WLS=""
 check_gc_args() { # check_gc_args "<arms>" [ab.sh args...]
   local arms="$1" part label opt wl
   shift
@@ -65,10 +68,16 @@ check_gc_args() { # check_gc_args "<arms>" [ab.sh args...]
             echo "bench_vm: galaxy_client needs a display and raylib; the VM has neither (drop it from -w)" >&2
             exit 2
           fi
+          GC_WLS="$GC_WLS $wl"
         done ;;
+      s)
+        case "$OPTARG" in
+          fixed|default|both|none) ;;
+          *) echo "bench_vm: bad -s '$OPTARG': expected fixed|default|both|none" >&2; exit 2 ;;
+        esac ;;
       a) echo "bench_vm: pass the arms as the argument after <ref>, not with -a" >&2; exit 2 ;;
       o|B) echo "bench_vm: -$opt is fixed on the VM (fresh output dir); results are copied back" >&2; exit 2 ;;
-      s|e) ;;
+      e) ;;
       *) echo "bench_vm: unknown ab.sh option" >&2; exit 2 ;;
     esac
   done
@@ -248,6 +257,13 @@ if [ "$MODE" = gc ]; then
     echo "bench_vm: ref '$GC_REF' has a macOS-only bench/gc_minor/ab.sh; use a ref that includes the Linux-capable one" >&2
     exit 2
   fi
+  known="$(sed -n 's/^ALL_WORKLOADS="\(.*\)"$/\1/p' "$TMP/ab.sh")"
+  for w in $GC_WLS; do
+    case " $known " in
+      *" $w "*) ;;
+      *) echo "bench_vm: unknown workload '$w' in -w (ab.sh knows: $known)" >&2; exit 2 ;;
+    esac
+  done
   NAME_PREFIX=sprout-bench-gc
 else
   git -C "$ROOT" archive --format=tar -o "$TMP/base.tar" "$BASE_SHA" "${ARCHIVE_PATHS[@]}"

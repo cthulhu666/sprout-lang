@@ -225,15 +225,8 @@ build_galaxy() { # mirrors uncharted-suns' `run-gfx`, minus the run; SPROUT_ROOT
   rm -f "$OUT/galaxy.ll"
 }
 
-# What `just compile-native <src> <out>` does, without just or mise: emit IR with the stage-1
-# compiler, then link it whole-program with the runtime.
-compile_native() {
-  local ll="$OUT/compile_native.$$.ll"
-  "$COMPILER" --emit-ir "$REPO/stdlib" --package-root "$REPO" "$1" > "$ll" || { rm -f "$ll"; return 1; }
-  # shellcheck disable=SC2086
-  bash "$REPO/scripts/link_whole_program.sh" "$ll" "$2" $CLANG_EXTRA || { rm -f "$ll"; return 1; }
-  rm -f "$ll"
-}
+# What `just compile-native <src> <out>` runs, without just or mise.
+compile_native() { bash "$REPO/scripts/compile_native.sh" "$1" "$2"; }
 
 build_all() {
   local w

@@ -93,15 +93,16 @@ just bench-vm-gc HEAD "s50:SPROUT_GC_NURSERY_SHARE=0.5,SPROUT_GC_REGION_LISTS=1;
 Config, VM flags, TTL, trap and leftover check are the compiler mode's. Differences:
 
 - **Shipped from the ref's commit:** the seed, `runtime/`, `stdlib/`, `testsupport/`,
-  `scripts/check_clang_cpr.sh`, `scripts/link_whole_program.sh`, `bench/gc_minor`, `bench/gc_roots`,
+  `scripts/check_clang_cpr.sh`, `scripts/link_whole_program.sh`, `scripts/compile_native.sh`,
+  `bench/gc_minor`, `bench/gc_roots`,
   `bench/http_log_middleware`, `bench/math_transcendental`, `examples/{nqueens,astar}.sprout`,
   `examples/digit_recognizer` (it reads its data files) and
   `tests/stdlib/test_ir_codegen_match.spr`. `scripts/test_bench_vm.sh` checks that every `W_SRC` in
   ab.sh is in that list.
 - **On the VM:** apt installs `clang llvm time python3 perl`; the stage-1 compiler is built from
   the ref's seed by the same steps as the compiler mode (`scripts/bench_vm_remote.sh --gc`). No
-  `just` or `mise`: ab.sh builds each workload with the stage-1 compiler and
-  `scripts/link_whole_program.sh` directly, which is what `just compile-native` does.
+  `just` or `mise`: ab.sh builds each workload with the stage-1 compiler through
+  `scripts/compile_native.sh`, which is what `just compile-native` runs.
 - **ab.sh runs on Linux** (`/usr/bin/time -v`, `/proc/loadavg`, `sha1sum` when there is no
   `shasum`). The ref must contain that version: a ref whose ab.sh still says "macOS only" is
   refused before any `gcloud` call.

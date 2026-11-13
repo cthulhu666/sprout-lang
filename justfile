@@ -395,10 +395,7 @@ compile file out: bootstrap-from-seed
 compile-native file out: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  TMP_LL="/tmp/sprout_compile_$$.ll"
-  trap 'rm -f "$TMP_LL"' EXIT
-  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" {{quote(file)}} > "$TMP_LL"
-  bash scripts/link_whole_program.sh "$TMP_LL" {{quote(out)}} {{clang_extra}}
+  bash scripts/compile_native.sh {{quote(file)}} {{quote(out)}}
 
 # Compile {{file}} to a debug binary at {{out}} using stage-1 (DWARF, no optimisation).
 # Use: just build-debug path/to/prog.spr ./prog_dbg && lldb ./prog_dbg
@@ -4329,6 +4326,17 @@ gc-gen-check: bootstrap-from-seed
     clang -c "$rtsrc" -O2 {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
       || { echo "gc-gen-check: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
   done
+  build_one() { # build_one <src> <name>: compile and link to $TMPD/<name>.bin; nonzero on failure
+    "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$1" > "$TMPD/$2.ll" 2>"$TMPD/$2.err" \
+      || { echo "gc-gen-check: compile failed: $1" >&2; cat "$TMPD/$2.err" >&2; return 1; }
+    clang "$TMPD/$2.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$2.bin" 2>"$TMPD/$2.err" \
+      || { echo "gc-gen-check: link failed: $1" >&2; cat "$TMPD/$2.err" >&2; return 1; }
+  }
+  report_mismatch() { # report_mismatch <name> <description> <actual-file>
+    echo "gc-gen-check: $1 $2" >&2
+    echo "  expected: $(cat "tests/gc_gen/$1.out")" >&2
+    echo "  actual:   $(cat "$3")" >&2
+  }
   failed=0
   min_minors=20  # fewer minor collections than this means the barrier was not exercised
   for f in tests/gc_gen/*.spr; do
@@ -4336,17 +4344,12 @@ gc-gen-check: bootstrap-from-seed
     case "$name" in *_nostress) continue ;; esac  # run below, without STRESS
     want_file="tests/gc_gen/$name.out"
     [ -f "$want_file" ] || { echo "gc-gen-check: missing $want_file (the expected stdout of $f)" >&2; failed=1; continue; }
-    "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$f" > "$TMPD/$name.ll" 2>"$TMPD/$name.err" \
-      || { echo "gc-gen-check: compile failed: $f" >&2; cat "$TMPD/$name.err" >&2; failed=1; continue; }
-    clang "$TMPD/$name.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$name.bin" 2>"$TMPD/$name.err" \
-      || { echo "gc-gen-check: link failed: $f" >&2; cat "$TMPD/$name.err" >&2; failed=1; continue; }
+    build_one "$f" "$name" || { failed=1; continue; }
     SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 SPROUT_DEBUG_GC=1 \
       "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.gc"
     rc=$?
     if [ "$rc" != 0 ] || ! cmp -s "$want_file" "$TMPD/$name.out"; then
-      echo "gc-gen-check: $name failed under MINOR=1 GENCHECK=1 STRESS=1 (rc=$rc)" >&2
-      echo "  expected: $(cat "$want_file")" >&2
-      echo "  actual:   $(cat "$TMPD/$name.out")" >&2
+      report_mismatch "$name" "failed under MINOR=1 GENCHECK=1 STRESS=1 (rc=$rc)" "$TMPD/$name.out"
       grep -A4 'GENCHECK' "$TMPD/$name.gc" | head -8 >&2
       failed=1; continue
     fi
@@ -4363,29 +4366,23 @@ gc-gen-check: bootstrap-from-seed
         "$TMPD/$name.bin" > "$TMPD/$name.mode.out" 2>"$TMPD/$name.mode.err"
       rc=$?
       if [ "$rc" != 0 ] || ! cmp -s "$want_file" "$TMPD/$name.mode.out"; then
-        echo "gc-gen-check: $name failed under MINOR=1 GENCHECK=1 STRESS=1 $mode (rc=$rc)" >&2
-        echo "  expected: $(cat "$want_file")" >&2
-        echo "  actual:   $(cat "$TMPD/$name.mode.out")" >&2
+        report_mismatch "$name" "failed under MINOR=1 GENCHECK=1 STRESS=1 $mode (rc=$rc)" "$TMPD/$name.mode.out"
         grep -A4 'GENCHECK\|FL_VERIFY' "$TMPD/$name.mode.err" | head -8 >&2
         failed=1
       fi
     done
     # Per-region free lists (docs/gc-stage2-v0.md §5.6): a minor walks everything only right before
     # a major (§5.4), so a `kind=minor sweep=full` line must be followed by `kind=major`.
-    rl="SPROUT_GC_REGION_LISTS=1 SPROUT_DEBUG_GC=1"
-    for mode in "$rl" "$rl SPROUT_FL_VERIFY=1"; do
-      # shellcheck disable=SC2086
-      env $mode SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 \
-        "$TMPD/$name.bin" > "$TMPD/$name.mode.out" 2>"$TMPD/$name.mode.err"
-      rc=$?
-      if [ "$rc" != 0 ] || ! cmp -s "$want_file" "$TMPD/$name.mode.out"; then
-        echo "gc-gen-check: $name failed under MINOR=1 GENCHECK=1 STRESS=1 $mode (rc=$rc)" >&2
-        echo "  expected: $(cat "$want_file")" >&2
-        echo "  actual:   $(cat "$TMPD/$name.mode.out")" >&2
-        grep -A4 'GENCHECK\|FL_VERIFY' "$TMPD/$name.mode.err" | head -8 >&2
-        failed=1; continue
-      fi
-      [ "$mode" = "$rl" ] || continue
+    mode="SPROUT_GC_REGION_LISTS=1 SPROUT_DEBUG_GC=1 SPROUT_FL_VERIFY=1"
+    # shellcheck disable=SC2086
+    env $mode SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 \
+      "$TMPD/$name.bin" > "$TMPD/$name.mode.out" 2>"$TMPD/$name.mode.err"
+    rc=$?
+    if [ "$rc" != 0 ] || ! cmp -s "$want_file" "$TMPD/$name.mode.out"; then
+      report_mismatch "$name" "failed under MINOR=1 GENCHECK=1 STRESS=1 $mode (rc=$rc)" "$TMPD/$name.mode.out"
+      grep -A4 'GENCHECK\|FL_VERIFY' "$TMPD/$name.mode.err" | head -8 >&2
+      failed=1
+    else
       bad=$(awk '/^\[sprout gc\] cycle=/ {
                    c = $3; sub(/cycle=/, "", c)
                    if (pend != "" && $0 !~ /kind=major/) { n++; if (n <= 5) list = list " " pend }
@@ -4395,19 +4392,15 @@ gc-gen-check: bootstrap-from-seed
                        if (n > 0) print n " (first:" list ")" }' "$TMPD/$name.mode.err")
       [ -z "$bad" ] \
         || { echo "gc-gen-check: $name: $bad full-walk minors not followed by a major under $mode (cycle numbers)" >&2; failed=1; }
-    done
+    fi
     SPROUT_GC_MINOR=0 "$TMPD/$name.bin" > "$TMPD/$name.off" 2>/dev/null
     cmp -s "$want_file" "$TMPD/$name.off" \
-      || { echo "gc-gen-check: $name differs with SPROUT_GC_MINOR=0" >&2
-           echo "  expected: $(cat "$want_file")" >&2
-           echo "  actual:   $(cat "$TMPD/$name.off")" >&2; failed=1; }
+      || { report_mismatch "$name" "differs with SPROUT_GC_MINOR=0" "$TMPD/$name.off"; failed=1; }
     # Per-region lists with minors off: the same allocator under the other arm of the A/B.
     SPROUT_GC_MINOR=0 SPROUT_GC_REGION_LISTS=1 SPROUT_FL_VERIFY=1 SPROUT_GC_STRESS=1 \
       "$TMPD/$name.bin" > "$TMPD/$name.off" 2>/dev/null
     cmp -s "$want_file" "$TMPD/$name.off" \
-      || { echo "gc-gen-check: $name differs with SPROUT_GC_MINOR=0 SPROUT_GC_REGION_LISTS=1" >&2
-           echo "  expected: $(cat "$want_file")" >&2
-           echo "  actual:   $(cat "$TMPD/$name.off")" >&2; failed=1; }
+      || { report_mismatch "$name" "differs with SPROUT_GC_MINOR=0 SPROUT_GC_REGION_LISTS=1" "$TMPD/$name.off"; failed=1; }
   done
   # `*_nostress` programs build too large a live heap to collect on every allocation. They reach
   # what STRESS cannot: a push below a class cursor (premise 9, checked by FL_VERIFY at every
@@ -4417,10 +4410,7 @@ gc-gen-check: bootstrap-from-seed
     name=$(basename "$f" .spr)
     want_file="tests/gc_gen/$name.out"
     [ -f "$want_file" ] || { echo "gc-gen-check: missing $want_file (the expected stdout of $f)" >&2; failed=1; continue; }
-    "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$f" > "$TMPD/$name.ll" 2>"$TMPD/$name.err" \
-      || { echo "gc-gen-check: compile failed: $f" >&2; cat "$TMPD/$name.err" >&2; failed=1; continue; }
-    clang "$TMPD/$name.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$name.bin" 2>"$TMPD/$name.err" \
-      || { echo "gc-gen-check: link failed: $f" >&2; cat "$TMPD/$name.err" >&2; failed=1; continue; }
+    build_one "$f" "$name" || { failed=1; continue; }
     ok=1
     for mode in "SPROUT_GC_MINOR=1" \
                 "SPROUT_GC_MINOR=1 SPROUT_GC_REGION_LISTS=1 SPROUT_FL_VERIFY=1" \
@@ -4429,9 +4419,7 @@ gc-gen-check: bootstrap-from-seed
       env $mode SPROUT_GC_GENCHECK=1 "$TMPD/$name.bin" > "$TMPD/$name.mode.out" 2>"$TMPD/$name.mode.err"
       rc=$?
       if [ "$rc" != 0 ] || ! cmp -s "$want_file" "$TMPD/$name.mode.out"; then
-        echo "gc-gen-check: $name failed under GENCHECK=1 $mode (rc=$rc)" >&2
-        echo "  expected: $(cat "$want_file")" >&2
-        echo "  actual:   $(cat "$TMPD/$name.mode.out")" >&2
+        report_mismatch "$name" "failed under GENCHECK=1 $mode (rc=$rc)" "$TMPD/$name.mode.out"
         grep 'GENCHECK\|FL_VERIFY' "$TMPD/$name.mode.err" | head -4 >&2
         failed=1; ok=0
       fi
