@@ -682,16 +682,18 @@ static void sprout_gc_log_cycle(
   long long swept_delta,
   long long elapsed_us,
   long long walked_delta,
-  const char* kind_suffix
+  const char* kind_suffix,
+  long long sweep_us
 ) {
   if (!g_debug_gc_enabled) return;
   /* walked= and free= go last: bench/gc_pause/pause_stats.py reads swept= and
      elapsed_us= as adjacent fields.  kind= follows them, and only with
      the mode on (the default), so SPROUT_GC_MINOR=0 leaves the line unchanged.
-     A minor adds sweep=young or sweep=full: which sweep it ran. */
+     A minor adds sweep=young or sweep=full: which sweep it ran.  sweep_us= ends the
+     line: the sweep's share of elapsed_us; the rest is mostly marking. */
   fprintf(
     stderr,
-    "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld live=%lld roots=%lld marked=%lld alloc_since_gc=%lld swept=%lld elapsed_us=%lld arena_regions=%lld overflow_regions=%lld walked=%lld free=%lld%s\n",
+    "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld live=%lld roots=%lld marked=%lld alloc_since_gc=%lld swept=%lld elapsed_us=%lld arena_regions=%lld overflow_regions=%lld walked=%lld free=%lld%s sweep_us=%lld\n",
     g_gc_cycle_count,
     reason,
     g_gc_threshold,
@@ -707,7 +709,8 @@ static void sprout_gc_log_cycle(
     g_overflow_region_count,
     walked_delta,
     g_gc_freelist_len,
-    kind_suffix
+    kind_suffix,
+    sweep_us
   );
   fprintf(
     stderr,
@@ -4122,8 +4125,10 @@ static void sprout_gc_collect_with_reason(const char* reason) {
      full sweep releases.  A minor before a major walks everything to clear the colour bits, and
      AGEPROF's age histogram needs every live slot. */
   int young_only = minor && !next_major && !sprout_gc_ageprof_on() && sprout_gc_young_sweep_ok();
+  long long sweep_started_us = time_now_micros();
   if (young_only) sprout_gc_sweep_young();
   else            sprout_gc_sweep(gen_on && !next_major);
+  long long sweep_us = time_now_micros() - sweep_started_us;
   if (gen_on && g_gen.check) sprout_gc_check_sweep(!next_major, young_only);
   if (gen_on && g_gen.check && g_gen.last_live != g_managed_heap_count) {
     fprintf(stderr, "[sprout] GENCHECK: predicted %lld live objects after the sweep, found %lld\n",
@@ -4139,7 +4144,8 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   if (g_debug_gc_enabled) arena_recount_regions();
   sprout_gc_log_cycle(reason, heap_before, g_managed_heap_count, root_count, g_gc_marked_count, alloc_since_gc, g_debug_gc_swept - swept_before, elapsed_us, g_debug_gc_walked - walked_before,
                     !gen_on ? "" : !minor ? " kind=major"
-                                         : young_only ? " kind=minor sweep=young" : " kind=minor sweep=full");
+                                         : young_only ? " kind=minor sweep=young" : " kind=minor sweep=full",
+                    sweep_us);
   /* Adaptive threshold: re-base on the LIVE set after each collection so the heap
      (hence RSS) stays proportional to live data instead of ratcheting upward
      without bound.  The previous policy only ever GREW the threshold (x
