@@ -31,5 +31,6 @@ runtime/sprout_runtime.c:region_find_slow     # binary search of the region tabl
 runtime/sprout_runtime.c:open_new_region      # orders the new region into the table by address
 runtime/sprout_runtime.c:region_table_insert  # sorted insert by address; keeps the heap span
 runtime/sprout_runtime.c:sprout_fl_entry_cmp  # qsort comparator: free-list entries by address
+runtime/sprout_runtime.c:sprout_fl_verify_region_lists  # entry in its region's range; slot index
 runtime/sprout_poll.c:poll_tag_timer linux    # epoll: sets bit 0 of a token; returns a pointer
 runtime/sprout_poll.c:poll_untag linux        # epoll: reads and clears bit 0; returns a pointer
