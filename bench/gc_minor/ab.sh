@@ -88,6 +88,12 @@ case "$(uname)" in
   Linux) TIME_FLAG=-v; CLANG_EXTRA="" ;;
   *) echo "ERROR: unsupported OS $(uname) (macOS and Linux only)" >&2; exit 1 ;;
 esac
+# A checkout rebuilds stage 1 from its seed, as `just compile-native` does; the VM's tree has no
+# justfile and builds its own.
+if command -v mise > /dev/null && [[ -f "$REPO/justfile" ]]; then
+  mise exec -- just bootstrap-from-seed > /dev/null \
+    || { echo "ERROR: just bootstrap-from-seed failed" >&2; exit 1; }
+fi
 [[ -x "$COMPILER" ]] || { echo "ERROR: $COMPILER missing (run: mise exec -- just bootstrap-from-seed)" >&2; exit 1; }
 
 # galaxy_client needs the game repo, raylib and a catalog: dropped with a warning when it came from
