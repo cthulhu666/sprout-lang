@@ -401,11 +401,12 @@ export fn compile_file(path: source.FilePath) -> CompileResult !{IO} =
 # ---------------------------------------------------------------------------
 #
 # compile_full is the Sprout-native end-to-end compiler entry point.
-# It chains all three passes that M1-M3 individually verified:
+# It chains the passes that M1-M3 individually verified, plus the dictionary passes:
 #
 #   1. bundler.bundle_file    — load entry file + imports, qualify names  (M3)
-#   2. checker.typecheck_bundle — HM type inference + typed IR production  (M1)
-#   3. lowering.lower_program  — dictionary-passing typeclass lowering     (M2)
+#   2. check_bundled          — typecheck_bundle (HM inference + typed IR, M1),
+#                               then resolve_checked (dictionary resolution, dispatch verifier)
+#   4. lowering.lower_program  — dictionary-passing typeclass lowering     (M2)
 #
 # Returns the lowered ast.Program plus the final type env on success, or a
 # diagnostic list on the first failing stage.
@@ -421,11 +422,10 @@ export fn compile_full(path: source.FilePath, stdlib_root: source.StdlibRoot) ->
     | bundler.BundleErr pos msg -> FullFail(Cons(diag_error(pos, "bundle: " ++ msg), Nil))
     | bundler.BundleOk modules ->
         do
-          tc_result <- checker.typecheck_bundle(modules, Nil)
-          match tc_result with
-          | typed_ast.TypedErr pos msg -> FullFail(Cons(diag_error(pos, "check: " ++ msg), Nil))
-          | typed_ast.TypedOk typed_prog env ->
-              FullOk(lowering.lower_program(typed_prog, env), env)
+          checked <- check_bundled(modules)
+          match checked with
+          | typed_ast.TypedErr pos msg -> FullFail(Cons(diag_error(pos, msg), Nil))
+          | typed_ast.TypedOk prog renv -> FullOk(lowering.lower_program(prog, renv), renv)
 
 # ---------------------------------------------------------------------------
 # Full IR pipeline: bundle → typecheck → lower → codegen

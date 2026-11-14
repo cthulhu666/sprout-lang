@@ -572,7 +572,7 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "p2-fwd-only: 2 args in inner call (fwd slot, no unresolved inner dict)",
       lowered_fn_lambda_inner_arg_count(r_p2, "test"), 2)
 
-    # TVar-headed forwarded constraint: eta_forwarded_method_for_prog_var path.
+    # TVar-headed forwarded constraint: the EvForward arm of eta_from_evidence.
     # `where MyEq a` — no concrete head; must use ctx_fwd["MyEq_a"] slot directly.
     r_tvar_fwd <- run_lower("class MyEq a {\n  fn my_eq(x: a, y: a) -> Bool\n}\nfn test(f: (a -> a -> Bool) -> Bool) -> Bool where MyEq a = f(my_eq)")
     assert_true(state, "tvar-fwd: lowers ok", is_lower_ok(r_tvar_fwd))
@@ -600,8 +600,8 @@ fn main() -> Unit !{IO} =
       str_starts_with(lowered_fn_lambda_inner_callee(r_thunk_nested_two, "test"), "__tc_Blank_1_"))
 
     # `from_int`'s class variable is in its RESULT, so its own type carries no tvar
-    # head. An ANNOTATED higher-order parameter still pins it, and these resolve
-    # through eta_class_type_of rather than the slot scan. A method that arrives through a
+    # head. An ANNOTATED higher-order parameter still pins it: resolve.method_evidence keys
+    # the slot from the annotated class type and lowering takes the EvForward slot. A method that arrives through a
     # polymorphic helper has a fresh tvar type, named through `@eta_fwdvar`
     # (tests/conformance/run/ambiguous_forwarded_method.spr).
     r_pinned_one <- run_lower("class Make a {\n  fn from_int(n: Int) -> a\n}\nfn test(f: (Int -> a) -> Int) -> Int where Make a = f(from_int)")
@@ -620,5 +620,17 @@ fn main() -> Unit !{IO} =
     assert_true(state, "two-classes: lowers ok", is_lower_ok(r_two_cls))
     assert_true(state, "two-classes: second class method uses its own slot",
       str_starts_with(lowered_fn_lambda_inner_callee(r_two_cls, "test"), "__tc_Cb_0_"))
+
+    # A subclass method (class MyOrd where MyEq) as a bare value at a concrete type: the
+    # evidence is the MyOrd instance, not the MyEq superclass block, so the lambda calls
+    # the MyOrd Int impl, with no dict argument.
+    r_super_conc <- run_lower("class MyEq a {\n  fn my_eq(x: a, y: a) -> Bool\n}\nclass MyOrd a where MyEq a {\n  fn my_less(x: a, y: a) -> Bool\n}\ninstance MyEq Int {\n  fn my_eq(x: Int, y: Int) -> Bool = true\n}\ninstance MyOrd Int {\n  fn my_less(x: Int, y: Int) -> Bool = true\n}\nfn test(f: (Int -> Int -> Bool) -> Bool) -> Bool = f(my_less)")
+    assert_true(state, "subclass method value (concrete): lowers ok", is_lower_ok(r_super_conc))
+    assert_true(state, "subclass method value (concrete): eta-expanded to lambda",
+      lowered_fn_body_has_lambda_first_arg(r_super_conc, "test"))
+    assert_true(state, "subclass method value (concrete): calls the MyOrd Int impl",
+      str_starts_with(lowered_fn_lambda_inner_callee(r_super_conc, "test"), "__tc_MyOrd_Int_"))
+    assert_eq(state, "subclass method value (concrete): inner call has 2 args (no dict)",
+      lowered_fn_lambda_inner_arg_count(r_super_conc, "test"), 2)
 
     summary(state)

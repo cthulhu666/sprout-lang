@@ -1285,8 +1285,8 @@ fn unknown_receiver_msg(field_name: String) -> String =
 # becomes a TMethodRef carrying the class name, so lowering can eta-expand it
 # against the final substituted type and fill its dictionary from Evidence.
 # Callee-position methods never reach here — infer_call_var builds their TVar
-# directly.  Detection precision is not load-bearing yet: both the TVar and
-# TMethodRef lowering arms run the same eta reconstruction until M3b-4b.
+# directly.  Detection precision is load-bearing: lowering lowers a TVar as a plain
+# variable and eta-expands only a TMethodRef, from its Evidence.
 fn value_var_node(name: String, t: types.Type, pos: source.SourcePos, env: Dict types.Scheme) -> typed_ast.TypedExpr =
   match dict_get(types.class_marker_key(name), env) with
   | Nothing -> typed_ast.TVar(name, t, pos)
@@ -8903,11 +8903,9 @@ fn check_arity_decls(decls: List ast.Decl, depths: Dict (String, List Int),
 # A function's hidden dictionary parameters are grouped by class name and the
 # OUTERMOST constructor of each constraint argument. So `where Boxed (Tagged k),
 # Boxed (Tagged j)` puts both constraints in the group `Boxed_Tagged`. Each has its
-# own slot (typed_ast.dict_slot_key names the arguments), but an eta'd method under both
-# reaches lowering's fallback (find_forwarded_method_any), which cannot tell the two
-# slots apart and leaves a name ast_to_ir rejects. So the shape is rejected here,
-# where it is written. Two constraints with the SAME subject are fine: one
-# dictionary is the right answer for both.
+# own slot (typed_ast.dict_slot_key names the arguments), but the group key alone cannot
+# tell the two apart. So the shape is rejected here, where it is written. Two
+# constraints with the SAME subject are fine: one dictionary is the right answer for both.
 # One pass, keyed by the slot the constraint would occupy: the first constraint to
 # claim a key records its subject, and a later one claiming the same key with a
 # different subject is the collision. Subjects are compared as written, which is exact

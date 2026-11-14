@@ -729,29 +729,18 @@ fn slot_key_applied(te: ast.TypeExpr, args: List ast.TypeExpr) -> String =
   | ast.TypeThunk _ _ -> slot_key_arg(te)
   | ast.TypeEffect _ _ -> slot_key_arg(te)
 
-# A table found by slot key. It keeps each key beside its value, so slot_entries hands
-# back the key as built.
-export wrap SlotTable v = Dict(SlotKey, v)
+# A table found by slot key.
+export wrap SlotTable v = Dict v
 
 export fn slot_table_empty() -> SlotTable v = SlotTable(dict_empty())
 
 export fn slot_get(key: SlotKey, table: SlotTable v) -> Maybe v =
   match table with
-  | SlotTable d ->
-      let Just(_, value) = dict_get(slot_key_text(key), d) else Nothing
-      in Just(value)
+  | SlotTable d -> dict_get(slot_key_text(key), d)
 
 export fn slot_set(key: SlotKey, value: v, table: SlotTable v) -> SlotTable v =
   match table with
-  | SlotTable d -> SlotTable(dict_set(slot_key_text(key), (key, value), d))
-
-export fn slot_entries(table: SlotTable v) -> List (SlotKey, v) =
-  match table with
-  | SlotTable d -> list_map(slot_entry, vec_to_list(dict_entries(d)))
-
-fn slot_entry(entry: (String, (SlotKey, v))) -> (SlotKey, v) =
-  let (_, kv) = entry
-  in kv
+  | SlotTable d -> SlotTable(dict_set(slot_key_text(key), value, d))
 
 # The outermost constructor, with function and effect types named `Fn` and `Eff`.
 export fn type_expr_head_name(te: ast.TypeExpr) -> String =
@@ -835,3 +824,10 @@ export fn ambiguous_method_message(method: String, class_name: String) -> String
        ++ cls ++ "` instance to use. Give it a type from a declared return type, a typed parameter "
        ++ "or a typed top-level `let`, or constrain its type variable with `where " ++ cls
        ++ "` so the caller decides."
+
+# A class method used as a value whose instance resolve cannot name. A class with more
+# than one parameter is keyed on its first alone, so none is found.
+export fn unresolved_method_message(method: String, class_name: String) -> String =
+  let cls = string.after_last_dot(class_name)
+      name = string.after_last_dot(method)
+  in `no instance of \`${cls}\` could be determined for \`${name}\` used as a value: a class with more than one parameter is not supported`

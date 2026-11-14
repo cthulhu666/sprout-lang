@@ -262,23 +262,17 @@ because the collapse made `make : a`, bridged by the `Unit`-peel workaround in
 That peel is now deleted, along with its copy in `resolve` and both `type_is_unit`
 helpers. It was unreachable twice over: a class method signature is parsed as
 `fn n(…) -> T` (`parser.parse_class_method_sig`), so its scheme is a `TFunc` or a `TThunk`
-and never the bare type the peel keys on; and `lowering.try_eta_in_class` requires a
-`TFunc` before it asks, so a nullary method in value position — now a `TThunk` — no longer
-reaches it. Confirmed by compiling the whole corpus with the arm replaced by a `panic`:
+and never the bare type the peel keys on; and the lowering eta path that served it asked
+only for a `TFunc`, so a nullary method in value position — now a `TThunk` — never
+reached it. Confirmed by compiling the whole corpus with the arm replaced by a `panic`:
 every `tests/stdlib` suite and all 54 examples passed untouched.
 
-That second reason holds, but declining is only safe because something else catches the
-shape. `lower_value_var` falls through to `try_eta_forwarded_without_class`, which gated on
-`TFunc` too — so a nullary method passed unapplied under a forwarded dictionary died as
-`ast_to_ir: unbound variable '__eta_unresolved_…'`. That fallback now admits a `TThunk`
-whose result *is* the class variable, keying on that tvar head. A result with the variable
-nested under a constructor (`() -> List a`) has no head to read and declines. A *second*
-same-class constraint puts the method in both slots; the head is then named by its
-`@eta_fwdvar` marker (`lowering.eta_class_var_name`) before it is compared with the slots'
-written names, so each occurrence takes its own constraint's slot. A head with no marker
-keeps its own identity, matches no slot, and goes to the any-slot scan, which declines
-when the slots carry distinct impls. `try_eta_in_class` stays
-`TFunc`-only, so the peel's unreachability above is unchanged.
+A nullary method passed unapplied is lowered from its Evidence
+(`lowering.eta_from_evidence`), like any bare method: a `TThunk` gets a lambda with no
+parameters. Under a forwarded dictionary the slot is the one `resolve.method_evidence`
+keys by the class variable's written name. A *second* same-class constraint puts the method
+in both slots; the variable's `@eta_fwdvar` marker, read through `types.eta_written_var`,
+names the constraint, so each occurrence takes its own constraint's slot.
 
 `.iface` moves 6 → 7. A v6 file is rejected loudly rather than read leniently: decoded
 under v7 rules every nullary signature would come back as its bare return type, which is

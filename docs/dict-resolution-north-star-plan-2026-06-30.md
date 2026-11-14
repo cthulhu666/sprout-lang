@@ -447,7 +447,19 @@ already complete.  Runtime-verified via `tests/stdlib/test_forwarded_inner_dict_
 strings — `box(int)`/`box(bool)` correct on both codegen paths).  `test_lowering`'s 4 structural
 arg-count assertions (p1-constrained, p1b-multi-var/mixed-inner/super-inner) were updated 3/4 → 2.
 
-**Still deferred — the eta→single-authority collapse.** `try_eta_in_class` /
+**Landed — the eta→single-authority collapse.** `try_eta_in_class`,
+`try_eta_forwarded_without_class`, `lower_value_var` and `find_forwarded_method_any` are deleted:
+lowering's `TVar` arm is a plain variable and its `TMethodRef` arm consumes Evidence only
+(`eta_from_evidence`); `resolve.method_evidence` rejects an unresolved one at check
+(`reject_unresolved`), and any other miss is a located panic (`eta_no_instance`). The paragraph below, and the
+three prerequisites after it, describe the state before that. Each prerequisite got its test:
+`tests/conformance/run/bare_method_nullary_concrete.spr` (1; a method's scheme is a `TFunc` or a
+`TThunk`, so a non-function type never reaches `eta_from_instance`),
+`bare_method_imported_class_qualified.spr` and `_unqualified.spr` (2), and
+`tests/conformance/type_error/multi_param_class_bare_method.spr` (3: the one shape resolve and
+lowering disagreed on).
+
+*Before it landed:* `try_eta_in_class` /
 `try_eta_forwarded_without_class` remain a *second* resolution authority for ONE shape: a **polymorphic
 (type-variable-head) forwarded** value-position method (`apply_any(x, to_string)` inside
 `fn f(x: a) ... where ToString a`).  `resolve` emits `EvUnresolved` there (non-concrete head), so
@@ -498,6 +510,10 @@ fixed-point still holds. Three known traps: the load-bearing sentinel (below), p
 ## Appendix — `__unresolved_` / `__eta_unresolved_` sentinel-flow map (M3b spec)
 
 Verified 2026-06-30; line numbers re-verified 2026-07-02. All lines in `stdlib/compiler/`.
+The eta family (`__eta_unresolved_*`, its mint in `lower_expr`, `try_eta_in_class` and the
+`has_unresolved_dict` reroute) was removed with the fallback: a bare method whose Evidence gives
+no instance is rejected at check (`resolve.reject_unresolved`); a shape lowering cannot consume
+is a located panic (`lowering.eta_no_instance`). Only the `__unresolved_*` call path remains.
 
 **Mint sites — Family A `__unresolved_*` (dict resolution), all in the `resolve_tdict`
 family:**
@@ -509,18 +525,7 @@ family:**
 - **A3** `lowering.sprout:1310` `resolve_method_var` — `"__unresolved_" ++ fallback_key ++
   "_" ++ method`. Condition: method absent from the resolved `method_map`.
 
-**Mint site — Family B `__eta_unresolved_*` (eta expansion):**
-- **B1** `lowering.sprout:1136` `lower_expr` (TVar) — `"__eta_unresolved_" ++
-  string.after_last_dot(class_name) ++ "_" ++ string.after_last_dot(name)`. Condition:
-  bare TVar is a class method but all eta-expansion attempts failed. Carries the real type.
-  NO dedicated consumer → hard error at `ast_to_ir.sprout:781`; silent zero at
-  `codegen.sprout:1900`.
-
 **Consumers of Family A:**
-- **C1 (transient, reroute)** `has_unresolved_dict` `lowering.sprout:850`, used at `:1064`
-  in `try_eta_in_class`: if an eta inner-dict list contains a sentinel, REROUTE to the
-  forwarded slot (`make_eta_lambda(fwd_slot,…)` 1066) or return `Nothing` (1067). Sentinel
-  is discarded — never reaches codegen.
 - **C2 (terminal, explicit null-fill)** `ast_to_ir.sprout:776`: `str_starts_with(name,
   "__unresolved_")` → `IRConst 0`; other unknown → hard error (781).
 - **C3 (terminal, implicit null-fill)** `codegen.sprout:1900` `emit_var`: any unknown name
@@ -532,14 +537,6 @@ family:**
   is spliced straight into TCall witness args; `has_unresolved_dict` is NEVER called on it.
   → reaches codegen (C2/C3). **This is the only path to the null-fill, and the path the
   original bug took.**
-- **Eta/value-position (TRANSIENT):** `lower_expr`(TVar) → `try_eta_in_class`(1048) →
-  `lookup_eta_inner_dicts_general`(949) → `resolve_tdict` → mint A1/A2/A3, THEN inspected by
-  `has_unresolved_dict`(1064) → reroute/discard. Family-A sentinels never escape here; a
-  failed reroute instead mints a Family-B sentinel (B1) that does reach codegen.
-
-**Refactor hazard:** `has_unresolved_dict` matches the bare prefix `"__unresolved_"` and
-does NOT match `"__eta_unresolved_"`. Unifying or renaming the prefixes silently changes
-which family the reroute predicate (1064) and the null-fill guard (`ast_to_ir:776`) catch.
 
 ## Invariant — `@fwd:` vs `@eta_fwd:` are separate key namespaces
 

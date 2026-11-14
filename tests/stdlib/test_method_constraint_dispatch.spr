@@ -9,9 +9,7 @@ import stdlib.string (join)
 # constraint variable, so a caller forwarding both must not hand one dictionary
 # to both slots.
 #
-# `to_string` is eta-wrapped here: a bare method value under two constraints of
-# its own class still reaches codegen as `__eta_unresolved_ToString_to_string`
-# (BACKLOG.md §7.5, ambiguous forwarded method references).
+# `to_string` is eta-wrapped here, not passed as a bare method value.
 
 class Pairer t
   fn show_pair(xs: t a, y: b) -> String where ToString a, ToString b

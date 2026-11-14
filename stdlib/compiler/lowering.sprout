@@ -37,7 +37,6 @@ fn lower_program_decls(decls: List typed_ast.TypedDecl, scheme_env: Dict types.S
                              super_map = super_map,
                              inst_meta = collect_inst_meta(decls, class_order, super_map, typed_ast.instance_table_empty()),
                              scheme_env = scheme_env,
-                             class_params = tables.params,
                              method_class = method_class_table(class_order)),
                     Nil, Nil, Nil) with
   | (user_rev, wrapper_rev, inst_rev) ->
@@ -60,7 +59,6 @@ fn lower_program_decls(decls: List typed_ast.TypedDecl, scheme_env: Dict types.S
 #                  Used to build lambda wrappers that capture inner dicts at call sites.
 #   scheme_env   – the full type scheme environment from the typechecker; used to
 #                  assign types to generated nodes so types survive lowering.
-#   class_params – class_name → primary class type parameter name
 #   method_class – canonical method name → the one class that declares it
 type LowerEnv = (
   class_order: Dict (List String),
@@ -68,7 +66,6 @@ type LowerEnv = (
   super_map: Dict (List String),
   inst_meta: typed_ast.InstanceTable (List ast.TypeExpr, List ast.TypeConstraint, Dict (Int, Int)),
   scheme_env: Dict types.Scheme,
-  class_params: Dict String,
   method_class: Dict String)
 
 # LowerCtx: per-function context passed during expression lowering.
@@ -685,20 +682,6 @@ fn mangle_mode_suffix(mode: ast.ParamMode) -> String =
   | ast.ModeDefault -> ""
   | ast.ModeConsuming -> ""
 
-# ---------------------------------------------------------------------------
-# Eta-expansion of class methods in value position
-# ---------------------------------------------------------------------------
-#
-# When a class method (e.g. `to_string`) is used as a value — passed to a
-# higher-order function like `fmap` — the generic closure wrapping it includes
-# dict slots as extra arguments.  Callers that don't know the dict arity crash
-# (SIGBUS on AArch64).  Fix: rewrite the TVar to a TLambda that calls the
-# resolved concrete or forwarded implementation directly, bypassing the generic
-# wrapper and its hidden dict parameter.
-#
-# lower_expr_callee (used for TCall callees) skips eta-expansion so that
-# infer-injected TDict nodes in direct calls expand correctly.
-
 # Keyed by the method's canonical name, which names one class (a module may not
 # declare one method name twice).
 fn find_class_of_method(method_name: String, ctx: LowerCtx) -> Maybe String =
@@ -712,41 +695,9 @@ fn add_class_methods(table: Dict String, entry: (String, List String)) -> Dict S
   match entry with
   | (class_name, methods) -> list_fold(\ (t, m) -> dict_set(m, class_name, t), table, methods)
 
-fn find_concrete_method_impl(class_name: String, method_name: String, head: String, ctx: LowerCtx) -> Maybe String =
-  match typed_ast.instance_get(typed_ast.instance_key(class_name, head), ctx.env.inst_table) with
-  | Nothing -> Nothing
-  | Just method_map -> dict_get(method_name, method_map)
-
-# The forwarded slot's method under an exact slot key (typed_ast.dict_slot_key), if the
-# current function received that constraint as a hidden dict parameter. Used to
-# prefer the forwarded slot over the concrete instance, avoiding an unresolvable
-# inner-dict reference at eta-expansion time.
-fn find_fwd_method_for_key(method_name: String, key: typed_ast.SlotKey, ctx: LowerCtx) -> Maybe String =
-  match typed_ast.slot_get(key, ctx.fwd) with
-  | Nothing -> Nothing
-  | Just method_map -> dict_get(method_name, method_map)
-
-# The slot key for a value-position method at `class_type`, its variables named by
-# the `@eta_fwdvar` markers infer threads into scheme_env. A variable without one
-# renders `_`, which no slot declares.
-fn eta_slot_key(class_name: String, class_type: types.Type, ctx: LowerCtx) -> typed_ast.SlotKey =
-  typed_ast.dict_slot_key(class_name, [eta_named_typeexpr(class_type, ctx)])
-
-fn eta_named_typeexpr(t: types.Type, ctx: LowerCtx) -> ast.TypeExpr =
-  match t with
-  | types.TConst name -> ast.TypeName(types.type_id_name(name))
-  | types.TApp base arg -> ast.TypeApply(eta_named_typeexpr(base, ctx), eta_named_typeexpr(arg, ctx))
-  | types.TTuple items -> ast.TupleType(list_map(\i -> eta_named_typeexpr(i, ctx), items))
-  | types.TVar v -> ast.TypeName(maybe_with_default("_", types.eta_written_var(v, ctx.env.scheme_env)))
-  | _ -> ast.TypeName("_")
-
 # Returns true if any dict in the list is the __unresolved_* sentinel consume_block
 # emits for an EvForward whose key is absent from ctx_fwd.
-# Used to detect the P2 case: concrete instance found but inner constraint is not
-# in scope — fall back to the forwarded slot instead of emitting a bad IR node.
-# Note: checks __unresolved_* (dict-resolution sentinel) only; __eta_unresolved_*
-# (eta-expansion sentinel emitted in lower_expr) is a distinct family and is NOT
-# covered here by design — the two failure modes have separate handling.
+# devirt_finish uses it: an inner constraint not in scope keeps the generic dispatch.
 fn has_unresolved_dict(dicts: List typed_ast.TypedExpr) -> Bool =
   match dicts with
   | Nil -> false
@@ -840,87 +791,9 @@ fn collect_slots_from_method_map(methods: List String, method_map: Dict String, 
           Cons(typed_ast.TVar(slot, types.TVar(types.tyvar_id("?lambda")), pos),
                collect_slots_from_method_map(rest, method_map, pos))
 
-# M3b-5: the deleted resolve_tdict once resolved eta inner-context dicts here.
-# The Evidence-consuming eta path (eta_from_evidence) covers every inner
-# dict exercised by valid programs — census-verified: these sites never fire across
-# the whole corpus + compiler self-compile.  Reaching one signals a resolve/lowering
-# disagreement, so fail loudly rather than emit a wrong witness (the located-panic
-# discipline the dict-resolution north star mandates for a consumption miss).
-fn eta_inner_dict_unreachable(class_name: String, pos: source.SourcePos) -> Maybe typed_ast.TypedExpr =
-  panic("lowering: eta inner-dict resolution for '" ++ class_name ++ "' at " ++ pos_loc(pos) ++
-        " reached the deleted resolve_tdict path — Evidence should cover this (M3b-5)")
-
-# The tvar-headed position of a method's own type: the first parameter of a
-# parameterised method, the result of a nullary one, whose TThunk has no parameter.
-# A nullary result is taken only when it IS the tvar; nested under a constructor
-# there is no head to key on, and `eta_forwarded_impl` would fall back to the first
-# slot carrying the name — another constraint's instance, silently.
-fn eta_class_position(t: types.Type) -> Maybe types.Type =
-  match t with
-  | types.TFunc param _ _ _ -> Just(param)
-  | types.TThunk ret _ -> tvar_position(ret)
-  | _ -> Nothing
-
-fn tvar_position(t: types.Type) -> Maybe types.Type =
-  match t with
-  | types.TVar _ -> Just(t)
-  | _ -> Nothing
-
-fn try_eta_forwarded_without_class(name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  let Just param = eta_class_position(t) else Nothing
-      Just impl_name = eta_forwarded_impl(name, eta_class_var_name(param, ctx), typed_ast.slot_entries(ctx.fwd)) else Nothing
-  in Just(make_eta_lambda(impl_name, t, no_pos()))
-
-# The class-position variable by its written name when `@eta_fwdvar` has one, else
-# by its own identity. Nothing for a position that is not a bare variable.
-fn eta_class_var_name(param: types.Type, ctx: LowerCtx) -> Maybe String =
-  match param with
-  | types.TVar v -> Just(maybe_with_default(types.tyvar_identity(v), types.eta_written_var(v, ctx.env.scheme_env)))
-  | _ -> Nothing
-
-# The forwarded impl for `name`: prefer the tvar-headed slot, else any slot carrying the method.
-# A missing tvar head or a for-tvar miss both fall through to the any-slot scan.
-fn eta_forwarded_impl(name: String, tvar: Maybe String, entries: List (typed_ast.SlotKey, Dict String)) -> Maybe String =
-  let Just tvar_name = tvar else find_forwarded_method_any(name, entries)
-      Just impl_name = find_forwarded_method_for_tvar(name, tvar_name, entries) else find_forwarded_method_any(name, entries)
-  in Just(impl_name)
-
-fn find_forwarded_method_for_tvar(method_name: String, tvar_name: String, entries: List (typed_ast.SlotKey, Dict String)) -> Maybe String =
-  match entries with
-  | Nil -> Nothing
-  | Cons (key, method_map) rest ->
-      if typed_ast.slot_key_sole_arg(key) == Just(tvar_name) then
-        match dict_get(method_name, method_map) with
-        | Just impl_name -> Just(impl_name)
-        | Nothing -> find_forwarded_method_for_tvar(method_name, tvar_name, rest)
-      else
-        find_forwarded_method_for_tvar(method_name, tvar_name, rest)
-
-# Reached when the class position has no variable to key on, or one no slot names
-# (no `@eta_fwdvar` marker). Only one candidate slot makes the answer certain: with
-# several, any pick runs one instance's code at another's type, so decline and
-# leave the loud __eta_unresolved_ failure.
-fn find_forwarded_method_any(method_name: String, entries: List (typed_ast.SlotKey, Dict String)) -> Maybe String =
-  match forwarded_method_impls(method_name, entries) with
-  | Nil -> Nothing
-  | Cons impl_name rest -> if all_same_impl(impl_name, rest) then Just(impl_name) else Nothing
-
-fn forwarded_method_impls(method_name: String, entries: List (typed_ast.SlotKey, Dict String)) -> List String =
-  match entries with
-  | Nil -> Nil
-  | Cons (_, method_map) rest ->
-      match dict_get(method_name, method_map) with
-      | Just impl_name -> Cons(impl_name, forwarded_method_impls(method_name, rest))
-      | Nothing -> forwarded_method_impls(method_name, rest)
-
-# Several slots naming the SAME impl are still one answer — only distinct ones are
-# a choice this code cannot make.
-fn all_same_impl(impl_name: String, rest: List String) -> Bool =
-  match rest with
-  | Nil -> true
-  | Cons other more -> impl_name == other && all_same_impl(impl_name, more)
-
-fn find_eta_class_of_method(method_name: String, ctx: LowerCtx) -> Maybe String =
+# The class a call-site callee name dispatches on: the method table first, then the
+# class marker (which also answers for an unqualified name).
+fn find_dispatch_class(method_name: String, ctx: LowerCtx) -> Maybe String =
   match find_class_of_method(method_name, ctx) with
   | Just class_name -> Just(class_name)
   | Nothing -> lookup_class_marker(method_name, ctx)
@@ -938,58 +811,6 @@ fn lookup_class_marker_scheme(method_name: String, scheme_env: Dict types.Scheme
   | Just scheme -> Just(scheme)
   | Nothing -> dict_get(types.class_marker_key(string.after_last_dot(method_name)), scheme_env)
 
-fn try_eta_in_class(class_name: String, name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  let types.TFunc param _ _ _ = t else Nothing
-      class_type = maybe_with_default(param, types.eta_class_type_of(ctx.env.class_params, ctx.env.scheme_env, class_name, name, t))
-  in eta_in_class_by_head(class_name, name, t, class_type, ctx)
-
-# Split on whether the class type has a concrete head: a concrete head resolves to an instance
-# (or its forwarded slot); an abstract (tvar) head forwards via the @eta_fwd marker.
-fn eta_in_class_by_head(class_name: String, name: String, t: types.Type, class_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match types.first_concrete_head_str(class_type) with
-  | Just head -> eta_in_class_concrete(class_name, name, t, head, class_type, ctx)
-  | Nothing -> eta_in_class_forwarded(class_name, name, t, class_type, ctx)
-
-# Concrete head: use the instance impl if one exists, else fall back to a forwarded slot.
-fn eta_in_class_concrete(class_name: String, name: String, t: types.Type, head: String, class_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match find_concrete_method_impl(class_name, name, head, ctx) with
-  | Just impl_name -> eta_in_class_with_impl(class_name, t, head, impl_name, ctx)
-  | Nothing -> eta_fwd_slot_lambda(class_name, name, class_type, t, ctx)
-
-fn eta_in_class_with_impl(class_name: String, t: types.Type, head: String, impl_name: String, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match typed_ast.instance_get(typed_ast.instance_key(class_name, head), ctx.env.inst_meta) with
-  | Just (_, [ast.TypeConstraint inner _ | _], _) -> eta_inner_dict_unreachable(inner, no_pos())
-  | _ -> Just(make_eta_lambda(impl_name, t, no_pos()))
-
-# Emit an eta-lambda over the forwarded hidden-dict slot for (class, method, class_type), or Nothing.
-fn eta_fwd_slot_lambda(class_name: String, name: String, class_type: types.Type, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match find_fwd_method_for_key(name, eta_slot_key(class_name, class_type, ctx), ctx) with
-  | Just fwd_slot -> Just(make_eta_lambda(fwd_slot, t, no_pos()))
-  | Nothing -> Nothing
-
-# Abstract (tvar) head: the slot the variable's written name keys. `@eta_fwdvar` markers
-# (threaded into scheme_env by infer) name every signature variable, seeded or unified;
-# a variable infer already named by its written name is probed under its own identity first.
-fn eta_in_class_forwarded(class_name: String, name: String, t: types.Type, class_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  let Just tvar_name = types.type_var_name(class_type) else Nothing
-  in match eta_forwarded_method_for_prog_var(name, class_name, tvar_name, t, ctx) with
-     | Just expanded -> Just(expanded)
-     | Nothing -> eta_fwd_slot_lambda(class_name, name, class_type, t, ctx)
-
-fn eta_forwarded_method_for_prog_var(method_name: String, class_name: String, prog_var: String, method_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match find_fwd_method_for_key(method_name,
-          typed_ast.dict_slot_key(class_name, [ast.TypeName(prog_var)]), ctx) with
-  | Just impl_name -> Just(make_eta_lambda(impl_name, method_type, no_pos()))
-  | Nothing -> Nothing
-
-# lower_expr_callee: lower the callee of a TCall without eta-expanding TVar class methods.
-# Direct class method calls already have TDict nodes injected by infer; rewriting the
-# callee would corrupt those dict args.
-fn lower_expr_callee(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
-  match te with
-  | typed_ast.TVar name t pos -> typed_ast.TVar(name, t, pos)
-  | _ -> lower_expr(te, ctx)
-
 # lower_dispatch_callee: when a call is a class-method DISPATCH — a class-method
 # callee together with an infer-injected leading TDict witness — rewrite the
 # callee to the mangled dispatch identity, matching the wrapper define.  The
@@ -999,15 +820,10 @@ fn lower_expr_callee(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedE
 # shadowing the method name reaches here WITHOUT a leading TDict (infer resolved
 # it to the user binding), so it stays bare and calls the user's own function.
 fn lower_dispatch_callee(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
-  match callee with
-  | typed_ast.TVar name t pos ->
-      if args_have_leading_tdict(args) then
-        match find_eta_class_of_method(name, ctx) with
-        | Just class_name -> typed_ast.TVar(classmethod_dispatch_name(class_name, name), t, pos)
-        | Nothing -> lower_expr_callee(callee, ctx)
-      else
-        lower_expr_callee(callee, ctx)
-  | _ -> lower_expr_callee(callee, ctx)
+  let typed_ast.TVar name t pos = callee else lower_expr(callee, ctx)
+      true = args_have_leading_tdict(args) else lower_expr(callee, ctx)
+      Just class_name = find_dispatch_class(name, ctx) else lower_expr(callee, ctx)
+  in typed_ast.TVar(classmethod_dispatch_name(class_name, name), t, pos)
 
 fn args_have_leading_tdict(args: List typed_ast.TypedExpr) -> Bool =
   match args with
@@ -1095,40 +911,19 @@ fn args_have_tdict(args: List typed_ast.TypedExpr) -> Bool =
 # Expression lowering
 # ---------------------------------------------------------------------------
 
-# Lower a value-position variable reference.  Bound locals stay plain; an
-# unbound class-method name is eta-expanded into a dictionary-applied lambda
-# (or a forwarded slot).  Shared by the TVar and TMethodRef arms of lower_expr
-# so both drive the identical reconstruction.
-fn lower_value_var(name: String, t: types.Type, pos: source.SourcePos, ctx: LowerCtx) -> typed_ast.TypedExpr =
-  if ctx_is_bound(name, ctx) then
-    typed_ast.TVar(name, t, pos)
-  else
-    match find_eta_class_of_method(name, ctx) with
-    | Nothing ->
-        match try_eta_forwarded_without_class(name, t, ctx) with
-        | Just expanded -> lower_expr(expanded, ctx)
-        | Nothing -> typed_ast.TVar(name, t, pos)
-    | Just class_name ->
-        match try_eta_in_class(class_name, name, t, ctx) with
-        | Just expanded -> lower_expr(expanded, ctx)
-        | Nothing ->
-            match try_eta_forwarded_without_class(name, t, ctx) with
-            | Just expanded -> lower_expr(expanded, ctx)
-            | Nothing -> typed_ast.TVar("__eta_unresolved_" ++ string.after_last_dot(class_name) ++ "_" ++ string.after_last_dot(name), t, pos)
-
 fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
   match te with
-  | typed_ast.TVar name t pos -> lower_value_var(name, t, pos, ctx)
-  | typed_ast.TMethodRef name _ t pos ev ->
+  | typed_ast.TVar name t pos -> typed_ast.TVar(name, t, pos)
+  | typed_ast.TMethodRef name class_name t pos ev ->
       # infer's post-pass turns a local shadowing a method back into a TVar; the
-      # bound-var check covers any body it does not reach. Then the clean Evidence
-      # path, else today's eta reconstruction.
+      # bound-var check covers any body it does not reach. An unbound method is
+      # eta-expanded from its Evidence, the only source of its instance.
       if ctx_is_bound(name, ctx) then
-        lower_value_var(name, t, pos, ctx)
+        typed_ast.TVar(name, t, pos)
       else
         match eta_from_evidence(name, t, pos, ev, ctx) with
         | Just lam -> lam
-        | Nothing -> lower_value_var(name, t, pos, ctx)
+        | Nothing -> eta_no_instance(name, class_name, pos)
   | typed_ast.TInt n t pos -> typed_ast.TInt(n, t, pos)
   | typed_ast.TFloat text t pos -> typed_ast.TFloat(text, t, pos)
   | typed_ast.TBool b t pos -> typed_ast.TBool(b, t, pos)
@@ -1365,8 +1160,8 @@ fn consume_block(ev: typed_ast.Evidence, pos: source.SourcePos, ctx: LowerCtx) -
   | _ -> panic("lowering: consume_block expected EvForward/EvInstance (internal error)")
 
 # A ctx_fwd miss on `key`: panics when it names an existential head, else yields
-# `fallback` (the null-fill). consume_block and eta_from_evidence both ask, so the
-# call and value paths decide alike.
+# `fallback`. consume_block passes the null-fill; eta_from_evidence passes Nothing,
+# which ends in eta_no_instance.
 fn or_existential_panic(key: typed_ast.SlotKey, pos: source.SourcePos, fallback: a) -> a =
   let Just arg = typed_ast.slot_key_sole_arg(key) else fallback
   in if types.is_existential_head(arg)
@@ -1389,30 +1184,26 @@ fn consume_inner_dicts(children: List typed_ast.Evidence, pos: source.SourcePos,
 fn pos_loc(pos: source.SourcePos) -> String =
   int_to_string(pos.line) ++ ":" ++ int_to_string(pos.column)
 
-# M3b-4b: consume a value-position method's Evidence into an eta-lambda, REUSING
-# make_eta_lambda_with_dicts so the emitted lambda is byte-identical to today's
-# eta reconstruction.  Only the CLEAN concrete case is handled: a bundled
-# EvInstance whose method slot is in ctx_inst and whose inner context dicts all
-# resolve.  Every other shape — EvForward/EvUnresolved/EvMissing, a non-concrete
-# head, or an inner forward-miss that today's path REROUTES to the outer slot
-# (surfacing here as a __unresolved_ sentinel) — returns Nothing, and the caller
-# falls back to lower_value_var (today's reconstruction).  Reroute-in-Evidence is
-# deferred to M3b-5; the clean case here is the eta analog of M3b-3's call path.
-# An empty-children EvInstance yields make_eta_lambda_with_dicts(impl, t, []),
-# which is identical to make_eta_lambda(impl, t) — today's no-inner-dict outcome.
+# Consume a value-position method's Evidence into an eta-lambda: the one authority
+# for a bare class method (lower_expr's TMethodRef arm).  The lambda calls the chosen
+# impl directly: the generic wrapper's hidden dict parameter crashes callers that do
+# not know the dict arity (SIGBUS on AArch64).  An EvInstance whose method
+# slot is in ctx_inst and whose inner context dicts all resolve gives the instance's
+# impl; an EvForward gives the forwarded hidden-dict slot.  Every other shape —
+# EvUnresolved/EvMissing, an inner forward with no slot — returns Nothing, and the
+# caller fails loudly.  An empty-children EvInstance yields
+# make_eta_lambda_with_dicts(impl, t, []), identical to make_eta_lambda(impl, t).
 fn eta_from_evidence(method: String, t: types.Type, pos: source.SourcePos, ev: typed_ast.Evidence, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   match ev with
   | typed_ast.EvInstance _ key children ->
       if evidence_list_fully_resolved(children) && misses_named_forward(children, ctx) == false then
         eta_from_instance(method, key, t, pos, consume_inner_dicts(children, pos, ctx), ctx)
       else Nothing
-  # M3b-5 (PR-A): value-position reroute to a forwarded hidden-dict slot — the eta
-  # analog of consume_block's EvForward arm.  Mirrors the fallback's
-  # find_fwd_method_for_key -> make_eta_lambda(fwd_slot): look up the forwarded
-  # method_map by the same key consume_block uses, then the method's slot within it.
-  # A ctx_fwd miss (a phantom fresh tyvar resolve emitted EvForward for
-  # optimistically) returns Nothing, so lower_value_var null-fills exactly as today;
-  # an existential head's miss panics, as in consume_block.
+  # A value-position reroute to a forwarded hidden-dict slot: look up the forwarded
+  # method_map by the key consume_block uses, then the method's slot within it. resolve
+  # emits EvForward for a bare method only for a slot it found, so a ctx_fwd miss is a
+  # resolve/lowering disagreement and ends in eta_no_instance; an existential head's
+  # miss panics here, as in consume_block.
   | typed_ast.EvForward _ key ->
       match typed_ast.slot_get(key, ctx.fwd) with
       | Nothing -> or_existential_panic(key, pos, Nothing)
@@ -1421,6 +1212,15 @@ fn eta_from_evidence(method: String, t: types.Type, pos: source.SourcePos, ev: t
           | Nothing -> Nothing
           | Just fwd_slot -> Just(make_eta_lambda(fwd_slot, t, no_pos()))
   | _ -> Nothing
+
+# A bare method whose Evidence eta_from_evidence cannot consume. resolve rejects the
+# unresolved case (resolve.reject_unresolved). Two shapes remain: a slot resolve and lowering
+# disagree on, and an instance context naming a variable absent from its head
+# (`instance C T where D b`), which resolve accepts and leaves no inner dict for.
+fn eta_no_instance(method: String, class_name: String, pos: source.SourcePos) -> typed_ast.TypedExpr =
+  let name = string.after_last_dot(method)
+      cls = string.after_last_dot(class_name)
+  in panic(`lowering: method \`${name}\` of class \`${cls}\` used as a value at ${pos_loc(pos)} has evidence lowering cannot use (internal error)`)
 
 fn eta_from_instance(method: String, key: typed_ast.InstanceKey, t: types.Type, pos: source.SourcePos, inner_dicts: List typed_ast.TypedExpr, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   match typed_ast.instance_get(key, ctx.env.inst_table) with
@@ -1433,7 +1233,8 @@ fn eta_from_instance(method: String, key: typed_ast.InstanceKey, t: types.Type, 
 # An inner forward the body has no slot for. One for a variable no declaration names
 # (`_`, an inference variable) is not counted: it has no slot by construction and its
 # dictionary is never read, so it takes the stand-in, as on the call path
-# (consume_block). A named one is left to the fallback, which can reroute it.
+# (consume_block). A named one is a miss: eta_from_evidence returns Nothing and the bare
+# method ends in eta_no_instance.
 fn misses_named_forward(evs: List typed_ast.Evidence, ctx: LowerCtx) -> Bool =
   any(named_forward_miss(_, ctx), evs)
 

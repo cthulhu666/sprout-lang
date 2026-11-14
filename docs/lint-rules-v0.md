@@ -387,11 +387,12 @@ for a `panic` callee catches it for free, which is the whole reason to state the
 than defer it.
 
 **The syntactic check is one hop deep, and that is a known gap.** A fallback that calls a helper
-whose *body* is a panic — `lowering.eta_inner_dict_unreachable`, reached at `lowering.sprout:1064` —
-reads as an ordinary call, so the rule reports it as merely eager when the rewrite would in fact
-panic on every call. Closing it needs a call graph; the stdlib has 2–3 such helpers, so v0 does not
-build one. Worth revisiting if autocorrect (§9) ever lands, because *suggesting* a bad rewrite and
-*applying* one are not the same risk.
+whose *body* is a panic — `linear_check.malformed_phantom`, the `else` branch of a `let..else` in
+`linear_check` — reads as an ordinary call, so the rule reports it as merely eager when the rewrite
+would in fact panic on every call. Closing it needs a call graph; the stdlib has several such
+helpers (`lowering.eta_no_instance` is another), so v0 does not build one. Worth revisiting if
+autocorrect (§9) ever lands, because *suggesting* a bad rewrite and *applying* one are not the
+same risk.
 
 **Silent: the fallback is evaluable but not free.** Revision 8 removed the *note* case this section
 used to describe. Reporting an eager rewrite advisorily produced 51 findings nobody should act on,

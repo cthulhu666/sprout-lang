@@ -1,0 +1,1 @@
+ERROR: check: no instance of `Conv` could be determined for `conv` used as a value: a class with more than one parameter is not supported

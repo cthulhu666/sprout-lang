@@ -7,7 +7,7 @@
 # `Describe` has TWO methods with DISTINCT return types (String vs Int): a
 # mis-mapped witness slot produces observably wrong output rather than a crash. We
 # exercise BOTH dictionary-consumption paths on the unpacked element type:
-#   - first-class / eta:  `list_map(dname, xs)`   (the s3 `__eta_unresolved` path)
+#   - first-class / eta:  `list_map(dname, xs)`   (the TMethodRef / `eta_from_evidence` path)
 #   - direct application: `dname(h)` / `dsize(h)`  (the s6 "No instance" path)
 
 import stdlib.test (check_eq, run_suite)
