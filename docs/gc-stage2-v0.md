@@ -439,7 +439,7 @@ nqueens 559 such minors, mutvec_int 33, digit_recognizer 12, the self-compile 9,
 The lists also decide where objects land (§5.5, out of scope there). LIFO lists hand out the most
 recently freed slot wherever it lies, so survivors can spread over every region. Address order
 fills low regions first. On load_spike it released no region (12 in both arms), so it does not
-reach the galaxy client's walk after a load spike (`BACKLOG.md`); §5.7 does.
+reach the galaxy client's walk after a load spike (`BACKLOG.md`); §5.7's option C does.
 
 **Per-region lists.** Each ordinary region owns its free lists: a head per class (1..256), in a
 block the region points to like `slotmap` (NULL for a large region), so region-table inserts and
@@ -496,38 +496,123 @@ retires a page whose `used` falls to 0 (`_mi_page_retire`). CRuby keeps a free l
 before free ones (PLDI 2008 §3.1), and Go's page allocator is address-ordered first-fit
 (`mpagealloc.go`).
 
-### 5.7 Lazy per-region sweep (step 5)
+### 5.7 The sweep's cost per dead slot (step 5)
 
-Designed after step 4 is measured. A lazy sweep defers a region's dead slots until the allocator
-next takes a slot from it, so the young sweep's cost per dead slot leaves the collection, and so
-does a major's walk of free slots (the galaxy client's ~1 ms after a load spike). JSC, Go, bdwgc
-and CRuby all sweep a page or block before allocating from it, which needs step 4's per-region
-allocation. Requirements, from what the eager sweep does today:
+**Where the time goes.** On the default, the sweep is 56–98% of GC time and 17–47% of CPU on the
+GC-heavy workloads ([results](../bench/results-2026-11-13-gc-sweep-split.md); the cycle line's
+`sweep_us=`). A minor marks its survivors, which are few, and sweeps its young set, all of it:
+nqueens' young-only minors walk ~4,065 slots each and spend 95% of their time sweeping. Marking
+passes a quarter of GC time only on the self-compile (44%) and mutvec_int (28–29%). So the lever
+is the work per dead slot, five steps today: read the header, size it (`slot_bytes`), release
+its extras and singleton, write a FREE header, push it on a list. `sprout_gc_free_dead_slot` and
+`slot_bytes` are calls, not inlined; forcing both inline cut nqueens' median sweep time ~15%
+locally, inside CPU noise.
 
-- a live bit per slot separate from the colour, since a young survivor's colour is clear;
-- lookups (`sprout_heap_lookup`, `sprout_heap_lookup_region`) that read it, so an unswept dead
-  slot is rejected like a FREE one;
-- singletons registered as roots or invalidated eagerly, since their slots are cleared by the
-  sweep today;
-- an eager visit to each dead object that owns malloc'd data (vector buffers), or that data
-  stays allocated until its region is swept;
-- census counts, lineage poisoning, HDRCHECK and the free count settled per region at sweep time.
+**What depends on the per-slot sweep today:**
 
-Step 4's allocation path, which this step rewrites, leaves four costs to settle here:
+- lookups (`sprout_heap_lookup_region`) accept a payload when its slotmap bit is set and its
+  header is not FREE; roots and tuple or closure words are raw, so a scalar equal to a dead
+  slot's address would mark it if its header still looked live;
+- dead objects' malloc'd data (out-of-line vector buffers, every bytes and builder buffer) is
+  freed when the slot is swept (`sprout_release_payload_extras`);
+- a dead nullary singleton is cleared from its `CtorMeta` (`sprout_gc_invalidate_singleton`);
+- the `types:` census subtracts each dead object with age ≥ 1 (`sprout_gc_census_sub`);
+  HDRCHECK requires a slotmap bit at every slot a walk stops on, FREE ones included; GENCHECK
+  and `SPROUT_FL_VERIFY` count FREE slots by class; lineage corpses keep their slotmap bit;
+- the free count (`g_gc_freelist_len`) is in slots, and the footprint floor, `just
+  gc-trigger-check` and the C tests `promote_age.c` and `young_sweep.c` read it;
+- a freed inline vector tail is reusable at once (`sprout_vec_release_inline_tail`;
+  `tests/gc_gen/inline_tail_reuse.spr`, `cursor_lower_nostress.spr`).
 
-- a class whose lists are exhausted still calls `fl_region_pop_slow` on every allocation; an
-  inline test of the cursor against `g_region_count` would skip it;
-- `sprout_gc_sweep_young` lowers cursors on each push (`fl_rpush_at`) and then resets them all,
-  so the next allocation of each class rescans from region 0;
-- a minor that empties every ordinary region releases them all and opens one; resetting one in
-  place would skip the `madvise`, the map allocations and the page faults;
-- `SproutRegion.emptied` carries a flag between two loops of the young sweep, where the release
-  loop could recompute it from the counts.
+**Prior art**, read from source: Go go1.23.0, WebKitGTK 2.46.0, Whippet ec1c48d, CRuby 3.4.1,
+bdwgc 8.2.8, Immix (PLDI 2008).
 
-It also leaves three copies to fold into the rewritten path: the young sweep's release loop
-repeats the full sweep's Pass 2; the list pop is written out in `fl_pop`, `fl_region_pop` and
-`fl_region_pop_slow`; and the choice between per-region and global lists is made at each push and
-pop site instead of inside the list layer.
+| | Sweep | Work per dead object | Allocation | Blocks | Mark reset |
+|---|---|---|---|---|---|
+| Go (`mgcsweep.go`) | lazy, by allocation and a background sweeper; done before the next mark (`finishsweep_m`) | none: `allocBits = gcmarkBits`, plus the span's specials list | scans alloc bits (`nextFreeFast`) | one size per span | mark bits become alloc bits; fresh ones per cycle (`newMarkBits`) |
+| JSC (`MarkedBlockInlines.h`) | lazy, when the allocator takes a block; may survive into the next mark | reads each mark bit; writes only the first cell of each dead run (`specializedSweep`, `setNext`); destructor cells are destroyed | bumps through each free run | one cell size per block | per-block version; `newlyAllocated` keeps the old marks of an unswept block |
+| Whippet (`nofl-space.h`) | lazy, a hole at a time; done before the next GC | none per object: memsets each hole's metadata and memory (`nofl_allocator_next_hole_in_block`); an END bit gives each object's extent | bumps into holes found from metadata bytes | mixed sizes, 16 B granules | mark byte rotates at a major (`nofl_advance_current_mark`) |
+| CRuby (`default.c`) | lazy, a few pages per step; done before the next GC | reads the header, frees malloc'd parts, pushes the slot (`gc_sweep_plane`) | pops the page's free list | one slot size per page | memset of the bitmaps at a full GC |
+| bdwgc (`reclaim.c`) | lazy, per size when its list runs out; unswept queues discarded at the next GC (`GC_start_reclaim`) | a free-list link in each dead object | pops the size's free list | one size and kind per block | walks every block header (`GC_clear_marks`) |
+| Immix (§3.1) | lazy line sweep | none: the marker marks every line an object spans | scans the line map, bumps into holes | mixed sizes, 128 B lines | not stated |
+
+Go, CRuby and Whippet finish sweeping before the next mark; only JSC lets an unswept block live
+into it, and pays with a second bitmap. The mixed-size collectors that skip dead objects
+(Whippet, Immix) record each live object's extent, not only its start. And a design that never
+visits a dead object needs a side record of the dead objects that own resources: Go's specials,
+Whippet's and bdwgc's finalizer tables. Theirs are rare (finalizers); ours are every vector with
+an out-of-line buffer, every bytes and every builder.
+
+**Options:**
+
+- **A. A cheaper eager sweep.** Inline the per-slot calls, and write free data once per run of
+  dead slots, as JSC does. It removes two of the five steps per slot, the FREE write and the push;
+  the header read, the size and the extras stay, since our slots differ in size and the walk
+  reads each header to find the next. Merging runs moves the free count to granules, which §5.6
+  avoided.
+- **B. A lazy per-region sweep.** Sweep a region when the allocator first takes from it, finish
+  before the next mark (Go, CRuby, Whippet). The work per dead slot is the same, done later; CPU
+  falls only by cache effects, while `elapsed_us` falls, so the §2 GC-time goal would improve
+  without the CPU goal moving. An unswept dead slot keeps a live-looking header, so lookups need
+  a live bit or the sweep first.
+- **C. Holes from occupancy maps.** Two per-granule maps per region beside `youngmap`: `oldocc`,
+  the extents of old objects, set at promotion and rebuilt by a major; and `markocc`, cleared at
+  each collection and set by the marker over each marked object's extent (`gc_mark_enqueue`
+  already reads the header). A minor's live granules are `oldocc | markocc`, a major's `markocc`;
+  the zero runs are holes. The sweep settles each hole in every region holding young slots:
+  slotmap and youngmap bits cleared a word at a time, one FREE header at its start. Its cost is
+  per hole, per survivor and per bitmap word, never per dead slot. The allocator bumps through a
+  region's holes behind a cursor that only moves up between collections, so a freed inline tail
+  waits for the next collection. Buffer owners sit on per-region lists, young and old, entered
+  when the buffer is acquired (`vector_push`, the bytes and builder allocators) and moved at
+  promotion; a minor walks the young list. Singletons are checked against `markocc` over the
+  ctor table. The census is taken at majors, from survivors. A lineage corpse sets `oldocc`.
+  The free count is in granules.
+- **D. No colour-clearing sweep before a major.** The minor before a major sweeps every slot to
+  clear colour bits (§5.4). A rotating mark value (Whippet) or a per-region version (JSC) removes
+  that walk: allocation writes the current "unmarked" value, `sprout_gc_barrier` compares against
+  it, and bit 13 is cleared through the remembered set's entries. The header colour still means
+  old under C, so C does not give D for free. On load_spike that minor's sweep is 99 of 397 ms of
+  sweep per run, on the self-compile 107 of 813; a young-only sweep in its place keeps part.
+- **E. Single-class regions.** Each region holds one size class, as Go, JSC, CRuby and bdwgc do
+  (`docs/gc-size-classes-v0.md` §5 records it). Mark bits become alloc bits, exactly: a slot's
+  size comes from its region, a dead slot is a clear bit, lookups test the bit, and no hole is
+  settled. Against it: a region per class in use, so regions must shrink well below 1 MiB (the
+  arena index and region table are sized for 1 MiB); memory a class frees serves no other class
+  until its region empties; and `sprout_vec_release_inline_tail` carves a slot of another class
+  inside a region, so inline tails must change. Buffer owners need C's lists.
+
+| | Per-dead-slot steps left | Free count | Allocation | Changes |
+|---|---|---|---|---|
+| A | 3 of 5 | granules | pops a run, bumps inside it | sweep, lists |
+| B | 5 of 5, later | slots | sweeps a region on first take | sweep, lookups, lists |
+| C | 0 | granules | bumps through holes, monotone cursor | mark, sweep, allocation, walks, census, gates |
+| D | the pre-major walk only | slots | unchanged | colour tests, barrier |
+| E | 0 | slots | scans alloc bits | region layout, lookup, inline tails, allocation |
+
+**Recommendation: C, prototyped first, then D as its own step.** C and E are the two options
+whose sweep follows survivors, which is what a minor needs: its young set is mostly dead. C
+keeps the 1 MiB mixed-size regions, region release, the arena index and inline tails; E is the
+common shape but reworks region layout and lookup, and trades holes for per-class retention,
+which nothing measures yet (`gc-size-classes-v0.md` §6). B moves work rather than removing it.
+A keeps three of five steps. D is independent and smaller, and comes after C.
+
+C's costs to measure: the buffer-owner lists on mutvec_int and http_log_middleware; per-hole and
+per-word work in regions that mix old and young slots; first fit through holes instead of exact
+fit by class, which can raise peak slots (`bench/gc_trigger/rotate_classes.sprout` relies on
+exact fit); and the footprint floor, kept until `test_gc_trigger_adversary` settles without it.
+
+**Prototype gate.** Hand-apply C, with its allocation path, and run the §14.8 set on the VM,
+load_spike and mutvec_int included, majors and census as in the final design. Take C if sweep
+time falls by half on the GC-heavy workloads and no workload's CPU or peak slots rises outside
+its spread. Otherwise take A.
+
+The step-4 costs and copies stay open until C replaces the code that holds them: a class whose
+lists are exhausted still calls `fl_region_pop_slow` each allocation; `sprout_gc_sweep_young`
+lowers cursors on each push and then resets them all; a minor that empties every ordinary region
+releases them all and opens one; `SproutRegion.emptied` carries a flag between two loops; the
+young sweep's release loop repeats Pass 2; the list pop is written three times; and the choice
+between per-region and global lists is made at each site.
 
 ## 6. Premises
 
@@ -567,6 +652,16 @@ Each premise has a test or a check that fails when it breaks.
 9. **Step 4.** Between collections, no region below a class's cursor has a free slot of that
    class, and each cached block is its cursor region's. `SPROUT_FL_VERIFY=1` checks both at each
    allocation that advances a cursor, and the cache after every collection.
+10. **Step 5 (option C).** After a sweep, no granule of a hole has a slotmap or youngmap bit, and
+    each hole starts with one FREE header spanning it, so no lookup can accept a dead slot.
+    GENCHECK walks every region the sweep settled and checks both.
+11. **Step 5.** `oldocc | markocc` covers every live object's extent and no granule of a hole.
+    GENCHECK compares the maps with a header walk after each sweep.
+12. **Step 5.** Between collections a granule is handed out once: a region's hole cursor only
+    moves up. A `SPROUT_FL_VERIFY` successor checks each allocation against the cursor and the
+    holes.
+13. **Step 5.** Every live object that owns malloc'd data is on its region's young or old
+    buffer list, exactly once. GENCHECK checks the lists against a header walk.
 
 ## 7. Steps
 
@@ -654,8 +749,12 @@ Each premise has a test or a check that fails when it breaks.
    - The reuse path costs 0–2% CPU with minors off on every workload but compiler_test (1.08 ~, a
      0.27 s run); only nqueens' 1.01 is outside the spread.
 
-   The young sweep's work per dead slot is unchanged; §5.7 is the step that moves it.
-5. **Lazy per-region sweep** (§5.7), designed once step 4's numbers are in.
+   The young sweep's work per dead slot is unchanged; §5.7 is the step that removes it.
+5. **Holes from occupancy maps** (§5.7, option C). First a hand-applied prototype with its
+   allocation path, run on the VM over the §14.8 set with load_spike and mutvec_int; take C only
+   if sweep time halves on the GC-heavy workloads with no CPU or peak-slot regression outside the
+   spread, else option A. Then premises 10–13 with their checks, behind a switch for the A/B.
+   Option D follows as its own step.
 6. Retire `SPROUT_GC_REGION_LISTS` once steps 4 and 5 settle it, and update
    `compiler-internals.md` and `gates.md`. Retiring it removes the global lists with
    `sprout_gc_young_sweep_ok` and the staged build (`g_fl_saved`, `fl_push_staged`,
@@ -690,6 +789,15 @@ Step 4:
   in minors; the young-only sweep paragraph's `sweep=young|full` marker.
 - `development.md`: the `SPROUT_DEBUG_GC` row's minor marker.
 - `gates.md`: `just gc-gen-check`'s region-list runs and `*_nostress` programs.
+
+Step 5:
+- `compiler-internals.md` §Non-moving GC: the FREE-header-with-slotmap-bit contract, holes, the
+  occupancy maps, buffer lists, census at majors, and the inline-tail paragraph.
+- `gates.md` and `just gc-gen-check`: the FL_VERIFY runs and premises 10–13; `just
+  gc-trigger-check` if the free count's unit or the footprint floor changes.
+- Tests: `tests/gc_gen/inline_tail_reuse.spr` and `cursor_lower_nostress.spr` expect a freed tail
+  reused at once, which C defers; `tests/c_runtime/promote_age.c` and `young_sweep.c` read the
+  free count.
 
 Step 6, for step 4's switch: `sprout_gc_young_sweep_ok`, the staged build, and the
 `fl_push_staged` warning in the comment above `sprout_vec_release_inline_tail`.
