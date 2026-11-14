@@ -562,9 +562,10 @@ an out-of-line buffer, every bytes and every builder.
 - **D. No colour-clearing sweep before a major.** The minor before a major sweeps every slot to
   clear colour bits (§5.4). A rotating mark value (Whippet) or a per-region version (JSC) removes
   that walk: allocation writes the current "unmarked" value, `sprout_gc_barrier` compares against
-  it, and bit 13 is cleared through the remembered set's entries. The header colour still means
-  old under C, so C does not give D for free. On load_spike that minor's sweep is 99 of 397 ms of
-  sweep per run, on the self-compile 107 of 813; a young-only sweep in its place keeps part.
+  it, and bit 13 is cleared through the remembered set's entries. Under C the mark moves to
+  `markocc` and the colour means only old, which gives D. On load_spike that minor's sweep is 99
+  of 397 ms of sweep per run, on the self-compile 107 of 813; a young-only sweep in its place
+  keeps part.
 - **E. Single-class regions.** Each region holds one size class, as Go, JSC, CRuby and bdwgc do
   (`docs/gc-size-classes-v0.md` §5 records it). Mark bits become alloc bits, exactly: a slot's
   size comes from its region, a dead slot is a clear bit, lookups test the bit, and no hole is
@@ -593,67 +594,97 @@ no header per hole, an overflow cursor, and freed inline tails reused at once.
 |---|---|---|---|---|
 | peak held, C | 0.86× | 0.41× | 0.36× | 1.00× |
 | peak held, E 16 KiB / 64 KiB, chunked | 0.93× / 0.96× | 0.51× | 2.64× / 2.86× | 1.00× |
-| sweep words per collection, today's slots walked → C / E 64 KiB | 660k → 34k / 15k | 24k → 1.6k / 260 | 13k → 2.2k / 470 | 58k → 2.4k / 890 |
+| sweep words per collection, today's slots walked → C / E 64 KiB | 660k → 36k / 16k | 24k → 1.9k / 280 | 13k → 2.2k / 480 | 58k → 2.5k / 940 |
 
-E updates fewer bitmap words, but sweeps 15–57× more regions (494–1,890 per collection on the
-self-compile against C's 33) and cannot reuse a freed tail, since the vector cannot move. Both
+E updates fewer bitmap words, but sweeps 15–58× more regions (530–2,016 per collection on the
+self-compile against C's 35) and cannot reuse a freed tail, since the vector cannot move. Both
 beat today's exact fit on rotate_classes, the workload built to show its retention.
 
-**Recommendation: C, prototyped first; D after it as its own step.** C holds the least memory on
+**Recommendation: C, with D folded in, prototyped first.** C holds the least memory on
 every workload where placement matters, cuts the self-compile's sweep from 660k slot visits to
-34k bitmap words, and keeps the 1 MiB regions, region release and the arena index. E's smaller
-word count does not outweigh its region count, the arena rework and the tail loss. B moves work
+36k bitmap words, and keeps the 1 MiB regions, region release and the arena index. E's smaller
+word count does not outweigh its region count, the arena rework and the tail loss. With the
+mark bit in `markocc`, C also removes the colour-clearing sweep before a major (option D). B moves work
 instead of removing it; A keeps three of five steps per dead slot.
 
 **C in detail.**
 
-- *Maps.* Each ordinary region gains `oldocc` and `markocc`, a bit per 16-byte granule like
-  `slotmap`. The marker sets `markocc` over each marked object's extent (`gc_mark_enqueue` already
-  reads the header), and does the ageing the sweep does today, since it already rewrites each
-  marked header. A survivor reaching the promotion age sets its extent in `oldocc`; a major rebuilds
-  `oldocc` from what it marks.
-- *Sweep.* Per region swept (every region at a full sweep; at a young-only minor the regions
-  allocated into since the last collection), with `live = oldocc | markocc` (a major: `markocc`):
-  `slotmap &= live`, `youngmap &= markocc` minus the promoted, `markocc = 0`. A live object's start
-  granule is in `live`, so this clears exactly the dead objects' starts. Word-wise; no dead slot
-  and no hole is visited. A region with `live` empty is released.
-- *Walks and lookups.* No FREE header is written: holes hold stale bytes. Every walk steps through
-  `slotmap` bits instead of slot headers: `sprout_gc_check_sweep`, the two `SPROUT_FL_VERIFY` walks
-  and `sprout_gc_clear_marks` (HDRCHECK already uses `slotmap_next_start`); `sprout_gc_sweep`'s walk
-  is what this replaces. `sprout_heap_lookup_region` rejects a dead slot by its cleared start bit,
-  so a raw word equal to a dead address is rejected as a FREE one is today.
-- *Allocation.* Between collections one cursor walks each region's holes, the zero runs of
-  `oldocc | markocc` from the last sweep, in address order, and only moves forward: a request that
-  fits bumps, one that does not moves on, and the remainder waits for the next collection. A
-  request over 256 B that misses the current hole takes an overflow cursor instead, so a large
-  request does not strand the small holes behind it (Immix). Past the last hole, a region opens.
-  Allocation still sets `slotmap` and `youngmap`.
-- *Inline tails.* `sprout_vec_release_inline_tail` puts the freed tail on a list by exact class,
-  which allocation tries before the cursors; the lists are dropped at each collection, when unused
-  tails become hole space. Without them mutvec_push holds 2.36× today's memory; with them 0.36×.
+- *Maps.* Each ordinary region gains three maps, a bit per 16-byte granule like `slotmap`: `occ`,
+  the granules in use between collections; `markocc`, the extents this collection marks; and
+  `oldocc`, the extents of old objects. `occ` and `markocc` are two buffers swapped at each sweep,
+  so the marker always starts from a zero `markocc`. Five maps per region against today's two:
+  40 KiB per 1 MiB region, 3.9%.
+- *Mark bit and colour.* A `markocc` bit at an object's start granule is its mark: `gc_mark_enqueue`
+  tests and sets it (it already has the region) and sets the rest of the extent from the header it
+  already reads. The header colour then means only old. The marker sets it when an object reaches
+  the promotion age, together with its extent in `oldocc`, and nothing clears it. A minor's marker
+  still stops at a coloured (old) object, a major's ignores colour. So no sweep clears colour bits:
+  the minor before a major sweeps young-only like any other, `sprout_gc_clear_marks` goes, and a
+  major clears bit 13 through the remembered set's entries before its sweep. This is option D.
+- *Ageing.* The marker bumps an object's age in the header write that marks it, so the sweep
+  writes no header. `sprout_gc_drain_marks`'s remembered rule reads ages after that bump, so its
+  "stays young" test shifts by one (`young_below = K` for a bumped header); parents pushed by
+  `sprout_gc_mark_remembered` are old by colour, not by age. AGEPROF's marked-by-age count reads
+  the age before the bump, as it does today.
+- *Large objects.* A large region has one slot and no maps; its mark is a flag in `SproutRegion`,
+  and colour and age stay in its header as above.
+- *Sweep.* A young-only minor sweeps every region holding a young object or allocated into since
+  the last collection (`young_count > 0`, as today); a major sweeps every region. Per region, with
+  `live = oldocc | markocc` (a major: `markocc`, and `oldocc` rebuilt by its marker):
+  `slotmap &= live`, `youngmap &= markocc & ~oldocc`, then `occ = live` and the buffers swap. A live
+  object's start granule is in `live`, so the AND clears exactly the dead objects' starts. Counts
+  come from popcounts: `live_count` of `slotmap`, `young_count` of `youngmap`, the heap count their
+  sum, `swept=` the drop; GENCHECK's live prediction (premise 5) stays independent of them. A
+  region whose `slotmap` empties is released. All word-wise: no dead slot, no hole visited.
+- *Per-dead-slot work only when asked.* The ALLOCTRACE `F` records, lineage poisoning and the
+  `just gc-trace` anchor (`sprout_gc_trace_free`, under lineage and `SPROUT_GC_STRESS=1`) iterate
+  `slotmap & ~live`, the starts about to clear, before the AND.
+- *Walks and lookups.* No FREE header is written; holes hold stale bytes. Every walk steps through
+  `slotmap` bits: `sprout_gc_check_sweep` and the verify walks; HDRCHECK already uses
+  `slotmap_next_start`. `slotmap` now marks exactly the objects in use, so
+  `sprout_heap_lookup_region` accepts a payload by its start bit, and a raw word equal to a dead or
+  hole address is rejected.
+- *Allocation.* Between collections one cursor walks each region's holes, the zero runs of `occ`
+  found from the map as it goes, in address order, and only moves forward: a request that fits
+  bumps, one that does not moves on, and the remainder waits for the next collection. A request over
+  256 B that misses the current hole takes an overflow cursor (Immix). Past the last hole a region
+  opens. Allocation sets `occ` over the extent, and `slotmap` and `youngmap` at the start. The
+  cursors are (region index, granule) and move with `region_table_insert` and
+  `region_table_remove`, as step 4's class cursors do. Each collection resets them.
+- *Inline tails.* `sprout_vec_release_inline_tail` clears `occ` and `oldocc` over the tail, gives it
+  no `slotmap` bit, and lists it by exact class; allocation tries the lists before the cursors. The
+  lists are dropped at each collection before the sweep recomputes `occ`, when unused tails become
+  hole space. Without them mutvec_push holds 2.36× today's memory; with them 0.36×.
 - *Malloc'd data.* Every vector with an out-of-line buffer, every bytes and every builder is on its
-  region's young or old buffer list, entered when the buffer is acquired and moved at promotion.
-  A minor walks the young list and frees what `markocc` does not cover; a major walks both.
-- *Singletons, census, lineage.* Singletons are checked against `markocc` over the ctor table. The
-  `types:` census is taken at majors, from the marker. A lineage corpse sets `oldocc` over its
-  extent, and lineage mode keeps a per-slot poisoning walk of the holes, since poisoning needs one.
-- *Free count.* Free granules divided by the mean live slot size in granules, so the footprint
-  floor and `just gc-trigger-check` keep a slot-sized unit. Raw granules would delay 23 of the
-  self-compile's 29 floor-applying collections; the normalised count delays 14, by 6% of an
-  interval on average, which the prototype measures against the trigger rather than the replay.
-  Whether the floor is still needed once a sweep no longer walks free slots is for
-  `test_gc_trigger_adversary` to show; the floor stays until it does.
-- *What goes.* The per-region free lists, their cursors and verify code (step 4), and the staged
-  build. With them go the costs and copies step 4 left: `fl_region_pop_slow` called on each
+  region's young or old buffer list, entered where the buffer is acquired (`sprout_alloc_vector_sized`'s
+  out-of-line branch, both growth branches of `vector_push`, `sprout_alloc_bytes_val`,
+  `sprout_alloc_builder_val`) and moved to the old list at promotion. A minor walks the young list
+  and frees the buffers of entries `markocc` does not mark; a major walks both.
+- *Singletons, census, AGEPROF, lineage.* Singletons are checked against `markocc` start bits over
+  the ctor table. The `types:` census and AGEPROF's live and freed histograms are produced at majors
+  from the marker, and AGEPROF's consistency check compares against the popcount heap count. A
+  lineage corpse keeps its `slotmap` bit and sets `occ` and `oldocc` over its extent.
+- *Free count.* Bumped granules minus `occ`'s popcount, per region, divided by the mean live slot
+  size in granules, so the footprint floor and `just gc-trigger-check` keep a slot-sized unit. Raw
+  granules would delay 23 of the self-compile's 29 floor-applying collections in the replay; the
+  normalised count delays 14, by 6% of an interval on average. Whether the floor is still needed
+  once a sweep no longer walks free slots is for `test_gc_trigger_adversary` to show; it stays
+  until then.
+- *What goes.* The per-region free lists, their cursors and verify code (step 4), the staged
+  build, the colour-clearing sweep and `sprout_gc_clear_marks`, and the ` kind=minor sweep=full`
+  case. With them go the costs and copies step 4 left: `fl_region_pop_slow` called on each
   allocation of an exhausted class, cursors lowered on each push and then reset, a minor that
   empties every region reopening one, the `SproutRegion.emptied` flag, the young sweep's copy of
   Pass 2, the list pop written three times, and the per-site choice between list kinds.
 
 **Prototype gate.** Hand-apply C with its allocation path, behind a switch, and run the §14.8 set on
-the VM with rotate_classes, mutvec_push and load_spike. Take it if sweep time halves on the
-GC-heavy workloads, no workload's CPU or peak slots rises outside its spread, and each workload's
-peak slots are within 10% of the replay's prediction; a larger gap means the replay or the
-prototype is wrong, and is found before the design proceeds. Otherwise take A.
+the VM with rotate_classes, mutvec_push and load_spike. `sweep_us` alone cannot judge it, since C
+moves work into the mark, so the gate reads GC time (`elapsed_us`) and CPU: take C if GC time falls
+by a third on the GC-heavy workloads and no workload's CPU or peak slots rises outside its spread.
+Check the replay with the trigger pinned (`SPROUT_GC_THRESHOLD`): peak ordinary regions at a
+collection's start within 10% of the replay's on each workload, or the gap explained before the
+design proceeds. Measure the trigger's shift from the free count's new unit separately. Otherwise
+take A.
 
 ## 6. Premises
 
@@ -693,18 +724,28 @@ Each premise has a test or a check that fails when it breaks.
 9. **Step 4.** Between collections, no region below a class's cursor has a free slot of that
    class, and each cached block is its cursor region's. `SPROUT_FL_VERIFY=1` checks both at each
    allocation that advances a cursor, and the cache after every collection.
-10. **Step 5 (option C).** After a sweep, a region's `slotmap` and `youngmap` bits lie inside its
-    live granules, so no dead object keeps a start bit and no lookup accepts one. GENCHECK checks
-    every region swept against a walk of its live objects.
-11. **Step 5.** `oldocc | markocc` covers every live object's extent, and `oldocc` exactly the old
-    objects'. GENCHECK compares the maps with the extents of the objects a `slotmap` walk finds.
-12. **Step 5.** Between collections a granule is handed out once: the cursors only move forward,
-    and a tail is listed once and taken once. A `SPROUT_FL_VERIFY` successor checks each
-    allocation against the cursors, the holes and the tail lists.
-13. **Step 5.** Every live object that owns malloc'd data is on its region's young or old buffer
-    list exactly once. GENCHECK checks the lists against a `slotmap` walk.
-14. **Step 5.** No walk steps over a hole by header: each iterates `slotmap`. A test allocates
-    into part of a hole and runs the GENCHECK, HDRCHECK and `SPROUT_FL_VERIFY` walks after it.
+10. **Step 5 (option C).** A young-only minor sweeps every region holding a young object or
+    allocated into since the last collection, and after any sweep each region's `slotmap` and
+    `youngmap` bits lie inside `occ`, so no dead object keeps a start bit and no lookup accepts one.
+    GENCHECK walks every region, swept or not.
+11. **Step 5.** Between collections `occ` covers every live object's extent, young ones that stayed
+    young included; `oldocc` covers exactly the old objects' and lineage corpses' extents; `markocc`
+    is zero. GENCHECK compares the maps with the extents of the objects a `slotmap` walk finds.
+12. **Step 5.** Between collections a granule is handed out once: the cursors only move forward, a
+    tail is listed once and taken once, and the tail lists are dropped before the sweep recomputes
+    `occ`. A `SPROUT_FL_VERIFY` successor checks each allocation against `occ`, the cursors and the
+    lists.
+13. **Step 5.** Every live object that owns malloc'd data is on its region's young or old buffer list
+    exactly once. GENCHECK checks the lists against a `slotmap` walk.
+14. **Step 5.** No walk steps over a hole by header: each iterates `slotmap`. A test scribbles a
+    hole's bytes, allocates into part of it, and runs the GENCHECK, HDRCHECK and verify walks.
+15. **Step 5.** The header colour is set exactly on old objects: never on a young one, set by the
+    marker at promotion. GENCHECK's walk checks it against `oldocc`.
+16. **Step 5.** The remembered rule reads an object's age before this collection's bump. Premise 3's
+    old-edge check catches a missed edge.
+
+Premises 8 and 9 retire with step 4's lists. Premise 5's heap count comes from popcounts under C,
+and premise 6's free count changes unit.
 
 ## 7. Steps
 
@@ -795,8 +836,8 @@ Each premise has a test or a check that fails when it breaks.
    The young sweep's work per dead slot is unchanged; §5.7 is the step that removes it.
 5. **Holes from occupancy maps** (§5.7, option C). First a hand-applied prototype with its
    allocation path, run on the VM over the §14.8 set with rotate_classes, mutvec_push and
-   load_spike, gated as §5.7 says; else option A. Then premises 10–14 with their checks, behind a
-   switch for the A/B. Option D follows as its own step.
+   load_spike, gated as §5.7 says; else option A. Then premises 10–16 with their checks, behind a
+   switch for the A/B. Option D is part of C.
 6. Retire `SPROUT_GC_REGION_LISTS` once steps 4 and 5 settle it, and update
    `compiler-internals.md` and `gates.md`. Retiring it removes the global lists with
    `sprout_gc_young_sweep_ok` and the staged build (`g_fl_saved`, `fl_push_staged`,
@@ -833,13 +874,22 @@ Step 4:
 - `gates.md`: `just gc-gen-check`'s region-list runs and `*_nostress` programs.
 
 Step 5:
-- `compiler-internals.md` §Non-moving GC: the FREE-header-with-slotmap-bit contract, holes and
-  the occupancy maps, walks by `slotmap`, the tail lists, buffer lists, census at majors, and the
-  inline-tail paragraph.
-- `gates.md` and `just gc-gen-check`: the FL_VERIFY runs and premises 10–14; `just
-  gc-trigger-check` for the free count's unit.
+- `compiler-internals.md`: §Non-moving GC's slotmap paragraph (FREE rejection), the two-pass sweep,
+  the staged build and its pinned hazards, HDRCHECK ("never cleared or re-carved"; also the comment
+  above `sprout_hdrcheck_slot`), the free count as list length, FL_VERIFY, and the inline-tail
+  paragraph; §Minor collections: the colour bit as old only, ageing in the marker, the occupancy
+  maps, the tail and buffer lists, census at majors.
+- `development.md`: the `SPROUT_DEBUG_GC` row (census at majors, `free=` unit, no `sweep=full`).
+- `gates.md` and the justfile: `just gc-gen-check`'s FL_VERIFY runs and premises 10–16;
+  `just test-freelist-verify` and the tests whose only check is FL_VERIFY
+  (`tests/stdlib/test_gc_freelist_reuse.spr`, `test_gc_region_release.spr`) move to the successor
+  check; `just gc-trigger-check` and `bench/gc_trigger/measure.sh` for the free count's unit;
+  `just gc-ageprof-check` for histograms at majors; `just gc-alloctrace-check` for `F` from the
+  cleared starts.
 - Tests: `tests/gc_gen/cursor_lower_nostress.spr` tests step 4's cursors, which go;
   `tests/c_runtime/promote_age.c` and `young_sweep.c` read the free count.
+- `gc-size-classes-v0.md` and `compiler-internals.md`'s note that coalescing needs a
+  `slotmap_clear`: both stale once the sweep clears `slotmap`.
 
 Step 6, for step 4's switch: `sprout_gc_young_sweep_ok`, the staged build, and the
 `fl_push_staged` warning in the comment above `sprout_vec_release_inline_tail`.
