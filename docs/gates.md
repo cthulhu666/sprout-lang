@@ -578,8 +578,8 @@ the REPL's completion list. It checks that a section exists, not what it says.
 ## Runtime warnings — `just runtime-warnings`
 
 Compiles each `runtime/*.c` with `clang -fsyntax-only -Wall -Wextra`
-(`scripts/check_runtime_warnings.sh`), once per build variant: default, `-DSPROUT_GC_PROFILE` and
-`-DSPROUT_GC_AGEPROF_STORES` (the only compile-time switches the justfile passes). When the local clang major equals the one
+(`scripts/check_runtime_warnings.sh`), once per build variant: default, `-DSPROUT_GC_PROFILE`,
+`-DSPROUT_GC_AGEPROF_STORES` and `-DSPROUT_GC_ALLOCTRACE` (the only compile-time switches the justfile passes). When the local clang major equals the one
 `scripts/ci_install_llvm.sh` pins (`LLVM_VERSION`), it adds `-Werror` and any warning fails the
 gate. On any other major it prints the warnings, says they are not enforced, and exits 0.
 
@@ -1139,6 +1139,22 @@ followed by a minor, not a major, which is why the program grows eight.
   without allocation between the store and the read passes whether or not the barrier exists.
 - The verifier can report a scalar that equals a young payload address as an edge (§14.5). The
   report names the owner kind and field index to triage that.
+
+## Allocation trace — `just gc-alloctrace-check`
+
+Builds the runtime with `-DSPROUT_GC_ALLOCTRACE` and runs `tests/gc_gen/inline_tail_reuse`
+(default, `SPROUT_GC_MINOR=0`, `SPROUT_GC_STRESS=1`, with and without
+`SPROUT_GC_REGION_LISTS=1`), `vector_push` and `region_empty_minor` (STRESS), and
+`tests/stdlib/test_gc_large_object_arena` (default, minors off, STRESS), each with
+`SPROUT_GC_ALLOCTRACE=<path>`. Every trace goes through `bench/gc_place/replay --check`:
+every `F`, `T` and `B` names an allocated object; no object is freed twice; `F` falls between a
+`G` and its `E`; `allocs − frees` equals `heap_after` at each `E`; `T` hits a vector at most once.
+The trace must end with the atexit collection's `E`, whose cycle is the last `cycle=` line of
+`SPROUT_DEBUG_GC`, and stdout must match the program's expected output. The inline-tail program
+must record `T` and `B`; the large-object one must record a large allocation, and in its default
+run both majors and young-only minors. About 12 s. The format is in `bench/gc_place/replay.c`;
+the recorder is described in [compiler-internals.md](compiler-internals.md) (Allocation trace).
+Also built as a fourth variant by `just runtime-warnings`.
 
 ## Sweep-walk counter — `just gc-walk-check`
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Compile runtime/*.c with -Wall -Wextra; -Werror only when the local clang major equals the
 # major CI pins (docs/gates.md §Runtime warnings). Each file is compiled in every build variant
-# (default, GC profile, age-profile stores).
+# (default, GC profile, age-profile stores, allocation trace).
 #
 # usage: check_runtime_warnings.sh [--pinned-major N | --print-local-major] [file.c ...]
 set -uo pipefail
@@ -47,7 +47,7 @@ if [[ "$local_major" == "$pinned" ]]; then
 fi
 
 # The runtime's compile-time switches (justfile: gc-profile, gc-ageprof-check). "" is the default.
-variants=("" -DSPROUT_GC_PROFILE -DSPROUT_GC_AGEPROF_STORES)
+variants=("" -DSPROUT_GC_PROFILE -DSPROUT_GC_AGEPROF_STORES -DSPROUT_GC_ALLOCTRACE)
 
 rc=0
 warned=0
