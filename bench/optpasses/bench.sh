@@ -5,10 +5,10 @@
 # pass under test OFF via SPROUT_OPT_OFF — so an A/B costs two compiles instead
 # of two bootstraps, which is what lets it run in CI at all.
 #
-# Usage: bench/optpasses/bench.sh [pass]        (default: dle)
+# Usage: bench/optpasses/bench.sh [pass]        (default: spec)
 set -uo pipefail
 
-PASS="${1:-dle}"
+PASS="${1:-spec}"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$DIR/../.." && pwd)"
 CC="$REPO/build/compile_driver_bin_stage1"
@@ -77,7 +77,7 @@ stat_field() {  # stat_field <err-file> <key>
 # here. A typo'd pass disables nothing, and every column below would then agree
 # for a reason that has nothing to do with the pass.
 probe_err="$TMPD/probe.err"
-SPROUT_OPT_OFF="$PASS" "$CC" --emit-ir stdlib tests/opt_harness/dead_let.spr >/dev/null 2>"$probe_err" || true
+SPROUT_OPT_OFF="$PASS" "$CC" --emit-ir stdlib tests/opt_harness/specialise.spr >/dev/null 2>"$probe_err" || true
 if grep -q 'no such pass' "$probe_err"; then
   cat "$probe_err" >&2
   echo "bench-opt: '$PASS' is not a pass — aborting rather than printing a meaningless A/B." >&2
@@ -140,5 +140,5 @@ echo
 if (( fired == 0 )); then
   echo "NOTE: $PASS removed or added nothing anywhere in this corpus — the ON and OFF columns"
   echo "      are expected to match. That is a result about the pass, not a broken harness;"
-  echo "      tests/opt_harness/dead_let.spr is the fixture where it does fire."
+  echo "      tests/opt_harness/specialise.spr is the fixture where it does fire."
 fi

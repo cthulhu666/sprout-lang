@@ -74,7 +74,7 @@ bench-string-concat: bootstrap-from-seed
 # NOT a gate, for bench-string-concat's reason — the run columns are wall-clock.
 # The gate half is `just opt-harness-check`, which asserts only exact properties.
 [group('dev')]
-bench-opt pass="dle": bootstrap-from-seed
+bench-opt pass="spec": bootstrap-from-seed
   bash bench/optpasses/bench.sh {{quote(pass)}}
 
 # HTTP keep-alive A/B: one server, compiled against the stdlib from before keep-alive and from this
@@ -1623,32 +1623,33 @@ linear-reuse-smoke: bootstrap-from-seed
 # The pass A/B harness's self-check (docs/opt-passes-v0.md §M0).  Three properties,
 # each with a silent-wrong failure mode: the switch reaches emitted IR at all, the
 # pass it disables is semantics-preserving, and an unset variable leaves the
-# pipeline exactly where it was.  A harness that cannot detect DLE — a pass already
-# known to do work — would not detect CSE either.
+# pipeline exactly where it was.  It runs on `spec`, a pass known to do work on the
+# fixture; a harness that cannot detect that would not detect CSE either.
 [group('smoke')]
 opt-harness-check: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
   TMPD=$(mktemp -d /tmp/sprout_optharness_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
-  F=tests/opt_harness/dead_let.spr
+  F=tests/opt_harness/specialise.spr
   [ -f "$F" ] || { echo "opt-harness-check: missing fixture $F" >&2; exit 1; }
 
   SPROUT_OPT_STATS=1 "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$F" \
     > "$TMPD/on.ll" 2>"$TMPD/on.err"
-  SPROUT_OPT_STATS=1 SPROUT_OPT_OFF=dle "{{build_dir}}/compile_driver_bin_stage1" --emit-ir \
+  SPROUT_OPT_STATS=1 SPROUT_OPT_OFF=spec "{{build_dir}}/compile_driver_bin_stage1" --emit-ir \
     "{{stdlib_root}}" "$F" > "$TMPD/off.ll" 2>"$TMPD/off.err"
 
-  grep -q '^\[opt\] dle on ' "$TMPD/on.err" \
+  grep -q '^\[opt\] spec on ' "$TMPD/on.err" \
     || { echo "opt-harness-check: no ON stats line" >&2; cat "$TMPD/on.err" >&2; exit 1; }
-  grep -q '^\[opt\] dle off ' "$TMPD/off.err" \
-    || { echo "opt-harness-check: SPROUT_OPT_OFF=dle did not disable the pass" >&2; exit 1; }
-  # Anchored to the dle line: unanchored, a second instrumented pass makes this a
-  # multi-line string and the -gt below fails as a syntax error, red-lighting this
-  # gate for a reason that has nothing to do with dle.
-  removed=$(sed -n 's/^\[opt\] dle .*removed=\(-\{0,1\}[0-9]\{1,\}\).*/\1/p' "$TMPD/on.err")
-  [ "${removed:-0}" -gt 0 ] \
-    || { echo "opt-harness-check: DLE removed $removed nodes from the fixture — it no longer fires" >&2; exit 1; }
+  grep -q '^\[opt\] spec off ' "$TMPD/off.err" \
+    || { echo "opt-harness-check: SPROUT_OPT_OFF=spec did not disable the pass" >&2; cat "$TMPD/off.err" >&2; exit 1; }
+  # The stats line carries `added=`, and the pass must fire on the fixture. Anchored to
+  # the spec line: unanchored, a second instrumented pass makes this a multi-line
+  # string and the -gt below fails as a syntax error, red-lighting this gate for a
+  # reason that has nothing to do with spec.
+  added=$(sed -n 's/^\[opt\] spec on .*added=\([0-9]\{1,\}\).*/\1/p' "$TMPD/on.err")
+  [ "${added:-0}" -gt 0 ] \
+    || { echo "opt-harness-check: spec added $added nodes to the fixture — it no longer fires" >&2; cat "$TMPD/on.err" >&2; exit 1; }
 
   if cmp -s "$TMPD/on.ll" "$TMPD/off.ll"; then
     echo "opt-harness-check: ON and OFF emit identical IR — the switch does not reach codegen" >&2
@@ -1661,7 +1662,7 @@ opt-harness-check: bootstrap-from-seed
     "$TMPD/$v.bin" > "$TMPD/$v.out"
   done
   cmp -s "$TMPD/on.out" "$TMPD/off.out" \
-    || { echo "opt-harness-check: DLE changed program output — not semantics-preserving" >&2
+    || { echo "opt-harness-check: spec changed program output — not semantics-preserving" >&2
          diff "$TMPD/on.out" "$TMPD/off.out" >&2; exit 1; }
 
   # An unrecognised pass name warns and disables nothing.
@@ -1679,24 +1680,6 @@ opt-harness-check: bootstrap-from-seed
   grep -q 'not implemented yet' "$TMPD/pending.err" \
     || { echo "opt-harness-check: disabling an unimplemented pass looked like it took effect" >&2; exit 1; }
 
-  # Specialisation runs by default (`print` is constrained, so it fires on the
-  # fixture); the stats line carries `added=`; SPROUT_OPT_OFF=spec must reach codegen.
-  grep -q '^\[opt\] spec on ' "$TMPD/on.err" \
-    || { echo "opt-harness-check: spec is not on by default" >&2; cat "$TMPD/on.err" >&2; exit 1; }
-  spec_added=$(sed -n 's/^\[opt\] spec on .*added=\([0-9]\{1,\}\).*/\1/p' "$TMPD/on.err")
-  [ "${spec_added:-0}" -gt 0 ] \
-    || { echo "opt-harness-check: spec added $spec_added nodes to the fixture — it no longer fires" >&2; exit 1; }
-  SPROUT_OPT_STATS=1 SPROUT_OPT_OFF=spec "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$F" \
-    > "$TMPD/nospec.ll" 2>"$TMPD/nospec.err"
-  grep -q '^\[opt\] spec off ' "$TMPD/nospec.err" \
-    || { echo "opt-harness-check: SPROUT_OPT_OFF=spec did not turn the pass off" >&2; cat "$TMPD/nospec.err" >&2; exit 1; }
-  if cmp -s "$TMPD/on.ll" "$TMPD/nospec.ll"; then
-    echo "opt-harness-check: SPROUT_OPT_OFF=spec emits the default IR — the switch does not reach codegen" >&2
-    exit 1
-  fi
-  grep -q '^\[opt\] dle on .* added=[0-9]' "$TMPD/on.err" \
-    || { echo "opt-harness-check: the stats line has no added=" >&2; cat "$TMPD/on.err" >&2; exit 1; }
-
   # The seed guard refuses SPROUT_OPT_OFF and passes without it.
   if SPROUT_OPT_OFF=x bash scripts/opt_env_guard.sh 2>"$TMPD/guard.err"; then
     echo "opt-harness-check: opt_env_guard.sh accepted SPROUT_OPT_OFF" >&2; exit 1
@@ -1706,7 +1689,7 @@ opt-harness-check: bootstrap-from-seed
   env -u SPROUT_OPT_OFF bash scripts/opt_env_guard.sh \
     || { echo "opt-harness-check: opt_env_guard.sh refused a clean environment" >&2; exit 1; }
 
-  echo "==> opt-harness-check ✓ (dle removed $removed nodes; OFF restores them)"
+  echo "==> opt-harness-check ✓ (spec added $added nodes; OFF restores them)"
 
 # DoD #8 — bundle smoke.  `--phase bundle` on token.sprout, ast.sprout, and
 # prelude.sprout must produce non-empty output with no dot-prefix qualified names.
@@ -3747,6 +3730,55 @@ overflow-smoke: bootstrap-from-seed
   done
   echo "==> overflow-smoke ✓ (${#FIXTURES[@]} overflow cases panic cleanly)"
 
+# A do-block `let` runs even when its name is never read (docs/spec-v0.md §6 rule 4): a pure
+# RHS can still panic (`panic`, `/` by zero, Int overflow). Each fixture binds a panicking RHS
+# to a name nothing reads, then prints. The run must exit non-zero with the expected message on
+# stderr and nothing on stdout, so a deleted binding shows as output where there must be none.
+# Operands are runtime values, as in overflow-smoke, so neither the compiler nor clang folds them.
+[group('smoke')]
+dead-let-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_deadlet_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  FIXTURES=(panic_discarded panic_named_unused div_by_zero mul_overflow neg_overflow)
+  declare -A EXPECT=(
+    [panic_discarded]="insufficient funds"
+    [panic_named_unused]="insufficient funds"
+    [div_by_zero]="division by zero"
+    [mul_overflow]="Int overflow in *"
+    [neg_overflow]="overflow"
+  )
+  for f in "${FIXTURES[@]}"; do
+    FIXTURE="tests/dead_let_smoke/$f.spr"
+    if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$FIXTURE" > "$TMPD/$f.ll" 2>"$TMPD/$f.emit.err"; then
+      echo "dead-let-smoke: emit-IR failed for $f" >&2; cat "$TMPD/$f.emit.err" >&2; exit 1
+    fi
+    if ! clang "$TMPD/$f.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/$f.bin" 2>"$TMPD/$f.link.err"; then
+      echo "dead-let-smoke: link failed for $f" >&2; cat "$TMPD/$f.link.err" >&2; exit 1
+    fi
+    set +e
+    "$TMPD/$f.bin" > "$TMPD/$f.out" 2>"$TMPD/$f.err"
+    ec=$?
+    set -e
+    if [ "$ec" -eq 0 ]; then
+      echo "dead-let-smoke: $f did NOT panic (exit 0) — the unused let was dropped" >&2
+      echo "  stdout was: $(cat "$TMPD/$f.out")" >&2
+      exit 1
+    fi
+    if [ -s "$TMPD/$f.out" ]; then
+      echo "dead-let-smoke: $f printed before panicking — the unused let ran too late" >&2
+      echo "  stdout was: $(cat "$TMPD/$f.out")" >&2
+      exit 1
+    fi
+    if ! grep -qF "${EXPECT[$f]}" "$TMPD/$f.err"; then
+      echo "dead-let-smoke: $f not reported cleanly (exit $ec); expected '${EXPECT[$f]}' on stderr" >&2
+      echo "--- stderr was ---" >&2; cat "$TMPD/$f.err" >&2
+      exit 1
+    fi
+  done
+  echo "==> dead-let-smoke ✓ (${#FIXTURES[@]} unused-let cases panic cleanly)"
+
 # stdlib.bits shift-count guard regression (CI gate). Same shape and same reason as
 # div-by-zero-smoke above: the count is -1 at RUNTIME (`list_length(argv) - 1` with
 # no args), which neither the compiler nor clang can fold, and a LITERAL negative
@@ -4751,6 +4783,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "div-by-zero-smoke|div-by-zero-smoke"
     "runtime-diag-smoke|runtime-diag-smoke"
     "overflow-smoke|overflow-smoke"
+    "dead-let-smoke|dead-let-smoke"
     "negative-shift-smoke|negative-shift-smoke"
     "closure-arity-smoke|closure-arity-smoke"
     "stack-overflow-smoke|stack-overflow-smoke"

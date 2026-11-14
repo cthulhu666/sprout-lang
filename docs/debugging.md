@@ -115,7 +115,7 @@ The last (lowering-discard) motivates the pending IR-level **phase 2b** (BACKLOG
 Bisect a miscompile against the Sprout-level passes without rebuilding the compiler
 (docs/opt-passes-v0.md §M0):
 
-- `SPROUT_OPT_OFF=dle` — comma list of passes to **disable** (`dle`, `bce`, `spec`, `wsi`); unset means all on.
+- `SPROUT_OPT_OFF=spec,bce` — comma list of passes to **disable** (`bce`, `spec`, `wsi`, `scalar`); unset means all on.
   Two warnings guard the misdiagnosis this knob invites: an unrecognised name
   ("no such pass") and a name that is declared but not yet implemented — `cse`
   and `licm` today ("not implemented yet … nothing was disabled"). Neither can

@@ -5,7 +5,7 @@ import stdlib.string as string
 # Which optimisation passes run, and whether they report what they did
 # (docs/opt-passes-v0.md §M0).  Two switches, read once per compile:
 #
-#   SPROUT_OPT_OFF=dle,cse    comma list of passes to DISABLE; unset means all on
+#   SPROUT_OPT_OFF=spec,cse   comma list of passes to DISABLE; unset means all on
 #   SPROUT_OPT_STATS=1        per-pass node-count deltas on stderr
 #
 # The environment carries strings; `parse` turns them into `Pass` values once, so
@@ -17,7 +17,6 @@ import stdlib.string as string
 # SPROUT_VERIFY_DISPATCH_OFF set the precedent.
 
 export type Pass (..) deriving (Eq, ToString) =
-  | Dle
   | Cse
   | Licm
   | Bce
@@ -30,7 +29,6 @@ export type OptConfig (..) =
 
 export fn pass_name(p: Pass) -> String =
   match p with
-  | Dle -> "dle"
   | Cse -> "cse"
   | Licm -> "licm"
   | Bce -> "bce"
@@ -40,7 +38,6 @@ export fn pass_name(p: Pass) -> String =
 
 export fn pass_from_name(name: String) -> Maybe Pass =
   match name with
-  | "dle" -> Just(Dle)
   | "cse" -> Just(Cse)
   | "licm" -> Just(Licm)
   | "bce" -> Just(Bce)
@@ -50,7 +47,7 @@ export fn pass_from_name(name: String) -> Maybe Pass =
   | _ -> Nothing
 
 export let all_passes =
-  [Dle, Cse, Licm, Bce, Spec, Wsi, Scalar]
+  [Cse, Licm, Bce, Spec, Wsi, Scalar]
 
 # Which of those the pipeline actually runs. `Cse`/`Licm` are named before they
 # exist because the switch's vocabulary is the roadmap — but disabling one must
@@ -59,7 +56,6 @@ export let all_passes =
 # the same change that lands the pass.
 export fn implemented(p: Pass) -> Bool =
   match p with
-  | Dle -> true
   | Cse -> false
   | Licm -> false
   | Bce -> true
@@ -84,7 +80,7 @@ export fn from_env() -> OptConfig !{IO} =
 export fn enabled(cfg: OptConfig, p: Pass) -> Bool =
   !list_member(p, cfg.disabled)
 
-# For a pass that runs below `compiler.run_opt_passes`, which has already reported
+# For a pass that runs below `compiler.lower_passes`, which has already reported
 # any unknown name: reads the switch without repeating the warnings.
 export fn pass_enabled(p: Pass) -> Bool !{IO} =
   enabled(parse(switches.env_switch_quiet("SPROUT_OPT_OFF"), Nothing), p)

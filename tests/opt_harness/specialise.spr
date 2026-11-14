@@ -1,0 +1,13 @@
+module main
+
+# The pass A/B harness's own fixture (docs/opt-passes-v0.md §M0).
+#
+# `print` is constrained, so specialisation copies it at the concrete type and the
+# pass adds nodes; SPROUT_OPT_OFF=spec keeps the generic call. `just opt-harness-check`
+# compares the two builds: the stats lines, the emitted IR and the program output.
+
+fn scaled(n: Int) -> Int =
+  n * 2 + 1
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(scaled(20)))

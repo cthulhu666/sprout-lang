@@ -1,0 +1,11 @@
+module main
+
+# An unused `let` whose RHS divides by a runtime zero must still panic. The
+# divisor is `list_length` of argv, which is 0 with no arguments and which the
+# compiler cannot fold.
+
+fn main() -> Unit !{IO} =
+  do
+    args <- argv_all_bytes()
+    let quotient = 100 / list_length(args)
+    print("reached")

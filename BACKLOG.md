@@ -155,6 +155,10 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 - [ ] `P4` **Effectful-`let..else` surface (B) — unify `do` and `let..in`.** Would let a `let..in`
   block hold `<-` bindings, at the cost of reclassifying `let..in` as sometimes-effectful. Revisit
   only if the two-construct split proves to be friction (`docs/effectful-let-else-v0.md` §5).
+- [ ] `P3` **Unused named local binding is not reported.** A named `let` or parameter that is never
+  read compiles silently. Sprout has no warnings, so the question is whether it is a compile error
+  (as in Go). `_` stays the way to discard, and its RHS still runs (spec §6 rule 4). Needs a design
+  doc: the rule, and migration of the existing stdlib and compiler code that binds unused names.
 
 **Existentials / GADTs**
 

@@ -1,0 +1,11 @@
+module main
+
+# An unused `let` whose RHS overflows `*` must still panic. `a` is 2 at run time
+# (the compiler cannot fold it) and 2 * 2^62 does not fit in Int.
+
+fn main() -> Unit !{IO} =
+  do
+    args <- argv_all_bytes()
+    let a = 2 + list_length(args)
+    let big = a * 4611686018427387904
+    print("reached")

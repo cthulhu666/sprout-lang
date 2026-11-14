@@ -117,11 +117,12 @@ the load-bearing half, not the seed diff's size.
 
 ### 0 differences is weak evidence for a purity change in `dce`
 
-Both halves of the 2026-09-08 nullary DCE work reported 62 files, 0 differences: the arm that
-*eliminates* more (a pure nullary call bound to an unused name) and the arrow walk that *keeps*
-more (a curried `!{IO}` call that was being dropped — a real dropped-effect miscompile). No
-golden program binds a call it then ignores, in either direction, so the corpus cannot observe
-`is_pure_callee_type` at all. A change there needs a synthetic test over `dce.elim_program` and
+Both halves of the 2026-09-08 nullary work reported 62 files, 0 differences: the arm that
+*eliminated* more (a pure nullary call bound to an unused name, dead-let elimination, since
+removed) and the arrow walk that *keeps* more (a curried `!{IO}` call that was being dropped — a
+real dropped-effect miscompile). No golden program binds a call it then ignores, in either
+direction, so the corpus cannot observe `is_pure_callee_type` at all. A change there needs a
+synthetic test over `dce.callee_is_pure` (`tests/stdlib/compiler/test_dce_callee_purity.spr`) and
 an executable fixture; the golden gate will report clean either way.
 
 ## Bootstrap seed — `scripts/seed_gate.sh`, `just refresh-seed`
@@ -1197,9 +1198,9 @@ monotone in s on every workload.
 
 ## Optimisation-pass harness — `just opt-harness-check`
 
-Compiles `tests/opt_harness/dead_let.spr` twice, once with every pass on and once with
-`SPROUT_OPT_OFF=dle`, and asserts four things: the stats line appears in both modes, the pass
-removes a non-zero number of nodes, the two IRs differ, and the two binaries print the same thing.
+Compiles `tests/opt_harness/specialise.spr` twice, once with every pass on and once with
+`SPROUT_OPT_OFF=spec`, and asserts four things: the stats line appears in both modes, the pass
+adds a non-zero number of nodes, the two IRs differ, and the two binaries print the same thing.
 It then compiles twice more with names that must *not* take effect: `nosuchpass` requires a "no
 such pass" warning plus unchanged output, and `cse` — declared in the switch's vocabulary but not
 implemented — requires a "not implemented yet" warning.
@@ -1209,10 +1210,10 @@ a pass that silently stops firing, a typo'd pass name that disables nothing — 
 build and a compiler that is no longer doing what the flag says. Added 2026-09-11 with M0
 (docs/opt-passes-v0.md); wired into `just ci-fast-gates` as `opt-harness-check`.
 
-The fixture is deliberately wasteful, and has to be: DLE removes **zero** nodes from every real
-program in the bench corpus (`bench/results-2026-09-11-opt.md`), so a realistic fixture would assert
-nothing. Keep the dead binding pure and unread — making it effectful or reading it turns the gate
-into a tautology that passes for the wrong reason.
+The harness runs on `spec` because it reports `[opt] <pass> on|off` stats and fires on a
+four-line fixture (`print` is constrained). Dead-let elimination was the first pass here; it was
+removed because a `let` must run even when its name is unused (docs/spec-v0.md §6 rule 4), and
+it removed 0 nodes from the bench corpus (`bench/results-2026-09-11-opt.md`).
 
 ## Driven smokes — `just ide-smoke`, `just tui-files-smoke`
 

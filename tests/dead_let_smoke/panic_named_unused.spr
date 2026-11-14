@@ -1,0 +1,15 @@
+module main
+
+# Same as panic_discarded.spr, with a named binding that is never read.
+
+fn require(ok: Bool, msg: String) -> Unit =
+  if ok then () else panic(msg)
+
+fn withdraw(balance: Int, amount: Int) -> Int !{IO} =
+  do
+    let checked = require(amount <= balance, "insufficient funds")
+    print("dispensing " ++ int_to_string(amount))
+    balance - amount
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(withdraw(100, 1000000)))
