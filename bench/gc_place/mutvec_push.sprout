@@ -1,0 +1,63 @@
+module main
+
+# Allocation-trace workload for single-class placement (bench/gc_place/run.sh): the inline-tail
+# release. `mutvec_new(n, x)` keeps its n elements inside the object's own slot, and the first push
+# past n moves them out and frees the rest of the slot (`sprout_vec_release_inline_tail`), which
+# the trace records as a T. A window of vectors stays alive and a random one is replaced each
+# step, so the freed tails and the vectors that own them die at all ages. Prints a checksum.
+
+import stdlib.mutable (MutVec, mutvec_new, mutvec_empty, mutvec_push, mutvec_set, mutvec_at, mutvec_fold)
+import stdlib.rng (rng_next, rng_below)
+
+let window = 256
+let creations = 150000
+let max_len = 400
+let max_pushes = 4
+let modulus = 1000000007
+
+fn add_mod(a: Int, b: Int) -> Int =
+  let s = a + b
+  in s - (s / modulus) * modulus
+
+fn push_n(v: MutVec Int, x: Int, k: Int) -> Unit !{IO} =
+  if k <= 0 then ()
+  else
+    do
+      _ <- mutvec_push(v, x + k)
+      push_n(v, x, k - 1)
+
+# 1..max_len elements, then 1..max_pushes pushes: the first one releases the tail.
+fn make(s: Int) -> MutVec Int !{IO} =
+  do
+    v <- mutvec_new(1 + rng_below(s, max_len), s)
+    _ <- push_n(v, s, 1 + rng_below(rng_next(s), max_pushes))
+    v
+
+fn total(v: MutVec Int) -> Int !{IO} =
+  mutvec_fold(\ (acc, x) -> add_mod(acc, x), 0, v)
+
+fn churn(ring: MutVec (MutVec Int), i: Int, s: Int, acc: Int) -> Int !{IO} =
+  if i >= creations then acc
+  else
+    do
+      let s1 = rng_next(s)
+      v <- make(s1)
+      sum <- total(v)
+      _ <- mutvec_set(ring, rng_below(rng_next(s1), window), v)
+      churn(ring, i + 1, rng_next(s1), add_mod(acc, sum))
+
+fn ring_total(ring: MutVec (MutVec Int), i: Int, acc: Int) -> Int !{IO} =
+  if i >= window then acc
+  else
+    do
+      v <- mutvec_at(ring, i)
+      sum <- total(v)
+      ring_total(ring, i + 1, add_mod(acc, sum))
+
+fn main() -> Unit !{IO} =
+  do
+    blank <- mutvec_empty()
+    ring <- mutvec_new(window, blank)
+    acc <- churn(ring, 0, 20261114, 0)
+    live <- ring_total(ring, 0, 0)
+    print(`mutvec_push checksum=${acc} live=${live}`)

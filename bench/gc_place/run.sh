@@ -3,8 +3,7 @@
 # (docs/gc-stage2-v0.md §5.7; the policies and the trace format are in replay.c).
 #
 # usage: run.sh <output dir>
-#   WORKLOADS="a b"  workloads to run (default: all but galaxy_client, which needs a display, and
-#                    math_transcendental, which has no collections)
+#   WORKLOADS="a b"  workloads to run (default: ALL_WORKLOADS below)
 #   KEEP=1           keep the traces (they can be GBs); default deletes each after its replay
 #   REUSE=1          reuse binaries already in <dir>/bin
 #   RUN_TIMEOUT=s    seconds per recorded run (1800)
@@ -13,8 +12,12 @@
 # region counts are comparable with the `base` policy. The runtime is built with
 # -DSPROUT_GC_ALLOCTRACE and linked per workload with a plain clang -O2 link (not the
 # whole-program link of `just compile-native`: placement does not depend on inlining).
-# <dir>/<workload>.txt holds the check line, the tables and the replay's time and peak RSS.
-# Exit status 1 when a replay fails or a `base` calibration misses.
+# Each run also sets SPROUT_DEBUG_GC=1: the same run's cycle lines give today's walked= slots per
+# collection kind, saved as <dir>/<workload>.walked.txt and handed to the replay.
+# <dir>/<workload>.txt holds the check line, the program's stdout, the tables (calibration line
+# first) and the replay's time and peak RSS.
+# Exit status 1 when a replay fails or `base` does not replay the trace exactly (regions, large
+# regions and free slots at every collection).
 #
 # Workloads mirror bench/gc_minor/ab.sh's wl_def.
 set -euo pipefail
@@ -29,7 +32,8 @@ mkdir -p "$OUT/bin" "$OUT/rt"
 OUT="$(cd "$OUT" && pwd)"
 BIN="$OUT/bin"
 
-ALL_WORKLOADS="selfcompile compiler_test digit_recognizer gc_roots http_log_middleware nqueens astar mutvec_int load_spike"
+ALL_WORKLOADS="selfcompile compiler_test digit_recognizer gc_roots http_log_middleware nqueens astar mutvec_int load_spike
+  rotate_classes rotate_classes_mixed rotate_classes_cap mutvec_push inline_tail_reuse"
 WORKLOADS="${WORKLOADS:-$ALL_WORKLOADS}"
 KEEP="${KEEP:-0}"
 REUSE="${REUSE:-0}"
@@ -66,8 +70,39 @@ wl_def() {
       W_SRC=bench/gc_minor/mutvec_int.sprout; W_CMD=("$BIN/mutvec_int") ;;
     load_spike)
       W_SRC=bench/gc_minor/load_spike.sprout; W_CMD=("$BIN/load_spike") ;;
+    rotate_classes)   # bench/gc_trigger/rotate_classes.sprout as it stands: 4 classes in turn, live data grows
+      W_SRC=bench/gc_trigger/rotate_classes.sprout; W_CMD=("$BIN/rotate_classes") ;;
+    rotate_classes_mixed)   # main: mixed = true
+      W_SRC=bench/gc_place/rotate_classes_mixed.sprout; W_CMD=("$BIN/rotate_classes_mixed") ;;
+    rotate_classes_cap)   # main: cap = 100, live data flat
+      W_SRC=bench/gc_place/rotate_classes_cap.sprout; W_CMD=("$BIN/rotate_classes_cap") ;;
+    mutvec_push)
+      W_SRC=bench/gc_place/mutvec_push.sprout; W_CMD=("$BIN/mutvec_push") ;;
+    inline_tail_reuse)
+      W_SRC=tests/gc_gen/inline_tail_reuse.spr; W_CMD=("$BIN/inline_tail_reuse") ;;
     *) echo "unknown workload: $1" >&2; exit 2 ;;
   esac
+}
+
+# walked_by_kind <stderr of a SPROUT_DEBUG_GC=1 run>: "<k> <name> n=<cycles> mean=<walked> max=<walked>" per
+# collection kind (0 minors off, 1 major, 2 young-only minor, 3 full-sweep minor), from the cycle lines.
+walked_by_kind() {
+  awk '
+    /^\[sprout gc\] cycle=/ {
+      k = 0
+      if ($0 ~ / kind=major/) k = 1
+      else if ($0 ~ / kind=minor sweep=young/) k = 2
+      else if ($0 ~ / kind=minor sweep=full/) k = 3
+      if (match($0, /walked=[0-9]+/)) {
+        w = substr($0, RSTART + 7, RLENGTH - 7) + 0
+        n[k]++; sum[k] += w
+        if (w > mx[k]) mx[k] = w
+      }
+    }
+    END {
+      split("off major minor_young minor_full", nm, " ")
+      for (k = 0; k < 4; k++) if (n[k] > 0) printf "%d %s n=%d mean=%.2f max=%.0f\n", k, nm[k + 1], n[k], sum[k] / n[k], mx[k]
+    }' "$1"
 }
 
 # "real max_rss_mib" from a `/usr/bin/time` report, BSD `-l` (bytes) or GNU `-v` (KiB), told by format.
@@ -125,16 +160,17 @@ for w in $WORKLOADS; do
   echo "==> recording $w" >&2
   rc=0
   # The alarm survives perl's exec, so a livelock ends the run instead of hanging.
-  (cd "$W_DIR" && exec env "${W_ENV[@]}" SPROUT_GC_ALLOCTRACE="$trace" SPROUT_GC_REGION_LISTS=1 \
-    perl -e 'alarm shift; exec @ARGV' "$RUN_TIMEOUT" "${W_CMD[@]}") > /dev/null 2> "$OUT/$w.err" || rc=$?
+  (cd "$W_DIR" && exec env "${W_ENV[@]}" SPROUT_GC_ALLOCTRACE="$trace" SPROUT_GC_REGION_LISTS=1 SPROUT_DEBUG_GC=1 \
+    perl -e 'alarm shift; exec @ARGV' "$RUN_TIMEOUT" "${W_CMD[@]}") > "$OUT/$w.out" 2> "$OUT/$w.err" || rc=$?
   if [[ $rc != 0 ]]; then
     echo "ERROR: $w exited $rc (see $OUT/$w.err)" >&2
     FAILED=1
     rm -f "$trace"
     continue
   fi
+  walked_by_kind "$OUT/$w.err" > "$OUT/$w.walked.txt"
   {
-    echo "# $w: trace $(wc -c < "$trace" | tr -d ' ') bytes"
+    echo "# $w: trace $(wc -c < "$trace" | tr -d ' ') bytes; stdout: $(head -c 200 "$OUT/$w.out" | head -1)"
     if ! "$REPLAY" --check "$trace"; then echo "# --check FAILED"; fi
   } > "$txt" 2>&1
   if grep -q 'FAILED' "$txt"; then
@@ -145,11 +181,12 @@ for w in $WORKLOADS; do
   fi
   echo "==> replaying $w" >&2
   rc=0
-  /usr/bin/time "$TIME_FLAG" -o "$OUT/$w.time" "$REPLAY" --policies all "$trace" >> "$txt" 2>> "$txt" || rc=$?
+  /usr/bin/time "$TIME_FLAG" -o "$OUT/$w.time" "$REPLAY" --policies all --walked "$OUT/$w.walked.txt" "$trace" >> "$txt" 2>> "$txt" || rc=$?
   read -r real rss < <(time_fields "$OUT/$w.time")
   echo "# replay: ${real}s wall, peak RSS ${rss} MiB" >> "$txt"
   [[ $rc == 0 ]] || { echo "ERROR: replay of $w failed" >&2; FAILED=1; }
-  grep -q 'CALIBRATION MISS' "$txt" && { echo "WARNING: $w: base calibration missed" >&2; FAILED=1; }
+  grep -q 'CALIBRATION MISS' "$txt" && { echo "ERROR: $w: base does not replay the trace exactly" >&2; FAILED=1; }
+  rm -f "$OUT/$w.err"
   [[ "$KEEP" == 1 ]] || rm -f "$trace"
   cat "$txt"
 done
