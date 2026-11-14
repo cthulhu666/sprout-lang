@@ -779,7 +779,10 @@ typedef struct {
 } Hole;
 typedef struct {
   Policy p;
-  int ovf;
+  int ovf, tails;
+  uint64_t tail_hits;
+  uint64_t* tl[NCLS];   /* tails: per class a min-heap of (region << 32 | granule offset) of freed inline tails */
+  uint32_t ntl[NCLS], capl[NCLS];
   HReg* r;
   uint32_t n, cap, nused;
   Hole* h;
@@ -860,9 +863,46 @@ static void holes_skip(Holes* h, size_t j) {
   }
 }
 
+static void tl_push(Holes* h, uint32_t cls, uint64_t key) {
+  if (h->ntl[cls] == h->capl[cls]) {
+    h->capl[cls] = h->capl[cls] ? h->capl[cls] * 2 : 8;
+    h->tl[cls] = xrealloc(h->tl[cls], (size_t)h->capl[cls] * sizeof(uint64_t));
+  }
+  uint64_t* a = h->tl[cls];
+  uint32_t i = h->ntl[cls]++;
+  while (i > 0 && a[(i - 1) / 2] > key) { a[i] = a[(i - 1) / 2]; i = (i - 1) / 2; }
+  a[i] = key;
+}
+
+static uint64_t tl_pop(Holes* h, uint32_t cls) {
+  uint64_t* a = h->tl[cls];
+  uint64_t top = a[0], key = a[--h->ntl[cls]];
+  uint32_t n = h->ntl[cls], i = 0;
+  while (2 * i + 1 < n) {
+    uint32_t c = 2 * i + 1;
+    if (c + 1 < n && a[c + 1] < a[c]) c++;
+    if (a[c] >= key) break;
+    a[i] = a[c];
+    i = c;
+  }
+  if (n > 0) a[i] = key;
+  return top;
+}
+
 static void holes_alloc(Policy* p, Obj* o) {
   Holes* h = (Holes*)p;
   uint32_t g = o->size / 16;
+  if (h->tails && h->ntl[g] > 0) {   /* an exact-class freed tail, lowest region first */
+    uint64_t key = tl_pop(h, g);
+    HReg* r = &h->r[key >> 32];
+    o->pl[h->p.slot].region = (uint32_t)(key >> 32);
+    o->pl[h->p.slot].off = (uint32_t)key;
+    bm_range(r->bm, (uint32_t)key, g, 1);
+    r->live++;
+    r->touched = 1;
+    h->tail_hits++;
+    return;
+  }
   if (h->mainc < h->nh) holes_examine(h, 0, h->mainc);
   if (h->mainc < h->nh && h->h[h->mainc].end - h->h[h->mainc].cur >= g) {
     holes_place(h, &h->h[h->mainc], o, g);
@@ -904,7 +944,9 @@ static void holes_free(Policy* p, Obj* o) {
 static void holes_tail(Policy* p, Obj* o, uint32_t rest) {
   Holes* h = (Holes*)p;
   HReg* r = &h->r[o->pl[p->slot].region];
-  bm_range(r->bm, o->pl[p->slot].off + (o->size - rest) / 16, rest / 16, 0);
+  uint32_t off = o->pl[p->slot].off + (o->size - rest) / 16;
+  bm_range(r->bm, off, rest / 16, 0);
+  if (h->tails) tl_push(h, rest / 16, (uint64_t)o->pl[p->slot].region << 32 | off);
 }
 
 /* The maximal zero runs of a region's live bitmap, appended to the holes.  Each carries the words
@@ -976,6 +1018,7 @@ static void holes_gc_end(Policy* p, uint64_t kind) {
   h->free_g = 0;
   for (size_t j = 0; j < h->nh; j++) h->free_g += h->h[j].end - h->h[j].cur;
   h->mainc = h->ovfc = 0;
+  memset(h->ntl, 0, sizeof h->ntl);   /* unused tails are free granules, now holes */
   h->last_ex[0] = h->last_ex[1] = SIZE_MAX;
   if (h->waste_interval > h->waste_peak) h->waste_peak = h->waste_interval;
   h->waste_interval = 0;
@@ -1180,11 +1223,13 @@ static Policy* policy_new(const char* name) {
     b->p = (Policy){ .name = "base", .type = PK_BASE, .region_bytes = REGION_BYTES, .alloc = base_alloc, .free_ = base_free,
                      .tail = base_tail, .gc_end = base_gc_end, .regions = base_regions, .free_units = base_free_units };
     p = &b->p;
-  } else if (strcmp(name, "holes") == 0 || strcmp(name, "holes-ovf") == 0) {
+  } else if (strcmp(name, "holes") == 0 || strcmp(name, "holes-ovf") == 0 ||
+             strcmp(name, "holes-ovf-tails") == 0) {
     Holes* h = xcalloc(1, sizeof *h);
-    h->ovf = strcmp(name, "holes-ovf") == 0;
+    h->tails = strcmp(name, "holes-ovf-tails") == 0;
+    h->ovf = h->tails || strcmp(name, "holes-ovf") == 0;
     h->last_ex[0] = h->last_ex[1] = SIZE_MAX;
-    h->p = (Policy){ .name = h->ovf ? "holes-ovf" : "holes", .type = PK_HOLES, .region_bytes = REGION_BYTES, .alloc = holes_alloc,
+    h->p = (Policy){ .name = h->tails ? "holes-ovf-tails" : h->ovf ? "holes-ovf" : "holes", .type = PK_HOLES, .region_bytes = REGION_BYTES, .alloc = holes_alloc,
                      .free_ = holes_free, .tail = holes_tail, .gc_end = holes_gc_end, .regions = holes_regions,
                      .free_units = holes_free_units, .nbitmaps = HOLES_BITMAPS };
     p = &h->p;
@@ -1207,7 +1252,7 @@ static Policy* policy_new(const char* name) {
   return p;
 }
 
-static const char* const ALL_POLICIES[] = { "base", "holes", "holes-ovf", "class-16K", "class-64K", "class-256K", "class-1M" };
+static const char* const ALL_POLICIES[] = { "base", "holes", "holes-ovf", "holes-ovf-tails", "class-16K", "class-64K", "class-256K", "class-1M" };
 
 /* "all", or a comma-separated list of policy names; 0 on success. */
 static int sim_init(Sim* s, const char* list) {
@@ -1320,6 +1365,7 @@ static void report_alloc_side(const Sim* s) {
              "(%.3f/alloc; per interval mean %.1f max %llu)\n",
              p->name, U(p->examined), (double)p->examined * per, U(h->entered), U(h->skipped), U(h->passed), U(p->words),
              (double)p->words * per, stat_mean(&p->iv_w), U(p->iv_w.max));
+      if (h->tails) printf("%-10s tail-list hits %llu (%.4f/alloc)\n", p->name, U(h->tail_hits), (double)h->tail_hits * per);
     } else {
       printf("%-10s regions tested %llu (%.4f/alloc; per interval mean %.1f max %llu) | region switches %llu (%.4f/alloc) | alloc-bitmap words read "
              "%llu (%.3f/alloc; per interval mean %.1f max %llu)\n",
@@ -1608,6 +1654,28 @@ static void test_tails(void) {
   CHECK(t_obj(t, u)->size == 480, "u size");
 }
 
+/* A 512 B vector gives back 480 B (granules 2..31), a 160 B vector gives back 128 B (class 8).
+ * A 480 B request takes the first tail before any collection, at granule 2.  The 128 B tail is
+ * unused, so at the next E it is a hole, and the 160 B vector's own 32 B head stays live. */
+static void test_tail_list(void) {
+  T* t = t_new("holes-ovf,holes-ovf-tails");
+  uint64_t v = t_a(t, 512), w = t_a(t, 160);   /* granules 0..31, 32..41 */
+  t_tail(t, v, 480);
+  t_tail(t, w, 128);
+  Holes* h = t_holes(t, 1);
+  uint64_t u = t_a(t, 480);
+  CHECK(t_obj(t, u)->pl[0].off == 42 && t_obj(t, u)->pl[1].off == 2, "480 B: plain at %u (want 42), tails at %u (want 2)", t_obj(t, u)->pl[0].off, t_obj(t, u)->pl[1].off);
+  CHECK(h->tail_hits == 1 && t_holes(t, 0)->p.allocs == h->p.allocs, "tail hits %llu, want 1", U(h->tail_hits));
+  uint64_t x = t_a(t, 16);   /* no class-1 tail: hole cursors */
+  CHECK(t_obj(t, x)->pl[1].off == 42 && t_obj(t, x)->pl[0].off == 72, "16 B: tails at %u (want 42), plain at %u (want 72)", t_obj(t, x)->pl[1].off, t_obj(t, x)->pl[0].off);
+  CHECK(h->tail_hits == 1, "tail hits %llu after a miss, want 1", U(h->tail_hits));
+  t_g(t); t_e(t, 1);
+  CHECK(h->ntl[8] == 0, "tail list dropped at E");
+  int found = 0;
+  for (size_t i = 0; i < h->nh; i++) found |= h->h[i].cur == 34 && h->h[i].end == 42;
+  CHECK(found, "after E the unused 128 B tail [34,42) joins a hole; holes: %zu", h->nh);
+}
+
 static void test_class_region_fills(void) {
   T* t = t_new("class-16K");
   ClassR* c = t_class(t, 0);
@@ -1765,6 +1833,7 @@ static int run_selftest(void) {
   test_region_released_and_reused();
   test_base_reopens_and_reuses();
   test_tails();
+  test_tail_list();
   test_class_region_fills();
   test_large_counts_as_held();
   test_chunked_accounting();
@@ -1782,7 +1851,7 @@ int main(int argc, char** argv) {
   int sim = (argc == 4 || argc == 6) && strcmp(argv[1], "--policies") == 0 && (argc == 4 || strcmp(argv[3], "--walked") == 0);
   if (!check && !sim) {
     fprintf(stderr, "usage: %s --check <trace>\n       %s --policies all|<name>[,<name>...] [--walked <file>] <trace>\n       %s --selftest\n"
-                    "policies: base holes holes-ovf class-16K class-64K class-256K class-1M\n", argv[0], argv[0], argv[0]);
+                    "policies: base holes holes-ovf holes-ovf-tails class-16K class-64K class-256K class-1M\n", argv[0], argv[0], argv[0]);
     return 2;
   }
   const char* path = argv[argc - 1];

@@ -7,7 +7,9 @@
 placement, so every policy replays the same allocations and frees at the same collections.
 
 Policies: `base` is today's per-region lists; `holes` is C with one forward cursor; `holes-ovf`
-adds an overflow cursor for requests over 256 B that miss the current hole (Immix); `class-R` is E
+adds an overflow cursor for requests over 256 B that miss the current hole (Immix);
+`holes-ovf-tails` also reuses a freed inline tail at once from a list by exact class, dropped at
+each collection; `class-R` is E
 with regions of R bytes, also accounted as carved from the runtime's 1 MiB arena chunks. C is
 costed in its leanest form: walks use the bitmaps, so a sweep updates bitmap words and writes no
 header per hole.
@@ -25,12 +27,12 @@ No workload of the A/B set releases an inline tail.
 (chunked: 1 MiB chunks × 1 MiB). On workloads that fit in 1–2 regions every 1 MiB policy holds
 mostly unbumped space, which RSS does not count; those rows are left out.
 
-| workload | base | holes | holes-ovf | class-16K (chunked) | class-64K (chunked) | class-1M |
-|---|---|---|---|---|---|---|
-| selfcompile | 217.8 | 214.8 | 187.8 | 200.7 (202.8) | 208.9 (209.8) | 446.8 |
-| rotate_classes | 37.0 | 15.0 | 15.0 | 18.0 (19.0) | 18.9 (19.0) | 21.0 |
-| load_spike | 15.0 | 15.0 | 15.0 | 14.2 (15.0) | 14.3 (15.0) | 16.0 |
-| mutvec_push | 14.0 | 33.0 | 33.0 | 36.1 (37.0) | 39.2 (40.0) | 202.0 |
+| workload | base | holes | holes-ovf | holes-ovf-tails | class-16K (chunked) | class-64K (chunked) | class-1M |
+|---|---|---|---|---|---|---|---|
+| selfcompile | 217.8 | 214.8 | 187.8 | 187.8 | 200.7 (202.8) | 208.9 (209.8) | 446.8 |
+| rotate_classes | 37.0 | 15.0 | 15.0 | 15.0 | 18.0 (19.0) | 18.9 (19.0) | 21.0 |
+| load_spike | 15.0 | 15.0 | 15.0 | 15.0 | 14.2 (15.0) | 14.3 (15.0) | 16.0 |
+| mutvec_push | 14.0 | 33.0 | 33.0 | 5.0 | 36.1 (37.0) | 39.2 (40.0) | 202.0 |
 
 Per-region metadata is 0.4–2.3% of held on the self-compile in every policy.
 
@@ -67,7 +69,8 @@ little; in raw granules it would be understated much more, and C needs the norma
   more regions per collection.
 - Memory: holes-ovf is lowest on the self-compile (0.86× base, against 0.93–0.96× for class
   regions chunked). On rotate_classes both beat today's exact fit (holes 0.41×, class 0.49–0.51×).
-- Inline tails are where both lose: mutvec_push holds 2.4× base under holes and 2.6–2.9× under
-  class regions. Today a freed tail is reused at once; holes reuse it only after the next
-  collection, and class regions never split it.
+- Inline tails: mutvec_push holds 2.4× base under holes and 2.6–2.9× under class regions, since
+  today reuses a freed tail at once. With the tail lists holes hold 0.36× (111,352 tail reuses,
+  0.37 per allocation); class regions cannot split a tail, since the vector cannot move. With no
+  tails (the self-compile) `holes-ovf-tails` equals `holes-ovf` exactly.
 - 256 KiB and 1 MiB class regions retain: 1.17× and 2.05× on the self-compile.
