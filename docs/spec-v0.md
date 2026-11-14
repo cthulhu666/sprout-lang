@@ -2120,7 +2120,8 @@ a field access or as a `match` scrutinee. Every other reference consumes. So
   The same holds after a `try` (§5.9.1), and the error names the `try`.
 - A `borrowing` parameter may not be consumed or returned.
 - An argument at a `borrowing` position must be a **variable reference**; a
-  freshly-built linear value there would never be consumed.
+  freshly-built value that is or holds a linear value there would never be
+  consumed.
 - The modifiers are **erased**: they reach no IR pass and emitted code is
   byte-identical with and without them.
 

@@ -397,7 +397,7 @@ fn borrowed_binder_msg(name: String) -> String =
   "linear value '" ++ name ++ "' is borrowed and cannot be consumed (it was destructured from a borrowed value, which its owner will still release)"
 
 let nonvar_borrow_msg: String =
-  "a borrowing argument must be a variable reference (a freshly-built linear value here would never be consumed)"
+  "a borrowing argument must be a variable reference (a freshly-built value that is or holds a linear value would never be consumed)"
 
 # Why a modifier was rejected. They need different messages: an unbounded type
 # variable (BadOnTyvar) is fixed by `where linear` on it, which "is not a linear
@@ -1040,7 +1040,7 @@ fn lin_borrow_var(name: String, p: source.SourcePos, sc: LinScope,
   else lin_consumed(a, sc, env)
 
 fn lin_nonvar_borrow(a: typed_ast.TypedExpr, sc: LinScope, env: LinEnv) -> LinRes =
-  if type_is_linear(typed_ast.typed_expr_type(a), env)
+  if holds_linear(typed_ast.typed_expr_type(a), env)
   then LinErr(typed_ast.typed_expr_pos(a), nonvar_borrow_msg)
   else lin_consumed(a, sc, env)
 
