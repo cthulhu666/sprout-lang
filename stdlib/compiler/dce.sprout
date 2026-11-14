@@ -4,41 +4,37 @@ import stdlib.compiler.types as types
 import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
 
-# Two eliminations, both applied after typeclass lowering and before IR emission.
+# Declaration reachability — `elim_unreachable`. Drops whole declarations that the
+# entry point cannot reach, applied after typeclass lowering and before IR emission.
+# See the section at the bottom of this file.
 #
-# Dead Let Elimination (DLE) — `elim_program`. Removes TDoLetStep name expr from
-# TDo blocks where:
-#   (1) name does not appear free in any subsequent do-step, and
-#   (2) expr is pure (has no observable side effects)
-# Recurses into all expression positions so nested TDo blocks are optimised too.
-#
-# Declaration reachability — `elim_unreachable`. Drops whole declarations that
-# the entry point cannot reach. See the section at the bottom of this file.
-#
-# The two are independent and DLE runs first: shrinking bodies can only remove
-# references, so it can only ever make reachability drop MORE. Running them the
-# other way round would still be correct, merely weaker.
+# There is no dead-`let` elimination. A do-block `let` runs even when its name is
+# never read (docs/spec-v0.md §6 rule 4), and a pure right-hand side can still
+# panic: `panic` is pure, Int `+ - *` and unary `-` panic on overflow, `/` panics
+# on zero. Deleting the binding would delete the panic.
 
 # ---------------------------------------------------------------------------
-# Purity check
+# Callee purity
 # ---------------------------------------------------------------------------
 
 # A call performs the effect of every arrow it CONSUMES, and `infer` records a
 # declared effect on the innermost one — so a two-parameter `!{IO}` function has a
-# pure outer arrow, and reading that alone deletes an effectful call. Mirrors
+# pure outer arrow, and reading that alone calls an effectful callee pure. Mirrors
 # `infer.arrows_effect`, which decides the same question at check time.
 #
 # `argc <= 0` means two things, as it does there: at the entry a zero-argument
 # call, which consumes a thunk arrow and performs its effect; through the
 # recursion the end of the consumed chain, where what is left is returned rather
-# than invoked. Every catch-all answers "impure", which keeps the binding — the
-# direction that costs an optimisation rather than an effect.
+# than invoked. Every catch-all answers "impure" — the direction that costs an
+# optimisation rather than an effect.
+#
+# "Pure" means the call cannot do IO. It does not mean the call cannot fail: a pure
+# callee may still panic, so this is no licence to drop a call whose result is unused.
 fn is_pure_callee_type(t: types.Type, argc: Int) -> Bool =
   if argc <= 0 then thunk_is_pure(t) else consumed_arrows_pure(t, argc)
 
-# The same question asked from a call site, for passes that need this oracle and
-# nothing else of DLE's (cse_census). One definition, so a purity fix cannot
-# reach one pass and miss another.
+# The same question asked from a call site, for the passes that need it (bce,
+# cse_census). One definition, so a purity fix cannot reach one pass and miss another.
 export fn callee_is_pure(callee: typed_ast.TypedExpr, argc: Int) -> Bool =
   is_pure_callee_type(typed_ast.typed_expr_type(callee), argc)
 
@@ -54,60 +50,11 @@ fn consumed_arrows_pure(t: types.Type, argc: Int) -> Bool =
     | types.TFunc _ ret eff _ -> types.effect_is_pure(eff) && consumed_arrows_pure(ret, argc - 1)
     | _ -> false
 
-fn is_pure_expr(e: typed_ast.TypedExpr) -> Bool =
-  match e with
-  | typed_ast.TVar _ _ _ -> true
-  | typed_ast.TInt _ _ _ -> true
-  | typed_ast.TFloat _ _ _ -> true
-  | typed_ast.TBool _ _ _ -> true
-  | typed_ast.TString _ _ _ -> true
-  | typed_ast.TChar _ _ _ -> true
-  | typed_ast.TUnit _ _ -> true
-  | typed_ast.TTuple items _ _ -> all_pure_list(items)
-  | typed_ast.TIf cond thn els _ _ ->
-      is_pure_expr(cond) && is_pure_expr(thn) && is_pure_expr(els)
-  | typed_ast.TMatch scrut arms _ _ ->
-      is_pure_expr(scrut) && all_pure_arms(arms)
-  | typed_ast.TCall callee args _ _ ->
-      is_pure_callee_type(typed_ast.typed_expr_type(callee), list_length(args)) &&
-      is_pure_expr(callee) && all_pure_list(args)
-  | typed_ast.TDict _ _ _ _ -> true
-  | typed_ast.TMethodRef _ _ _ _ _ -> panic("dce.is_pure_expr: TMethodRef survived lowering (internal error)")
-  | typed_ast.TLambda _ _ _ _ -> true
-  | typed_ast.TBinary _ l r _ _ -> is_pure_expr(l) && is_pure_expr(r)
-  | typed_ast.TUnary _ operand _ _ -> is_pure_expr(operand)
-  | typed_ast.TRange l r _ _ -> is_pure_expr(l) && is_pure_expr(r)
-  | typed_ast.TDo _ _ _ -> false
-  | typed_ast.TRecord _ fields _ _ -> all_pure_fields(fields)
-  | typed_ast.TGetField obj _ _ _ -> is_pure_expr(obj)
-  | typed_ast.TRecordUpdate base fields _ _ -> is_pure_expr(base) && all_pure_fields(fields)
-
-fn all_pure_list(es: List typed_ast.TypedExpr) -> Bool =
-  match es with
-  | Nil -> true
-  | Cons e rest -> is_pure_expr(e) && all_pure_list(rest)
-
-fn all_pure_arms(arms: List typed_ast.TypedMatchBranch) -> Bool =
-  match arms with
-  | Nil -> true
-  | Cons arm rest ->
-      match arm with
-      | typed_ast.TypedMatchBranch _ body -> is_pure_expr(body) && all_pure_arms(rest)
-
-fn all_pure_fields(fields: List typed_ast.TypedRecordField) -> Bool =
-  match fields with
-  | Nil -> true
-  | Cons f rest ->
-      match f with
-      | typed_ast.TypedRecordField _ v -> is_pure_expr(v) && all_pure_fields(rest)
-
 # ---------------------------------------------------------------------------
-# Free-variable check — is `name` free anywhere in the given construct?
+# Binders
 # ---------------------------------------------------------------------------
 
-# The names a binder takes. One set serves both questions this file asks: WHICH
-# names a construct binds, for reachability below, and whether it binds a GIVEN
-# name, for the free-variable check here.
+# The names a construct binds, for reachability below.
 fn bind_param(p: ast.Param, bound: Set) -> Set =
   match p with
   | ast.Param n _ _ -> set_insert(n, bound)
@@ -120,192 +67,12 @@ fn bind_params(ps: List ast.Param, bound: Set) -> Set =
 fn bind_pat(pat: ast.Pattern, bound: Set) -> Set =
   list_fold(\ (s, n) -> set_insert(n, s), bound, ast.pattern_names(pat))
 
-fn params_bind(name: String, ps: List ast.Param) -> Bool =
-  set_member(name, bind_params(ps, set_empty()))
-
-fn pat_binds(name: String, pat: ast.Pattern) -> Bool =
-  list_member(name, ast.pattern_names(pat))
-
-fn is_free(name: String, e: typed_ast.TypedExpr) -> Bool =
-  match e with
-  | typed_ast.TVar n _ _ -> n == name
-  | typed_ast.TInt _ _ _ -> false
-  | typed_ast.TFloat _ _ _ -> false
-  | typed_ast.TBool _ _ _ -> false
-  | typed_ast.TString _ _ _ -> false
-  | typed_ast.TChar _ _ _ -> false
-  | typed_ast.TUnit _ _ -> false
-  | typed_ast.TTuple items _ _ -> any_free_list(name, items)
-  | typed_ast.TIf cond thn els _ _ ->
-      is_free(name, cond) || is_free(name, thn) || is_free(name, els)
-  | typed_ast.TMatch scrut arms _ _ ->
-      is_free(name, scrut) || any_free_arms(name, arms)
-  | typed_ast.TCall callee args _ _ ->
-      is_free(name, callee) || any_free_list(name, args)
-  | typed_ast.TDict _ _ _ _ -> false
-  | typed_ast.TMethodRef _ _ _ _ _ -> panic("dce.is_free: TMethodRef survived lowering (internal error)")
-  | typed_ast.TLambda params body _ _ ->
-      if params_bind(name, params) then false else is_free(name, body)
-  | typed_ast.TBinary _ l r _ _ -> is_free(name, l) || is_free(name, r)
-  | typed_ast.TUnary _ operand _ _ -> is_free(name, operand)
-  | typed_ast.TRange l r _ _ -> is_free(name, l) || is_free(name, r)
-  | typed_ast.TDo steps _ _ -> is_free_in_steps(name, steps)
-  | typed_ast.TRecord _ fields _ _ -> any_free_fields(name, fields)
-  | typed_ast.TGetField obj _ _ _ -> is_free(name, obj)
-  | typed_ast.TRecordUpdate base fields _ _ -> is_free(name, base) || any_free_fields(name, fields)
-
-fn any_free_list(name: String, es: List typed_ast.TypedExpr) -> Bool =
-  match es with
-  | Nil -> false
-  | Cons e rest -> is_free(name, e) || any_free_list(name, rest)
-
-fn any_free_arms(name: String, arms: List typed_ast.TypedMatchBranch) -> Bool =
-  match arms with
-  | Nil -> false
-  | Cons arm rest ->
-      match arm with
-      | typed_ast.TypedMatchBranch pat body ->
-          (if pat_binds(name, pat) then false else is_free(name, body)) ||
-          any_free_arms(name, rest)
-
-fn any_free_fields(name: String, fields: List typed_ast.TypedRecordField) -> Bool =
-  match fields with
-  | Nil -> false
-  | Cons f rest ->
-      match f with
-      | typed_ast.TypedRecordField _ v -> is_free(name, v) || any_free_fields(name, rest)
-
-fn is_free_in_steps(name: String, steps: List typed_ast.TypedDoStep) -> Bool =
-  match steps with
-  | Nil -> false
-  | Cons step rest ->
-      match step with
-      | typed_ast.TDoBindStep pat e _ ->
-          is_free(name, e) ||
-          (if pat_binds(name, pat) then false else is_free_in_steps(name, rest))
-      | typed_ast.TDoLetStep n e ->
-          is_free(name, e) ||
-          (if n == name then false else is_free_in_steps(name, rest))
-      | typed_ast.TDoExprStep e ->
-          is_free(name, e) || is_free_in_steps(name, rest)
-
-# ---------------------------------------------------------------------------
-# Rewrite pass — bottom-up elimination; recurses into all expression positions
-# ---------------------------------------------------------------------------
-
-fn elim_expr(e: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
-  match e with
-  | typed_ast.TVar _ _ _ -> e
-  | typed_ast.TInt _ _ _ -> e
-  | typed_ast.TFloat _ _ _ -> e
-  | typed_ast.TBool _ _ _ -> e
-  | typed_ast.TString _ _ _ -> e
-  | typed_ast.TChar _ _ _ -> e
-  | typed_ast.TUnit _ _ -> e
-  | typed_ast.TTuple items t p ->
-      typed_ast.TTuple(elim_list(items), t, p)
-  | typed_ast.TIf cond thn els t p ->
-      typed_ast.TIf(elim_expr(cond), elim_expr(thn), elim_expr(els), t, p)
-  | typed_ast.TMatch scrut arms t p ->
-      typed_ast.TMatch(elim_expr(scrut), elim_arms(arms), t, p)
-  | typed_ast.TCall callee args t p ->
-      typed_ast.TCall(elim_expr(callee), elim_list(args), t, p)
-  | typed_ast.TDict _ _ _ _ -> e
-  | typed_ast.TMethodRef _ _ _ _ _ -> panic("dce.elim_expr: TMethodRef survived lowering (internal error)")
-  | typed_ast.TLambda params body t p ->
-      typed_ast.TLambda(params, elim_expr(body), t, p)
-  | typed_ast.TBinary op l r t p ->
-      typed_ast.TBinary(op, elim_expr(l), elim_expr(r), t, p)
-  | typed_ast.TUnary op operand t p ->
-      typed_ast.TUnary(op, elim_expr(operand), t, p)
-  | typed_ast.TRange l r t p ->
-      typed_ast.TRange(elim_expr(l), elim_expr(r), t, p)
-  | typed_ast.TDo steps t p ->
-      typed_ast.TDo(elim_steps(steps), t, p)
-  | typed_ast.TRecord name fields t p ->
-      typed_ast.TRecord(name, elim_record_fields(fields), t, p)
-  | typed_ast.TGetField obj fname t p ->
-      typed_ast.TGetField(elim_expr(obj), fname, t, p)
-  | typed_ast.TRecordUpdate base fields t p ->
-      typed_ast.TRecordUpdate(elim_expr(base), elim_record_fields(fields), t, p)
-
-fn elim_list(es: List typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
-  match es with
-  | Nil -> Nil
-  | Cons e rest -> Cons(elim_expr(e), elim_list(rest))
-
-fn elim_arms(arms: List typed_ast.TypedMatchBranch) -> List typed_ast.TypedMatchBranch =
-  match arms with
-  | Nil -> Nil
-  | Cons arm rest ->
-      match arm with
-      | typed_ast.TypedMatchBranch pat body ->
-          Cons(typed_ast.TypedMatchBranch(pat, elim_expr(body)), elim_arms(rest))
-
-fn elim_record_fields(fields: List typed_ast.TypedRecordField) -> List typed_ast.TypedRecordField =
-  match fields with
-  | Nil -> Nil
-  | Cons f rest ->
-      match f with
-      | typed_ast.TypedRecordField name v ->
-          Cons(typed_ast.TypedRecordField(name, elim_expr(v)), elim_record_fields(rest))
-
-# elim_steps processes bottom-up: the tail is already optimised when checking
-# whether the current step's binding is dead.
-fn elim_steps(steps: List typed_ast.TypedDoStep) -> List typed_ast.TypedDoStep =
-  match steps with
-  | Nil -> Nil
-  | Cons step rest -> elim_one_step(step, elim_steps(rest))
-
-fn elim_one_step(step: typed_ast.TypedDoStep, tail: List typed_ast.TypedDoStep) -> List typed_ast.TypedDoStep =
-  match step with
-  | typed_ast.TDoLetStep name e ->
-      if is_pure_expr(e) && (is_free_in_steps(name, tail) == false)
-      then tail
-      else Cons(typed_ast.TDoLetStep(name, elim_expr(e)), tail)
-  | typed_ast.TDoBindStep pat e mode ->
-      Cons(typed_ast.TDoBindStep(pat, elim_expr(e), mode), tail)
-  | typed_ast.TDoExprStep e ->
-      Cons(typed_ast.TDoExprStep(elim_expr(e)), tail)
-
-fn elim_instance_methods(ms: List typed_ast.TypedInstanceMethod) -> List typed_ast.TypedInstanceMethod =
-  match ms with
-  | Nil -> Nil
-  | Cons m rest ->
-      match m with
-      | typed_ast.TypedInstanceMethod name params ret_ann eff_ann cs body ->
-          Cons(typed_ast.TypedInstanceMethod(name, params, ret_ann, eff_ann, cs, elim_expr(body)),
-               elim_instance_methods(rest))
-
-fn elim_decl(d: typed_ast.TypedDecl) -> typed_ast.TypedDecl =
-  match d with
-  | typed_ast.TFnDecl name params ret_ann eff_ann constraints body ->
-      typed_ast.TFnDecl(name, params, ret_ann, eff_ann, constraints, elim_expr(body))
-  | typed_ast.TExternFnDecl _ _ _ _ -> d
-  | typed_ast.TLetDecl name e ->
-      typed_ast.TLetDecl(name, elim_expr(e))
-  | typed_ast.TInstanceDecl constraint constraints methods ->
-      typed_ast.TInstanceDecl(constraint, constraints, elim_instance_methods(methods))
-  | typed_ast.TPassThrough _ -> d
-
-fn elim_decls(ds: List typed_ast.TypedDecl) -> List typed_ast.TypedDecl =
-  match ds with
-  | Nil -> Nil
-  | Cons d rest -> Cons(elim_decl(d), elim_decls(rest))
-
-# O(n) in the number of TypedExpr nodes; is_free_in_steps adds O(steps × expr_size)
-# per do-block, which is bounded in practice.
-export fn elim_program(prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
-  match prog with
-  | typed_ast.TypedProgram (decls) -> typed_ast.TypedProgram(elim_decls(decls))
-
 # ---------------------------------------------------------------------------
 # Declaration reachability elimination
 # ---------------------------------------------------------------------------
 #
-# Everything above rewrites declaration BODIES. This section drops whole
-# declarations nothing reaches, which is what stops every program from carrying
-# the entire prelude: before it, a six-line `module main` emitted 276 functions
+# This section drops whole declarations nothing reaches, which is what stops every
+# program from carrying the entire prelude: before it, a six-line `module main` emitted 276 functions
 # of which 3 were reachable.
 #
 # Running after `lowering.lower_program` is what makes plain name reachability
@@ -318,8 +85,7 @@ export fn elim_program(prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
 # is a link failure or a silently missing instance. Any construct whose scoping
 # this file does not model must therefore fall on the "invent the edge" side.
 
-# Names an expression references. Mirrors `is_free`'s traversal, binders and all,
-# but collecting instead of testing. `bound` holds the names a lambda parameter,
+# Names an expression references. `bound` holds the names a lambda parameter,
 # match binder or do-binding has taken: a TVar naming one of those is a local, and
 # an edge from it to a top-level declaration of that name would be invented.
 fn refs_expr(e: typed_ast.TypedExpr, bound: Set, acc: Set) -> Set =
@@ -388,7 +154,7 @@ fn refs_fields(fields: List typed_ast.TypedRecordField, bound: Set, acc: Set) ->
       | typed_ast.TypedRecordField _ v -> refs_fields(rest, bound, refs_expr(v, bound, acc))
 
 # A do-binding scopes over the steps that FOLLOW it, never over its own
-# right-hand side — `is_free_in_steps` reads the same shape.
+# right-hand side.
 fn refs_steps(steps: List typed_ast.TypedDoStep, bound: Set, acc: Set) -> Set =
   match steps with
   | Nil -> acc

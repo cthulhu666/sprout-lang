@@ -2605,7 +2605,7 @@ absent; see `docs/list-comprehensions-v0.md` for the rationale and open question
    If the call supplies more than the remaining parameters, it is an error.
 2. Lambda expression: evaluating a lambda produces a closure that captures the current lexical environment.
 3. Function-local `where` bindings evaluate in source order after function parameters are bound, with each binding extending the environment for later bindings and the final body.
-4. `let`: evaluate RHS immediately, then bind.
+4. `let`: evaluate RHS immediately, then bind. A `let` runs even if its name is never used: a pure RHS can still panic.
 5. Binary operators: evaluate left operand, then right operand.
    - Integer division `/`: dividing by zero **panics** with a runtime error
      (`division by zero`) rather than producing an undefined result. `INT_MIN / -1`

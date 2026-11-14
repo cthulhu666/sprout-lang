@@ -3,6 +3,12 @@
 **Status — arc parked 2026-09-11.** No syntax, typing-rule, evaluation-order or diagnostic change
 happened; `spec-v0.md` is untouched, as planned.
 
+**Dead-let elimination (DLE) was removed.** A do-block `let` must run even when its name is never
+read (`spec-v0.md` §6 rule 4), and a pure right-hand side can still panic: `panic` is pure, Int
+`+ - *` and unary `-` panic on overflow, `/` panics on zero. Deleting the binding deleted the
+panic. It removed 0 nodes from real programs, so nothing was lost. The harness below now runs on
+`spec`; where this document says DLE, read it as history. `just dead-let-smoke` pins the behaviour.
+
 | milestone | outcome |
 |---|---|
 | **M0** — A/B harness | **landed.** `SPROUT_OPT_OFF`/`SPROUT_OPT_STATS`, `just bench-opt`, `just opt-harness-check`. Baseline: `bench/results-2026-09-11-opt.md` |
@@ -14,7 +20,7 @@ happened; `spec-v0.md` is untouched, as planned.
 | **Scalar copies** — per-scalar copies of vector-creating generics | **landed**, a typed-AST pass: a generic function that creates a vector (`vec_map`, `mutvec_new`, …) gets a copy per `Int`/`Double`/`Bool`/`Char` instantiation (`vec_map$Int`), calls and value references are retargeted, and the copy's vector is flagged NOSCAN. `SPROUT_OPT_OFF=scalar` turns it off, `SPROUT_TRACE_SCALAR=1` lists the copies: [pointer-free-vectors-v0.md](pointer-free-vectors-v0.md) §4.3 |
 
 **What this arc established, in one line:** the two passes it set out to add turned out not to be
-worth adding, and the instrument that proved it is the durable result. DLE removes zero nodes from
+worth adding, and the instrument that proved it is the durable result. DLE removed zero nodes from
 real code; CSE has 673 real sites in the compiler that LLVM genuinely will not take, and taking 49
 of them by hand changed nothing measurable. Whoever proposes either pass again should read the two
 results files first — both are re-runnable.
@@ -22,11 +28,11 @@ results files first — both are re-runnable.
 One open gap in the harness itself: `SPROUT_OPT_OFF` cannot reach `dce.elim_unreachable`, the pass
 that actually does large work, because it runs below the seam. `BACKLOG.md` P2.
 
-Scope correction up front: **DCE already exists.** `stdlib/compiler/dce.sprout` implements dead-let
-elimination and declaration reachability. Dead-let runs through `compiler.run_opt_passes`
-(`compiler.sprout:457`, called from `:579` and `:651`); reachability runs separately inside
-`ir_pipeline.sprout:338`. The purity oracle (`is_pure_callee_type`, exposed as `dce.callee_is_pure`)
-reads the effect row. The proposed passes were CSE and LICM; DCE is the shape they copy.
+Scope correction up front: **DCE already exists.** `stdlib/compiler/dce.sprout` implements
+declaration reachability (dead-let elimination was removed, see the status above). Reachability
+runs inside `ir_pipeline.sprout`. The purity oracle (`is_pure_callee_type`, exposed as
+`dce.callee_is_pure`) reads the effect row. "Pure" there means the call cannot do IO; a pure call
+can still panic. The proposed passes were CSE and LICM; DCE is the shape they copy.
 
 ## Problem
 
@@ -102,22 +108,23 @@ What shipped, and where:
 |---|---|
 | `SPROUT_OPT_OFF` / `SPROUT_OPT_STATS` switchboard | `stdlib/compiler/opt_config.sprout` |
 | node census (`node_count`) | `stdlib/compiler/typed_ast.sprout` |
-| pipeline seam (`run_opt_passes`) | `stdlib/compiler/compiler.sprout` |
+| pipeline seam (`lower_passes`, `copying_checked`) | `stdlib/compiler/compiler.sprout` |
 | self-check gate | `just opt-harness-check`, in `just ci-fast-gates` |
 | A/B bench | `bench/optpasses/bench.sh`, `just bench-opt [pass]` |
 | first baseline | `bench/results-2026-09-11-opt.md` |
 
 **The prediction below was wrong, and the measurement is the point of having built this.** DLE
-removes **zero** nodes from every program in the bench corpus, the 110 096-node compiler included,
-so `SPROUT_OPT_OFF=dle` does *not* change a real binary. Self-validation therefore comes from
-`tests/opt_harness/dead_let.spr` — a deliberately wasteful shape where the pass removes 6 nodes and
-the switch demonstrably reaches emitted IR — asserted by `just opt-harness-check` on every CI run.
+removed **zero** nodes from every program in the bench corpus, the 110 096-node compiler included,
+so `SPROUT_OPT_OFF=dle` did *not* change a real binary. Self-validation came from a deliberately
+wasteful fixture; after DLE was removed it is `tests/opt_harness/specialise.spr`, where `spec`
+adds nodes and the switch demonstrably reaches emitted IR — asserted by `just opt-harness-check`
+on every CI run.
 The consolation was a clean baseline — whatever M1 removed would have been the first node this
 pipeline ever removed from real code. M1 was then measured and declined, so that baseline still
 stands unbroken.
 
-`dce.elim_unreachable`, the half of `dce.sprout` that *does* do large work, is not under the switch
-— it runs inside `ir_pipeline`, not at the `compiler.sprout` seam. Filed in `BACKLOG.md`.
+`dce.elim_unreachable`, the pass `dce.sprout` now holds, does large work and is not under the
+switch — it runs inside `ir_pipeline`, not at the `compiler.sprout` seam. Filed in `BACKLOG.md`.
 
 `Pass` names `Cse` and `Licm` before they exist, so the switch's vocabulary is the roadmap. That
 only works because `opt_config.implemented` marks them pending and `SPROUT_OPT_OFF=cse` warns
@@ -145,7 +152,7 @@ Stash-and-rebootstrap per measurement is slow and cannot run in CI.
 `SPROUT_VERIFY_DISPATCH_STATS` as a stats reporter:
 
 ```
-SPROUT_OPT_OFF=cse,licm,dle    # comma list; absent = all on
+SPROUT_OPT_OFF=cse,licm,spec   # comma list; absent = all on
 SPROUT_OPT_STATS=1             # eprint static counts per pass
 ```
 
@@ -154,12 +161,13 @@ patterns, so an orthogonal flag would have to be threaded through every arm. `co
 already imports `stdlib.env`, so this adds no import and no bundle change, and stays inside the
 existing seed closure.
 
-`dce.elim_program` is pure and stays pure. Read the flag in the enclosing `!{IO}`
+The passes stay pure. Read the flag in the enclosing `!{IO}`
 `compile_phase_lower_with_roots` and pass an `OptConfig` record down.
 
-**Retrofit the toggle onto the existing DCE first.** This is what makes M0 self-validating:
-`SPROUT_OPT_OFF=dle` must produce a measurably different binary on day one. A harness that cannot
-detect a pass already known to do work will not detect CSE either.
+**Retrofit the toggle onto an existing pass first.** This is what makes M0 self-validating:
+the switch must produce a measurably different binary on day one. A harness that cannot
+detect a pass already known to do work will not detect CSE either. (The pass first chosen was
+DLE; the harness now uses `spec`.)
 
 **`bench/optpasses/` and `just bench-opt`.** One compiler build; each program compiled twice (OFF,
 ON) and run warm; emits a table and writes `bench/results-<date>-opt.md` in the existing house
@@ -197,9 +205,9 @@ Narrowest useful scope: within one function body, two calls with the same callee
 equal arguments, and no intervening effectful step become one binding and a reuse. Reuses
 `dce.is_pure_callee_type` verbatim.
 
-Runs **before** DLE. `dce.sprout:17-19` records that DLE precedes reachability because shrinking
-bodies can only remove references; CSE sits one step earlier for the same reason — it creates
-shared bindings, which can only make more things dead.
+Would run before declaration reachability: shrinking bodies can only remove references, so
+running earlier can only make reachability drop more. CSE creates shared bindings, which can only
+make more things dead.
 
 ### M2 — LICM (not refuted by M1's result; gate it on a DYNAMIC measurement)
 

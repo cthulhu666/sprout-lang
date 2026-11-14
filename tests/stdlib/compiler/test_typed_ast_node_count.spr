@@ -7,7 +7,7 @@ import stdlib.compiler.ast as ast
 # Unit tests for typed_ast.node_count — the census an optimisation pass reports
 # through (docs/opt-passes-v0.md §M0), as count-before minus count-after.
 #
-# The load-bearing assertion is `dle delta`: deleting one do-step must move the
+# The load-bearing assertion is the let-step delta: removing one do-step must move the
 # count, and by its whole subtree. A census that counted only expressions would
 # still pass every other case here and report 1 instead of 2.
 
@@ -33,11 +33,11 @@ fn do_block(steps: List typed_ast.TypedDoStep) -> typed_ast.TypedExpr =
 fn let_step(name: String, value: typed_ast.TypedExpr) -> typed_ast.TypedDoStep =
   typed_ast.TDoLetStep(name, value)
 
-# `do let x = 1 / x` and the same block with the dead binding eliminated.
-fn with_dead_let() -> typed_ast.TypedExpr =
+# `do let x = 1; y` and the same block without the let step.
+fn do_with_let() -> typed_ast.TypedExpr =
   do_block([let_step("x", lit(1)), typed_ast.TDoExprStep(var_("y"))])
 
-fn without_dead_let() -> typed_ast.TypedExpr =
+fn do_without_let() -> typed_ast.TypedExpr =
   do_block([typed_ast.TDoExprStep(var_("y"))])
 
 fn main() -> Unit !{IO} =
@@ -66,9 +66,9 @@ fn main() -> Unit !{IO} =
     check_eq("unlowered dict is a leaf, not a panic",
              count(typed_ast.TDict(ast.TypeConstraint("Eq", []), int_t(), pos(),
                                    typed_ast.EvUnresolved)), 1),
-    check_eq("do block counts steps", count(with_dead_let()), 5),
-    check_eq("dle delta: one dead let step is two nodes",
-             count(with_dead_let()) - count(without_dead_let()), 2),
+    check_eq("do block counts steps", count(do_with_let()), 5),
+    check_eq("a let step is two nodes: the step and its value",
+             count(do_with_let()) - count(do_without_let()), 2),
     check_eq("decl_node_count is one declaration's share",
              typed_ast.decl_node_count(typed_ast.TFnDecl("f", [], Nothing, Nothing, [],
                                                          typed_ast.TCall(var_("g"), [lit(1)], int_t(), pos()))),

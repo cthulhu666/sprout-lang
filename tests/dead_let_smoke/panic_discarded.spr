@@ -1,0 +1,17 @@
+module main
+
+# A `let` runs even when its name is never read (docs/spec-v0.md §6 rule 4).
+# `require` is pure but panics, and its result is bound to `_`: the panic must
+# stop the program before `print` runs.
+
+fn require(ok: Bool, msg: String) -> Unit =
+  if ok then () else panic(msg)
+
+fn withdraw(balance: Int, amount: Int) -> Int !{IO} =
+  do
+    let _ = require(amount <= balance, "insufficient funds")
+    print("dispensing " ++ int_to_string(amount))
+    balance - amount
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(withdraw(100, 1000000)))

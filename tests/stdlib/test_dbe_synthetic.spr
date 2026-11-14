@@ -1,9 +1,8 @@
 import stdlib.test (new_state, assert_eq, summary)
 
-# Tests for Dead Let Elimination (DLE) pass.
-# These functions have TDoLetStep bindings that are pure and unreferenced.
-# After the DLE pass runs, the dead computations must be absent from IR —
-# verified by running these functions and checking only live values are used.
+# Do-block `let` bindings that are pure, cannot fail and are never read.
+# Each one still runs; the function must return its live value.
+# A binding that can panic is covered by `just dead-let-smoke`.
 
 # Case 1: unused arithmetic binding — pure, never read
 fn test_unused_int() -> Int !{IO} =

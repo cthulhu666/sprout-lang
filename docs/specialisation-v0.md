@@ -123,7 +123,7 @@ AST (`docs/iface-precompiled-modules-v1-draft.md` §What gets serialized, item 2
 `compile_phase_check_with_roots`, before dictionary-passing lowering:
 
 ```
-specialise → lowering.lower_program → run_opt_passes → ir_pipeline (unchanged)
+specialise → lowering.lower_program → ir_pipeline (unchanged)
 ```
 
 Here evidence is still structured (`EvInstance` / `EvForward`), not yet hidden parameters. Every
@@ -322,8 +322,7 @@ code compares through `Ord`/`Eq`.
   wins when both name it, and an unknown name warns as it does there. `just refresh-seed` and
   `just verify-bootstrap-fixed-point` refuse to run while either is set, or a seed built with
   the pass on, or another pass off, gets committed. `SPROUT_OPT_OFF` is read today in
-  `run_opt_passes`, after lowering, where this pass has already run; `lower_checked` reads the
-  config once and passes it to both. ~~`report_opt_delta` prints `removed=`, and
+  `lower_passes`, which reads the config once and passes it to each pass. ~~`report_opt_delta` prints `removed=`, and
   `bench/optpasses/bench.sh` counts a pass as fired only when that is non-zero; this pass adds
   nodes, so both learn `added=`.~~ Landed. A/B with `just bench-opt spec` and with
   `bench/native_runtime/bench.sh`. Target: generic `mutvec_sort` near §1's hand-applied copy

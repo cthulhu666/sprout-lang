@@ -14,7 +14,6 @@ import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.resolve as resolve
 import stdlib.compiler.verify_dispatch as verify_dispatch
 import stdlib.compiler.lowering as lowering
-import stdlib.compiler.dce as dce
 import stdlib.compiler.specialise as specialise
 import stdlib.compiler.scalar_copies as scalar_copies
 import stdlib.compiler.spec_keys as spec_keys
@@ -471,16 +470,6 @@ fn report_verify_stats(prog: typed_ast.TypedProgram) -> Unit !{IO} =
           eprint("[verify-dispatch] stats: verified=" ++ int_to_string(ok)
                  ++ " skipped=" ++ int_to_string(sk) ++ " mismatched=" ++ int_to_string(mm))
 
-# The optimisation pipeline over the lowered typed AST (docs/opt-passes-v0.md §M0).
-# Every pass is ON unless SPROUT_OPT_OFF names it. `lower_checked` reads the config once;
-# the passes stay pure.
-fn run_opt_passes(cfg: opt_config.OptConfig, prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram !{IO} =
-  do
-    let dle_on = opt_config.enabled(cfg, opt_config.Dle)
-    let after = if dle_on then dce.elim_program(prog) else prog
-    _ <- report_opt_stats(cfg, opt_config.Dle, dle_on, prog, after)
-    after
-
 # Gated on cfg.stats because the census is two whole-program walks.
 fn report_opt_stats(cfg: opt_config.OptConfig, pass: opt_config.Pass, on: Bool,
                     before: typed_ast.TypedProgram, after: typed_ast.TypedProgram) -> Unit !{IO} =
@@ -618,13 +607,10 @@ fn lower_passes(prog: typed_ast.TypedProgram, env: Dict types.Scheme) -> typed_a
     cfg <- opt_config.from_env()
     specialised <- specialise_checked(cfg, prog, env)
     scalared <- typed_then(specialised, scalar_checked(cfg, _, _))
-    typed_then(scalared, lower_and_optimise(cfg, _, _))
+    typed_then(scalared, lower_resolved(_, _))
 
-fn lower_and_optimise(cfg: opt_config.OptConfig, prog: typed_ast.TypedProgram,
-                      env: Dict types.Scheme) -> typed_ast.TypedResult !{IO} =
-  do
-    optimised <- run_opt_passes(cfg, lowering.lower_program(prog, env))
-    typed_ast.TypedOk(optimised, env)
+fn lower_resolved(prog: typed_ast.TypedProgram, env: Dict types.Scheme) -> typed_ast.TypedResult =
+  typed_ast.TypedOk(lowering.lower_program(prog, env), env)
 
 # An error passes through; a program goes to `f` with its environment.
 fn typed_then(r: typed_ast.TypedResult,

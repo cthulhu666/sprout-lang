@@ -196,9 +196,9 @@ hole bindings. It must also provide, because nothing else in the compiler does:
   `ModeDefault` and `ModeConsuming` are one mode and only one survives a round trip
   (`typed_ast.mode_of_ownership`). An effect row compares as a set;
 - **free variables of an `ast.Expr`**, which §5.2's closedness check needs. Also absent over `ast`,
-  but `dce.is_free` and `ast_to_ir.compute_free_vars` are
-  close structural templates — both over `typed_ast`, and `dce`'s binder half already works on
-  `ast.Pattern`. Both templates run *after* inference, where a field access is already a
+  but `ast_to_ir.compute_free_vars` is a
+  close structural template — over `typed_ast`, and `dce`'s binders (`bind_pat`) already work on
+  `ast.Pattern`. The template runs *after* inference, where a field access is already a
   `GetFieldExpr` on a resolved binder. Over `ast` it is still one dotted `VarExpr`, so the free-vars
   walk must split it: the **head** is the name in scope, and reading the whole string instead is a
   silent hole in closedness rather than an approximation of it.

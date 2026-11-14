@@ -348,8 +348,7 @@ Swift added such a bound in SE-0427, making every generic parameter `Copyable` u
 call pure, for any later pass to keep. Read "write" below as "write or change a length":
 
 - No pass moves a call that borrows a linear value across the call that consumes it. Today no
-  pass moves a call: `dce.sprout` only deletes pure ones, which is safe here, since a dropped set
-  writes an array no one can read. [opt-passes-v0.md](opt-passes-v0.md) declined CSE and
+  pass moves a call, and none deletes one whose result is unused. [opt-passes-v0.md](opt-passes-v0.md) declined CSE and
   proposes LICM; either must treat a shared linear argument as ordering the two calls.
 - Their Sprout purity never reaches LLVM as a purity attribute (`readnone`, `memory(none)`),
   which would let LLVM merge or reorder two reads across a write. The compiler emits none today.
