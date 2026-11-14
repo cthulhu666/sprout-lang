@@ -2982,15 +2982,6 @@ acting.
   `Nil` for months). Both were invisible to `opt --passes=verify` and to linking, because LLVM only
   sees the `declare`. Derive each expected C signature from its `extern fn` and fail on a mismatch,
   wired into `ci-fast-gates`; longer term generate the C prototypes from the declarations.
-- [ ] `P2` **Both seed checks hang off a commit, so a rebase replays a stale seed unseen.**
-  `scripts/seed_gate.sh` matches the command text for a literal `git … commit`, and
-  `.githooks/pre-commit` is a git `pre-commit` hook — which `git rebase` does not run for replayed
-  commits (verified empirically 2026-09-20). Rebase is exactly when the seed goes stale: master's
-  compiler sources moved, and the replayed commit still carries the seed built against the old
-  base. Observed on PR #317 — a stale seed was pushed and only CI's
-  `just verify-bootstrap-fixed-point` caught it, one round-trip later. A `pre-push` hook is the fix:
-  it fires however the push is invoked, it is the moment the damage actually escapes, and
-  `core.hooksPath` already points at `.githooks/`. `docs/gates.md` §Bootstrap seed has the detail.
 - [ ] `P3` **The seed gate's path regex cannot see a nested stdlib module, and that is luck, not
   design.** `scripts/seed_gate.sh:46` matches `^stdlib/[^/]+\.sprout$` and
   `^stdlib/compiler/[^/]+\.sprout$`, so `stdlib/fs/path.sprout`, `stdlib/math/*.sprout` and

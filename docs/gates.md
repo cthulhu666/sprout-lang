@@ -132,13 +132,13 @@ genuinely unchanged): run `just verify-bootstrap-fixed-point` then `just seed-fp
 
 ### `just seed-stale` and CI answer different questions, and a comment-only edit splits them
 
-Three checks are easy to run together and are not the same thing:
+The checks below are easy to run together and are not the same thing:
 
 | check | compares | run by |
 |---|---|---|
 | `scripts/seed_gate.sh` (commit hook) | staged tree hash vs `.git/seed-fp-ack` | local `git commit` |
 | `just seed-stale` | `shasum` of `stdlib/compiler/*.sprout` vs the `; seed-fingerprint:` line at the top of the seed | `.githooks/pre-commit`, when `stdlib/compiler/` is staged |
-| `just verify-bootstrap-fixed-point` | the re-emitted IR is byte-identical | **CI** (`.github/workflows/ci.yml`) |
+| `just verify-bootstrap-fixed-point` | the re-emitted IR is byte-identical | **CI** (`.github/workflows/ci.yml`), and `.githooks/pre-push` when the pushed range touches `stdlib/` sources or the seed |
 
 Edit only a comment in a compiler source and the source bytes change while the emitted IR does not,
 so `seed-stale` reports STALE while the fixed point holds. **CI runs only the fixed-point check, so
@@ -158,9 +158,9 @@ full `just refresh-seed` (delete the stale stage-1 binary first), **not** the `s
 even though `stdlib/compiler/` was untouched. No 2-step bootstrap is needed (no
 parser/compiler-source change; the seed diff is purely the additive declare line).
 
-### Both seed checks hang off a commit, and a rebase makes no commit they can see
+### Both commit-time seed checks miss a rebase; `.githooks/pre-push` does not
 
-Two things check the seed before it lands, and a rebase defeats both:
+Two things check the seed at commit time, and a rebase defeats both:
 
 | check | fires on | why a rebase misses it |
 |---|---|---|
@@ -173,9 +173,21 @@ built against the old base. The gate had nothing to object to when that commit w
 and there is no second commit event for it to fire on. Observed 2026-09-20 on PR #317: master's
 newer seed was overwritten by a rebase and the push went out stale.
 
-CI is the backstop — `just verify-bootstrap-fixed-point` runs there, so this costs a round-trip and
-a confusing red, not a bad merge. Until it is closed: **after any rebase of a branch touching
-`stdlib/compiler/`, reseed before pushing**; do not read a quiet hook as a clean seed.
+`.githooks/pre-push` runs `just verify-bootstrap-fixed-point` on any push whose range touches
+`stdlib/**.sprout` or `bootstrap/compile_driver.ll`. It fires however the push is made, and it
+diffs trees from the remote tip (or the merge base with `<remote>/master` for a new branch), so
+master's incoming changes in a rebase count. `just seed-stale` would miss about one seed change in
+ten here, since it fingerprints `stdlib/compiler/` only; the fixed point is what CI runs. A push
+of a delete, or of a range that touches neither, skips the check. The check costs about 10 s with
+a current stage-1 and 25 s when stage-1 is rebuilt from the seed. On failure the hook says to run
+`just pr-rebase` or `just refresh-seed`.
+
+The fixed point reads the working tree, so the hook can verify a ref only when it is checked out
+and `stdlib/` and `bootstrap/` have no uncommitted changes, untracked files included: a new module
+left out of the commit would pass here and fail in CI. A tag is checked by the commit it names. For any other push touching
+those paths it refuses and names the ref. Check out that ref and push again, or run `just
+verify-bootstrap-fixed-point` there and push with `--no-verify`. `SPROUT_PRE_PUSH_CHECK` replaces
+the check command; it exists for `just test-pre-push`.
 
 `just pr-rebase` does this in one command (`scripts/pr_rebase.sh`; tested by `just test-pr-rebase`).
 It rebases onto `origin/master`, reseeds each replayed commit that touches `stdlib/compiler/` or
