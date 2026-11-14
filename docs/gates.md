@@ -183,7 +183,8 @@ a current stage-1 and 25 s when stage-1 is rebuilt from the seed. On failure the
 `just pr-rebase` or `just refresh-seed`.
 
 The fixed point reads the working tree, so the hook can verify a ref only when it is checked out
-and `stdlib/` and `bootstrap/` have no uncommitted tracked changes. For any other push touching
+and `stdlib/` and `bootstrap/` have no uncommitted changes, untracked files included: a new module
+left out of the commit would pass here and fail in CI. A tag is checked by the commit it names. For any other push touching
 those paths it refuses and names the ref. Check out that ref and push again, or run `just
 verify-bootstrap-fixed-point` there and push with `--no-verify`. `SPROUT_PRE_PUSH_CHECK` replaces
 the check command; it exists for `just test-pre-push`.

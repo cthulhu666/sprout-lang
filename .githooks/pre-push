@@ -17,22 +17,23 @@ while read -r local_ref local_sha _remote_ref remote_sha; do
 
   if ! [[ "$remote_sha" =~ $zero ]] && git cat-file -e "${remote_sha}^{commit}" 2>/dev/null; then
     base="$remote_sha"
-  elif base=$(git merge-base "$local_sha" "refs/remotes/$remote/master" 2>/dev/null); then
-    :
   else
-    base=""
+    base=$(git merge-base "$local_sha" "refs/remotes/$remote/master" 2>/dev/null) || base=""
   fi
 
-  if [[ -n "$base" ]]; then
-    changed=$(git diff --name-only "$base" "$local_sha" -- stdlib bootstrap/compile_driver.ll \
-              | grep -E '^(stdlib/.*\.sprout|bootstrap/compile_driver\.ll)$' || true)
-    [[ -z "$changed" ]] && continue
+  # A pathspec `*` matches across `/`, so this covers stdlib/compiler/ too.
+  if [[ -n "$base" ]] \
+     && git diff --quiet "$base" "$local_sha" -- 'stdlib/*.sprout' bootstrap/compile_driver.ll; then
+    continue
   fi
 
-  if [[ "$(git rev-parse HEAD)" != "$local_sha" ]] \
-     || ! git diff --quiet HEAD -- stdlib bootstrap; then
+  # An annotated tag's sha names the tag object; compare the commit it points at.
+  commit=$(git rev-parse -q --verify "${local_sha}^{commit}" || true)
+  if [[ "$(git rev-parse HEAD)" != "$commit" ]] \
+     || ! git diff --quiet HEAD -- stdlib bootstrap \
+     || [[ -n "$(git ls-files --others --exclude-standard -- stdlib bootstrap)" ]]; then
     echo "[pre-push] the seed of $local_ref (${local_sha:0:9}) can't be verified from this checkout." >&2
-    echo "    Check out that ref (commit or set aside the stdlib/ and bootstrap/ edits) and push again," >&2
+    echo "    Check out that ref (commit or set aside stdlib/ and bootstrap/ changes, untracked too) and push again," >&2
     echo "    or run 'just verify-bootstrap-fixed-point' there and push with --no-verify." >&2
     refused=1
     continue

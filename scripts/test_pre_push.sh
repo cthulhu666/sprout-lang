@@ -127,4 +127,27 @@ git push -q origin feature 2>"$T/err"
 check "check ran once" 1 "$(runs)"
 check "push landed" "$(git rev-parse HEAD)" "$(remote_ref h feature)"
 
+echo "i. HEAD pushed, untracked stdlib module"
+mk i
+mkdir stdlib/compiler
+echo x >stdlib/compiler/a.sprout; commit compiler
+echo new >stdlib/compiler/new.sprout
+git push -q origin feature 2>"$T/err"
+check "check not run" 0 "$(runs)"
+check "push rejected" none "$(remote_ref i feature)"
+check "message names the ref" 1 "$(grep -c 'refs/heads/feature' "$T/err")"
+rm stdlib/compiler/new.sprout
+git push -q origin feature 2>"$T/err"
+check "nested stdlib change ran the check" 1 "$(runs)"
+check "push landed" "$(git rev-parse HEAD)" "$(remote_ref i feature)"
+
+echo "j. annotated tag of HEAD touching stdlib"
+mk j
+echo x >stdlib/x.sprout; commit stdlib
+git tag -a v1 -m v1
+git push -q origin v1 2>"$T/err"
+check "check ran once" 1 "$(runs)"
+check "tag landed" "$(git rev-parse v1)" \
+  "$(git --git-dir="$T/j.origin.git" rev-parse -q --verify refs/tags/v1 || echo none)"
+
 exit $fail
