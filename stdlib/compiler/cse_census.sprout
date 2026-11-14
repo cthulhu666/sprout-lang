@@ -4,9 +4,9 @@ import stdlib.string as string
 
 # How much common subexpression elimination is there to eliminate?
 #
-# M1 proposes CSE over Sprout-level calls (docs/opt-passes-v0.md). M0 measured
-# that dead-let elimination (since removed) removed ZERO nodes from every real program, the
-# reason this counter exists before the pass does: an optimisation nobody can
+# M1 proposes CSE over Sprout-level calls (docs/opt-passes-v0.md). M0 measured that
+# dead-let elimination (since removed) removed ZERO nodes from every real program, which
+# is the reason this counter exists before the pass does: an optimisation nobody can
 # measure an opportunity for is not worth its complexity. This module counts the
 # opportunity and rewrites nothing.
 #

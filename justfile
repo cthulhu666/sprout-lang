@@ -3675,15 +3675,26 @@ runtime-diag-smoke: bootstrap-from-seed
 #     bigint column sum leaves i64 above 2047 limbs, so `mul` refuses instead,
 #     and the refusal must name the module — an unguarded build returns a wrong
 #     product with exit 0, which exit code alone cannot catch.
+#   dead_let_* — a do-block `let` runs even when its name is never read (docs/spec-v0.md §6
+#     rule 4), and a pure RHS can still panic (`panic`, `/` by zero, Int overflow). Each binds a
+#     panicking RHS to a name nothing reads, then prints. MESSAGE-EXACT, and stdout must be
+#     EMPTY: a deleted binding shows as output where there must be none.
 [group('smoke')]
 overflow-smoke: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
   TMPD=$(mktemp -d /tmp/sprout_ovf_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
+  RTO="$TMPD/rtobj"; mkdir -p "$RTO"
+  for rtsrc in {{runtime_src}}; do
+    clang -c "$rtsrc" -O2 {{clang_extra}} -o "$RTO/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
+      || { echo "overflow-smoke: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
+  done
   FIXTURES=(add_overflow sub_overflow mul_overflow neg_overflow int_min_div
             abs_int_min pow_overflow range_count_span bigint_mul_ceiling
-            bigint_shl_ceiling)
+            bigint_shl_ceiling
+            dead_let_panic_discarded dead_let_panic_named dead_let_div_by_zero
+            dead_let_mul_overflow dead_let_neg_overflow)
   # Every case now pins a message substring; an empty string here would mean
   # exit-code-only, which int_min_div showed is unfalsifiable on x86-64.
   # abs_int_min/pow_overflow pin only "overflow": they gate docs/spec-v0.md
@@ -3701,13 +3712,18 @@ overflow-smoke: bootstrap-from-seed
     [range_count_span]="range_count"
     [bigint_mul_ceiling]="bigint.mul"
     [bigint_shl_ceiling]="bigint.shl"
+    [dead_let_panic_discarded]="insufficient funds"
+    [dead_let_panic_named]="insufficient funds"
+    [dead_let_div_by_zero]="division by zero"
+    [dead_let_mul_overflow]="Int overflow in *"
+    [dead_let_neg_overflow]="overflow"
   )
   for f in "${FIXTURES[@]}"; do
     FIXTURE="tests/overflow_smoke/$f.spr"
     if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$FIXTURE" > "$TMPD/$f.ll" 2>"$TMPD/$f.emit.err"; then
       echo "overflow-smoke: emit-IR failed for $f" >&2; cat "$TMPD/$f.emit.err" >&2; exit 1
     fi
-    if ! clang "$TMPD/$f.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/$f.bin" 2>"$TMPD/$f.link.err"; then
+    if ! clang "$TMPD/$f.ll" "$RTO"/*.o -O2 {{clang_extra}} -o "$TMPD/$f.bin" 2>"$TMPD/$f.link.err"; then
       echo "overflow-smoke: link failed for $f" >&2; cat "$TMPD/$f.link.err" >&2; exit 1
     fi
     set +e
@@ -3715,7 +3731,12 @@ overflow-smoke: bootstrap-from-seed
     ec=$?
     set -e
     if [ "$ec" -eq 0 ]; then
-      echo "overflow-smoke: $f did NOT panic (exit 0) — the overflow guard is missing or was optimized away" >&2
+      echo "overflow-smoke: $f did NOT panic (exit 0) — the overflow guard is missing or was optimized away (for dead_let_*, the unused let was dropped)" >&2
+      echo "  stdout was: $(cat "$TMPD/$f.out")" >&2
+      exit 1
+    fi
+    if [[ "$f" == dead_let_* && -s "$TMPD/$f.out" ]]; then
+      echo "overflow-smoke: $f printed before panicking — the unused let ran too late" >&2
       echo "  stdout was: $(cat "$TMPD/$f.out")" >&2
       exit 1
     fi
@@ -3729,60 +3750,6 @@ overflow-smoke: bootstrap-from-seed
     fi
   done
   echo "==> overflow-smoke ✓ (${#FIXTURES[@]} overflow cases panic cleanly)"
-
-# A do-block `let` runs even when its name is never read (docs/spec-v0.md §6 rule 4): a pure
-# RHS can still panic (`panic`, `/` by zero, Int overflow). Each fixture binds a panicking RHS
-# to a name nothing reads, then prints. The run must exit non-zero with the expected message on
-# stderr and nothing on stdout, so a deleted binding shows as output where there must be none.
-# Operands are runtime values, as in overflow-smoke, so neither the compiler nor clang folds them.
-[group('smoke')]
-dead-let-smoke: bootstrap-from-seed
-  #!/usr/bin/env bash
-  set -euo pipefail
-  TMPD=$(mktemp -d /tmp/sprout_deadlet_XXXXXX)
-  trap 'rm -rf "$TMPD"' EXIT
-  RTO="$TMPD/rtobj"; mkdir -p "$RTO"
-  for rtsrc in {{runtime_src}}; do
-    clang -c "$rtsrc" -O2 {{clang_extra}} -o "$RTO/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
-      || { echo "dead-let-smoke: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
-  done
-  FIXTURES=(panic_discarded panic_named_unused div_by_zero mul_overflow neg_overflow)
-  declare -A EXPECT=(
-    [panic_discarded]="insufficient funds"
-    [panic_named_unused]="insufficient funds"
-    [div_by_zero]="division by zero"
-    [mul_overflow]="Int overflow in *"
-    [neg_overflow]="overflow"
-  )
-  for f in "${FIXTURES[@]}"; do
-    FIXTURE="tests/dead_let_smoke/$f.spr"
-    if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$FIXTURE" > "$TMPD/$f.ll" 2>"$TMPD/$f.emit.err"; then
-      echo "dead-let-smoke: emit-IR failed for $f" >&2; cat "$TMPD/$f.emit.err" >&2; exit 1
-    fi
-    if ! clang "$TMPD/$f.ll" "$RTO"/*.o -O2 {{clang_extra}} -o "$TMPD/$f.bin" 2>"$TMPD/$f.link.err"; then
-      echo "dead-let-smoke: link failed for $f" >&2; cat "$TMPD/$f.link.err" >&2; exit 1
-    fi
-    set +e
-    "$TMPD/$f.bin" > "$TMPD/$f.out" 2>"$TMPD/$f.err"
-    ec=$?
-    set -e
-    if [ "$ec" -eq 0 ]; then
-      echo "dead-let-smoke: $f did NOT panic (exit 0) — the unused let was dropped" >&2
-      echo "  stdout was: $(cat "$TMPD/$f.out")" >&2
-      exit 1
-    fi
-    if [ -s "$TMPD/$f.out" ]; then
-      echo "dead-let-smoke: $f printed before panicking — the unused let ran too late" >&2
-      echo "  stdout was: $(cat "$TMPD/$f.out")" >&2
-      exit 1
-    fi
-    if ! grep -qF "${EXPECT[$f]}" "$TMPD/$f.err"; then
-      echo "dead-let-smoke: $f not reported cleanly (exit $ec); expected '${EXPECT[$f]}' on stderr" >&2
-      echo "--- stderr was ---" >&2; cat "$TMPD/$f.err" >&2
-      exit 1
-    fi
-  done
-  echo "==> dead-let-smoke ✓ (${#FIXTURES[@]} unused-let cases panic cleanly)"
 
 # stdlib.bits shift-count guard regression (CI gate). Same shape and same reason as
 # div-by-zero-smoke above: the count is -1 at RUNTIME (`list_length(argv) - 1` with
@@ -4788,7 +4755,6 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "div-by-zero-smoke|div-by-zero-smoke"
     "runtime-diag-smoke|runtime-diag-smoke"
     "overflow-smoke|overflow-smoke"
-    "dead-let-smoke|dead-let-smoke"
     "negative-shift-smoke|negative-shift-smoke"
     "closure-arity-smoke|closure-arity-smoke"
     "stack-overflow-smoke|stack-overflow-smoke"

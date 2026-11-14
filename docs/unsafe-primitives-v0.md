@@ -21,8 +21,8 @@ One more fact shapes the design. Declaring an extern is already unchecked trust:
 declare any extern with any signature when the canonical declaration is not in its build. A probe
 compiled a user file declaring `extern fn vector_mutset(...) -> Unit` (pure); the dead-let
 elimination of the time then deleted the call, leaving no call to `vector_mutset` in the IR. That
-pass is gone (an unused `let` always runs, spec §6 rule 4), but a pass may again treat a pure call
-with an unused result as removable, so whatever hides an effect must return the thing it changed.
+pass is gone. The trust still matters: bounds-check elimination reads a pure function as unable to
+change a length (§4.4), so whatever hides an effect must return the thing it changed.
 
 ## 2. Goals and non-goals
 
@@ -183,7 +183,8 @@ The three rules of persistent-array-v0 §5.3 hold for every `unsafe_pure` call, 
 
 4. **No pass changes how many times an action runs, or its order relative to other calls on the
    same value.** An unused `let` always runs (spec §6 rule 4), so no pass deletes a call because its
-   result is unused. Copying code is allowed when each run still runs each action once, as BCE's `$fast` clones do.
+   result is unused. Copying code is allowed when each run still runs each action once, as BCE's
+   `$fast` clones do.
 
 Today no pass moves, merges or repeats a call (opt-passes-v0: CSE declined, LICM open). Rule 4 is
 GHC's NOINLINE plus `-fno-cse` stated as a rule rather than a pragma. It constrains passes that do
