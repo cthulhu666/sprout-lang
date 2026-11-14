@@ -1,7 +1,9 @@
 /* replay: decoder and validator for a Sprout GC allocation trace (docs/gc-stage2-v0.md §5.7).
  *
  *   clang -O2 bench/gc_place/replay.c -o replay
- *   replay --check <trace>
+ *   replay --check <trace>                       validate a trace
+ *   replay --policies all|<name>,... <trace>     replay it under placement policies (bench/gc_place/run.sh)
+ *   replay --selftest                            the policies on tiny hand-written traces
  *
  * Written by a runtime built with -DSPROUT_GC_ALLOCTRACE when SPROUT_GC_ALLOCTRACE=<path> is set
  * (sprout_at_* in runtime/sprout_runtime.c).  This file holds the authoritative format.
@@ -239,18 +241,1038 @@ static int chk_finish(void* ctx) {
 
 static const Handlers check_handlers = { chk_alloc, chk_free, chk_tail, chk_vec_out, chk_gc_start, chk_gc_end, chk_finish };
 
+/* ── placement simulator (docs/gc-stage2-v0.md §5.7, options C and E against today's layout) ────
+ *
+ * Which ids a collection frees does not depend on placement, so every policy replays the same
+ * allocations and frees at the same collections; only where objects land, and so what memory is
+ * held, differs.  All policies share one object table (id -> Obj) and each keeps its own placement
+ * of an object in Obj.pl[its slot].  A slot_bytes above LARGE_THRESHOLD is never placed: its bytes
+ * count as held while it lives, identically for every policy.
+ *
+ * Each policy owns an address space of fixed-size regions, indexed 0..n-1.  "Lowest address" is
+ * the lowest index, and a released region's index is reused (lowest first) before the space grows.
+ * (The runtime's arena hands chunks back LIFO; the order of regions, not their number, differs.)
+ *
+ * Memory is measured at each G, before its frees (the high-water point), and at each E:
+ *   held = regions x region_size + live large bytes.
+ *
+ * POLICIES
+ *   base      today's layout with SPROUT_GC_REGION_LISTS=1, 1 MiB regions.  Per region and class an
+ *             exact-fit free slot count; class c takes from the lowest region holding one (a cursor
+ *             per class, reset at every E, lowered by a tail), else bumps exactly as
+ *             sprout_gc_alloc_block does: the hint region if the slot fits, else the highest region
+ *             with room, else a new region (which becomes the hint).  A freed slot rejoins its
+ *             region's class at the F; a T tail is a free slot of class rest/16 at once.  At an E a
+ *             region with no live object is released (a young-only minor, kind 2, only one that
+ *             was bumped into), and when none is left a fresh one is opened, as Pass 2 and the
+ *             young sweep do.  Which slot of a class is popped within a region is not modelled.
+ *   holes     1 MiB mixed-size regions (option C).  At each E the holes are the maximal runs of
+ *             16 B granules covered by no live object's extent, unbumped space included.  Between
+ *             collections one cursor walks the holes in address order and only moves forward: a
+ *             request that fits the current hole bumps; one that does not skips to the next hole
+ *             that fits, and every skipped remainder (the current hole's and each passed hole's) is
+ *             wasted until the next E.  Past the last hole a new region opens as one big hole.
+ *             T shrinks the extent; the tail is a hole only at the next E.  An empty region is
+ *             released at every E, none is reopened.
+ *   holes-ovf as holes, but a request above OVF_THRESHOLD bytes that does not fit the current hole
+ *             goes to an overflow cursor instead of moving the main one.  It walks the holes ahead
+ *             of the main cursor (never behind its own last position), takes the first that fits,
+ *             and otherwise opens a fresh region appended to the holes.  Holes it passes are not
+ *             wasted: only the main cursor's skips count.  Both cursors bump the same hole.
+ *   class-R   single-class regions of R bytes (option E): floor(R / slot_bytes) slots of one class,
+ *             the remainder is internal waste.  Class c takes a slot in the lowest region of class
+ *             c with one (cursor per class, reset at every E), else opens a region of class c.  T
+ *             does not shrink the object: the tail is held dead until the object is freed.  An
+ *             empty region is released at every E. */
+
+#define REGION_BYTES (1u << 20)
+#define REGION_GRANULES (REGION_BYTES / 16)
+#define BM_WORDS (REGION_GRANULES / 64)
+#define MAX_POL 8
+#define NCLS 257   /* class = slot_bytes / 16, 1..256 */
+#define OVF_THRESHOLD 256
+#define KIND_BYTES 5
+#define KIND_BUILDER 6
+#define NO_OBJ UINT32_MAX
+
+enum { O_OWNER = 1, O_LARGE = 2, O_TAILED = 4 };
+enum { PK_BASE, PK_HOLES, PK_CLASS };
+
+static void* xcalloc(size_t n, size_t sz) {
+  void* p = calloc(n, sz);
+  if (p == NULL) { fprintf(stderr, "replay: out of memory\n"); exit(2); }
+  return p;
+}
+
+static void* xrealloc(void* p, size_t n) {
+  p = realloc(p, n);
+  if (p == NULL) { fprintf(stderr, "replay: out of memory\n"); exit(2); }
+  return p;
+}
+
+typedef struct { uint64_t n, max; double sum; } Stat;
+static void stat_add(Stat* s, uint64_t v) { s->n++; s->sum += (double)v; if (v > s->max) s->max = v; }
+static double stat_mean(const Stat* s) { return s->n ? s->sum / (double)s->n : 0; }
+
+typedef struct { uint32_t region, off; } Place;   /* off: granule offset in the region (holes) */
+
+typedef struct {
+  uint64_t id;
+  uint32_t size;   /* slot bytes now: a T takes the tail off */
+  uint32_t tail;   /* bytes a T freed from this object */
+  uint8_t kind, flags;
+  Place pl[MAX_POL];
+} Obj;
+
+typedef struct Policy Policy;
+struct Policy {
+  const char* name;
+  int type, slot;
+  uint64_t region_bytes;
+  void (*alloc)(Policy*, Obj*);
+  void (*free_)(Policy*, Obj*);
+  void (*tail)(Policy*, Obj*, uint32_t rest);   /* before o->size shrinks */
+  void (*gc_end)(Policy*, uint64_t kind);
+  uint64_t (*regions)(const Policy*);
+  void (*snap)(Policy*);   /* at a new G peak */
+  uint64_t g_n, g_peak, peak_regions;
+  double g_sum, e_sum;
+  uint64_t e_n;
+};
+
+/* ── id -> pool index: open addressing, linear probing, backward-shift delete ── */
+typedef struct { uint64_t* k; uint32_t* v; size_t cap, cnt; } Map;
+#define MAP_EMPTY UINT64_MAX
+
+static size_t map_hash(uint64_t id, size_t mask) { return (size_t)((id * 0x9E3779B97F4A7C15ull) >> 32) & mask; }
+
+static void map_put(Map* m, uint64_t id, uint32_t v) {
+  if ((m->cnt + 1) * 2 > m->cap) {
+    Map n;
+    n.cap = m->cap ? m->cap * 2 : 1 << 16;
+    n.cnt = 0;
+    n.k = xcalloc(n.cap, sizeof(uint64_t));
+    n.v = xcalloc(n.cap, sizeof(uint32_t));
+    for (size_t i = 0; i < n.cap; i++) n.k[i] = MAP_EMPTY;
+    for (size_t i = 0; i < m->cap; i++)
+      if (m->k[i] != MAP_EMPTY) {
+        size_t j = map_hash(m->k[i], n.cap - 1);
+        while (n.k[j] != MAP_EMPTY) j = (j + 1) & (n.cap - 1);
+        n.k[j] = m->k[i];
+        n.v[j] = m->v[i];
+      }
+    free(m->k);
+    free(m->v);
+    n.cnt = m->cnt;
+    *m = n;
+  }
+  size_t j = map_hash(id, m->cap - 1);
+  while (m->k[j] != MAP_EMPTY) j = (j + 1) & (m->cap - 1);
+  m->k[j] = id;
+  m->v[j] = v;
+  m->cnt++;
+}
+
+static uint32_t map_get(const Map* m, uint64_t id) {
+  if (m->cap == 0) return NO_OBJ;
+  size_t mask = m->cap - 1, j = map_hash(id, mask);
+  while (m->k[j] != MAP_EMPTY) {
+    if (m->k[j] == id) return m->v[j];
+    j = (j + 1) & mask;
+  }
+  return NO_OBJ;
+}
+
+static void map_del(Map* m, uint64_t id) {
+  size_t mask = m->cap - 1, i = map_hash(id, mask);
+  while (m->k[i] != id) i = (i + 1) & mask;
+  size_t j = i;
+  for (;;) {
+    j = (j + 1) & mask;
+    if (m->k[j] == MAP_EMPTY) break;
+    size_t h = map_hash(m->k[j], mask);
+    if (i <= j ? (i < h && h <= j) : (i < h || h <= j)) continue;
+    m->k[i] = m->k[j];
+    m->v[i] = m->v[j];
+    i = j;
+  }
+  m->k[i] = MAP_EMPTY;
+  m->cnt--;
+}
+
+typedef struct {
+  Map map;
+  Obj* pool;
+  uint32_t pool_cap, pool_used, pool_free;
+  Policy* pols[MAX_POL];
+  int npol;
+  uint64_t allocs, frees, large_allocs, large_live, large_cnt, large_peak, live_objs;
+  uint64_t live_bytes;   /* ordinary slot bytes of live objects */
+  uint64_t owners, collections, ecount[4];
+  Stat owners_e, live_e;   /* at each E */
+  /* base calibration against the trace's own E records */
+  int have_base;
+  Stat cal_base, cal_trace;
+  uint64_t cal_maxdiff, cal_large_miss, cal_n;
+} Sim;
+
+static Obj* pool_new(Sim* s, uint32_t* idx) {
+  uint32_t i;
+  if (s->pool_free != NO_OBJ) {
+    i = s->pool_free;
+    s->pool_free = s->pool[i].pl[0].region;
+  } else {
+    if (s->pool_used == s->pool_cap) {
+      s->pool_cap = s->pool_cap ? s->pool_cap * 2 : 1 << 16;
+      s->pool = xrealloc(s->pool, (size_t)s->pool_cap * sizeof(Obj));
+    }
+    i = s->pool_used++;
+  }
+  *idx = i;
+  memset(&s->pool[i], 0, sizeof(Obj));
+  return &s->pool[i];
+}
+
+static void measure(Sim* s, Policy* p, int at_g) {
+  uint64_t regs = p->regions(p), held = regs * p->region_bytes + s->large_live;
+  if (regs > p->peak_regions) p->peak_regions = regs;
+  if (at_g) {
+    p->g_n++;
+    p->g_sum += (double)held;
+    if (held > p->g_peak) { p->g_peak = held; if (p->snap) p->snap(p); }
+  } else {
+    p->e_n++;
+    p->e_sum += (double)held;
+  }
+}
+
+static int sim_alloc(Sim* s, uint64_t id, uint64_t kind, uint64_t slot_bytes) {
+  if (slot_bytes == 0 || slot_bytes % 16 != 0) return err("A %llu: slot_bytes %llu is not a positive multiple of 16", (unsigned long long)id, (unsigned long long)slot_bytes);
+  uint32_t idx;
+  Obj* o = pool_new(s, &idx);
+  o->id = id;
+  o->size = (uint32_t)slot_bytes;
+  o->kind = (uint8_t)kind;
+  s->allocs++;
+  s->live_objs++;
+  if (kind == KIND_BYTES || kind == KIND_BUILDER) { o->flags |= O_OWNER; s->owners++; }
+  if (slot_bytes > LARGE_THRESHOLD) {
+    o->flags |= O_LARGE;
+    s->large_allocs++;
+    s->large_cnt++;
+    s->large_live += slot_bytes;
+    if (s->large_live > s->large_peak) s->large_peak = s->large_live;
+  } else {
+    s->live_bytes += slot_bytes;
+    for (int i = 0; i < s->npol; i++) s->pols[i]->alloc(s->pols[i], o);
+  }
+  map_put(&s->map, id, idx);
+  return 0;
+}
+
+static int sim_free(Sim* s, uint64_t id) {
+  uint32_t idx = map_get(&s->map, id);
+  if (idx == NO_OBJ) return err("F %llu: not a live object", (unsigned long long)id);
+  Obj* o = &s->pool[idx];
+  if (o->flags & O_OWNER) s->owners--;
+  if (o->flags & O_LARGE) {
+    s->large_live -= o->size;
+    s->large_cnt--;
+  } else {
+    s->live_bytes -= o->size;
+    for (int i = 0; i < s->npol; i++) s->pols[i]->free_(s->pols[i], o);
+  }
+  s->frees++;
+  s->live_objs--;
+  map_del(&s->map, id);
+  o->pl[0].region = s->pool_free;
+  s->pool_free = idx;
+  return 0;
+}
+
+static int sim_tail(Sim* s, uint64_t id, uint64_t rest) {
+  uint32_t idx = map_get(&s->map, id);
+  if (idx == NO_OBJ) return err("T %llu: not a live object", (unsigned long long)id);
+  Obj* o = &s->pool[idx];
+  if ((o->flags & (O_LARGE | O_TAILED)) || rest == 0 || rest >= o->size || rest % 16 != 0)
+    return err("T %llu: rest %llu does not fit an ordinary untailed object of %u bytes", (unsigned long long)id, (unsigned long long)rest, o->size);
+  for (int i = 0; i < s->npol; i++) s->pols[i]->tail(s->pols[i], o, (uint32_t)rest);
+  o->flags |= O_TAILED;
+  o->tail = (uint32_t)rest;
+  o->size -= (uint32_t)rest;
+  s->live_bytes -= rest;
+  return 0;
+}
+
+static int sim_vec_out(Sim* s, uint64_t id) {
+  uint32_t idx = map_get(&s->map, id);
+  if (idx == NO_OBJ) return err("B %llu: not a live object", (unsigned long long)id);
+  Obj* o = &s->pool[idx];
+  if (o->kind == KIND_VECTOR && !(o->flags & O_OWNER)) { o->flags |= O_OWNER; s->owners++; }
+  return 0;
+}
+
+static int sim_gc_start(Sim* s) {
+  for (int i = 0; i < s->npol; i++) measure(s, s->pols[i], 1);
+  return 0;
+}
+
+/* ordinary is the trace's own region count at this E; UINT64_MAX skips the comparison. */
+static int sim_gc_end(Sim* s, uint64_t kind, uint64_t heap_after, uint64_t ordinary, uint64_t large) {
+  if (heap_after != UINT64_MAX && heap_after != s->live_objs)
+    return err("E: %llu live objects replayed, trace says %llu", (unsigned long long)s->live_objs, (unsigned long long)heap_after);
+  s->collections++;
+  if (kind < 4) s->ecount[kind]++;
+  for (int i = 0; i < s->npol; i++) {
+    Policy* p = s->pols[i];
+    p->gc_end(p, kind);
+    measure(s, p, 0);
+    if (p->type == PK_BASE && ordinary != UINT64_MAX) {
+      uint64_t b = p->regions(p), d = b > ordinary ? b - ordinary : ordinary - b;
+      stat_add(&s->cal_base, b);
+      stat_add(&s->cal_trace, ordinary);
+      if (d > s->cal_maxdiff) s->cal_maxdiff = d;
+    }
+  }
+  if (ordinary != UINT64_MAX && large != s->large_cnt) s->cal_large_miss++;
+  stat_add(&s->owners_e, s->owners);
+  stat_add(&s->live_e, s->live_bytes + s->large_live);
+  return 0;
+}
+
+/* ── base ───────────────────────────────────────────────────────────────────────────────── */
+typedef struct { uint32_t bump, live; uint32_t* fc; uint8_t used; } BReg;   /* fc[class]: free slots */
+typedef struct {
+  Policy p;
+  BReg* r;
+  uint32_t n, cap, nused;
+  int64_t hint;
+  uint32_t cursor[NCLS];
+} Base;
+
+static uint32_t base_open(Base* b) {
+  uint32_t i = 0;
+  while (i < b->n && b->r[i].used) i++;
+  if (i == b->n) {
+    if (b->n == b->cap) {
+      b->cap = b->cap ? b->cap * 2 : 16;
+      b->r = xrealloc(b->r, (size_t)b->cap * sizeof(BReg));
+    }
+    memset(&b->r[b->n], 0, sizeof(BReg));
+    b->n++;
+  }
+  BReg* r = &b->r[i];
+  if (r->fc == NULL) r->fc = xcalloc(NCLS, sizeof(uint32_t)); else memset(r->fc, 0, NCLS * sizeof(uint32_t));
+  r->bump = r->live = 0;
+  r->used = 1;
+  b->nused++;
+  b->hint = i;
+  return i;
+}
+
+static void base_alloc(Policy* p, Obj* o) {
+  Base* b = (Base*)p;
+  uint32_t cls = o->size / 16, sz = o->size;
+  for (uint32_t* c = &b->cursor[cls]; *c < b->n; (*c)++) {
+    BReg* r = &b->r[*c];
+    if (r->used && r->fc[cls] > 0) {
+      r->fc[cls]--;
+      r->live++;
+      o->pl[p->slot].region = *c;
+      return;
+    }
+  }
+  int64_t ri = -1;
+  if (b->hint >= 0 && (uint32_t)b->hint < b->n) {
+    const BReg* r = &b->r[b->hint];
+    if (r->used && r->bump + sz <= REGION_BYTES) ri = b->hint;
+  }
+  if (ri < 0)
+    for (uint32_t i = b->n; i > 0; i--) {
+      const BReg* r = &b->r[i - 1];
+      if (r->used && r->bump + sz <= REGION_BYTES) { ri = i - 1; b->hint = ri; break; }
+    }
+  if (ri < 0) ri = base_open(b);
+  b->r[ri].bump += sz;
+  b->r[ri].live++;
+  o->pl[p->slot].region = (uint32_t)ri;
+}
+
+static void base_free(Policy* p, Obj* o) {
+  Base* b = (Base*)p;
+  BReg* r = &b->r[o->pl[p->slot].region];
+  r->fc[o->size / 16]++;
+  r->live--;
+}
+
+static void base_tail(Policy* p, Obj* o, uint32_t rest) {
+  Base* b = (Base*)p;
+  uint32_t ri = o->pl[p->slot].region, cls = rest / 16;
+  b->r[ri].fc[cls]++;
+  if (b->cursor[cls] > ri) b->cursor[cls] = ri;
+}
+
+static void base_gc_end(Policy* p, uint64_t kind) {
+  Base* b = (Base*)p;
+  int full = kind != 2;
+  uint32_t released = 0;
+  for (uint32_t i = 0; i < b->n; i++) {
+    BReg* r = &b->r[i];
+    if (r->used && r->live == 0 && (full || r->bump > 0)) {
+      r->used = 0;
+      b->nused--;
+      released++;
+      if (b->hint == (int64_t)i) b->hint = -1;
+    }
+  }
+  if (b->nused == 0 && (full || released)) base_open(b);
+  memset(b->cursor, 0, sizeof b->cursor);
+}
+
+static uint64_t base_regions(const Policy* p) { return ((const Base*)p)->nused; }
+
+/* ── holes (option C) ─────────────────────────────────────────────────────────────────────── */
+typedef struct { uint64_t* bm; uint32_t live; uint8_t used, touched; } HReg;   /* bm: live granules */
+typedef struct { uint32_t reg, cur, end; } Hole;   /* granule offsets: [cur, end) is free */
+typedef struct {
+  Policy p;
+  int ovf;
+  HReg* r;
+  uint32_t n, cap, nused;
+  Hole* h;
+  size_t nh, hcap, mainc, ovfc;
+  uint64_t waste_interval, waste_total, waste_peak, skipped, allocs;
+  Stat holes_all, holes_young, live_young, words;   /* per E */
+} Holes;
+
+static void bm_range(uint64_t* bm, uint32_t s, uint32_t len, int set) {
+  uint32_t e = s + len;
+  while (s < e) {
+    uint32_t w = s >> 6, b = s & 63, n = 64 - b;
+    if (n > e - s) n = e - s;
+    uint64_t mask = (n == 64 ? ~0ull : ((1ull << n) - 1)) << b;
+    if (set) bm[w] |= mask; else bm[w] &= ~mask;
+    s += n;
+  }
+}
+
+static void holes_push(Holes* h, uint32_t reg, uint32_t cur, uint32_t end) {
+  if (h->nh == h->hcap) {
+    h->hcap = h->hcap ? h->hcap * 2 : 1024;
+    h->h = xrealloc(h->h, h->hcap * sizeof(Hole));
+  }
+  h->h[h->nh].reg = reg;
+  h->h[h->nh].cur = cur;
+  h->h[h->nh].end = end;
+  h->nh++;
+}
+
+/* A new region, appended to the holes as one big hole. */
+static void holes_open(Holes* h) {
+  uint32_t i = 0;
+  while (i < h->n && h->r[i].used) i++;
+  if (i == h->n) {
+    if (h->n == h->cap) {
+      h->cap = h->cap ? h->cap * 2 : 16;
+      h->r = xrealloc(h->r, (size_t)h->cap * sizeof(HReg));
+    }
+    memset(&h->r[h->n], 0, sizeof(HReg));
+    h->n++;
+  }
+  HReg* r = &h->r[i];
+  r->bm = xcalloc(BM_WORDS, sizeof(uint64_t));
+  r->live = 0;
+  r->used = 1;
+  r->touched = 0;
+  h->nused++;
+  holes_push(h, i, 0, REGION_GRANULES);
+}
+
+static void holes_place(Holes* h, Hole* ho, Obj* o, uint32_t g) {
+  HReg* r = &h->r[ho->reg];
+  o->pl[h->p.slot].region = ho->reg;
+  o->pl[h->p.slot].off = ho->cur;
+  bm_range(r->bm, ho->cur, g, 1);
+  ho->cur += g;
+  r->live++;
+  r->touched = 1;
+}
+
+static void holes_skip(Holes* h, size_t j) {
+  uint32_t rem = h->h[j].end - h->h[j].cur;
+  if (rem > 0) {
+    h->waste_interval += (uint64_t)rem * 16;
+    h->waste_total += (uint64_t)rem * 16;
+    h->skipped++;
+    h->h[j].cur = h->h[j].end;
+  }
+}
+
+static void holes_alloc(Policy* p, Obj* o) {
+  Holes* h = (Holes*)p;
+  uint32_t g = o->size / 16;
+  h->allocs++;
+  if (h->mainc < h->nh && h->h[h->mainc].end - h->h[h->mainc].cur >= g) {
+    holes_place(h, &h->h[h->mainc], o, g);
+    return;
+  }
+  if (h->ovf && o->size > OVF_THRESHOLD && h->mainc < h->nh) {
+    size_t j = h->ovfc > h->mainc ? h->ovfc : h->mainc + 1;
+    while (j < h->nh && h->h[j].end - h->h[j].cur < g) j++;
+    if (j >= h->nh) { holes_open(h); j = h->nh - 1; }
+    h->ovfc = j;
+    holes_place(h, &h->h[j], o, g);
+    return;
+  }
+  size_t j = h->mainc;
+  if (j < h->nh) { holes_skip(h, j); j++; }
+  while (j < h->nh && h->h[j].end - h->h[j].cur < g) { holes_skip(h, j); j++; }
+  if (j >= h->nh) { holes_open(h); j = h->nh - 1; }
+  h->mainc = j;
+  holes_place(h, &h->h[j], o, g);
+}
+
+static void holes_free(Policy* p, Obj* o) {
+  Holes* h = (Holes*)p;
+  HReg* r = &h->r[o->pl[p->slot].region];
+  bm_range(r->bm, o->pl[p->slot].off, o->size / 16, 0);
+  r->live--;
+}
+
+static void holes_tail(Policy* p, Obj* o, uint32_t rest) {
+  Holes* h = (Holes*)p;
+  HReg* r = &h->r[o->pl[p->slot].region];
+  bm_range(r->bm, o->pl[p->slot].off + (o->size - rest) / 16, rest / 16, 0);
+}
+
+/* The maximal zero runs of a region's live bitmap, appended to the holes. */
+static uint64_t holes_scan(Holes* h, uint32_t ri) {
+  const uint64_t* bm = h->r[ri].bm;
+  uint64_t count = 0;
+  uint32_t pos = 0;
+  while (pos < REGION_GRANULES) {
+    uint32_t w = pos >> 6;
+    uint64_t bits = ~bm[w] & (~0ull << (pos & 63));
+    while (bits == 0) {
+      if (++w == BM_WORDS) return count;
+      bits = ~bm[w];
+    }
+    uint32_t start = w * 64 + (uint32_t)__builtin_ctzll(bits), end;
+    w = start >> 6;
+    uint64_t ones = bm[w] & (~0ull << (start & 63));
+    while (ones == 0) {
+      if (++w == BM_WORDS) { ones = 1; w = BM_WORDS - 1; end = REGION_GRANULES; goto emit; }
+      ones = bm[w];
+    }
+    end = w * 64 + (uint32_t)__builtin_ctzll(ones);
+  emit:
+    holes_push(h, ri, start, end);
+    count++;
+    pos = end;
+  }
+  return count;
+}
+
+static void holes_gc_end(Policy* p, uint64_t kind) {
+  (void)kind;
+  Holes* h = (Holes*)p;
+  uint64_t touched = 0;
+  for (uint32_t i = 0; i < h->n; i++) touched += h->r[i].used && h->r[i].touched;
+  for (uint32_t i = 0; i < h->n; i++) {
+    HReg* r = &h->r[i];
+    if (r->used && r->live == 0) {
+      free(r->bm);
+      r->bm = NULL;
+      r->used = 0;
+      h->nused--;
+    }
+  }
+  h->nh = 0;
+  uint64_t all = 0, young = 0, live_young = 0;
+  for (uint32_t i = 0; i < h->n; i++) {
+    if (!h->r[i].used) continue;
+    uint64_t c = holes_scan(h, i);
+    all += c;
+    if (h->r[i].touched) { young += c; live_young += h->r[i].live; }
+    h->r[i].touched = 0;
+  }
+  stat_add(&h->holes_all, all);
+  stat_add(&h->holes_young, young);
+  stat_add(&h->live_young, live_young);
+  stat_add(&h->words, touched * BM_WORDS);
+  h->mainc = h->ovfc = 0;
+  if (h->waste_interval > h->waste_peak) h->waste_peak = h->waste_interval;
+  h->waste_interval = 0;
+}
+
+static uint64_t holes_regions(const Policy* p) { return ((const Holes*)p)->nused; }
+
+/* ── class-R (option E) ───────────────────────────────────────────────────────────────────── */
+typedef struct { uint32_t cls, nslots, inuse; uint8_t used, touched; } CReg;
+typedef struct {
+  Policy p;
+  uint32_t R;
+  CReg* r;
+  uint32_t n, cap, nused;
+  uint32_t* lst[NCLS];   /* region indices of a class */
+  uint32_t nl[NCLS], capl[NCLS], cur[NCLS];
+  uint8_t unsorted[NCLS];
+  uint64_t dead_tail;
+  Stat words;   /* per E */
+  /* at the peak G */
+  uint64_t pk_waste, pk_tail, pk_free, pk_classes, pk_regions;
+} ClassR;
+
+static void class_place(ClassR* c, uint32_t ri, Obj* o) {
+  c->r[ri].inuse++;
+  c->r[ri].touched = 1;
+  o->pl[c->p.slot].region = ri;
+}
+
+static void class_alloc(Policy* p, Obj* o) {
+  ClassR* c = (ClassR*)p;
+  uint32_t cls = o->size / 16;
+  for (; c->cur[cls] < c->nl[cls]; c->cur[cls]++) {
+    uint32_t ri = c->lst[cls][c->cur[cls]];
+    if (c->r[ri].inuse < c->r[ri].nslots) { class_place(c, ri, o); return; }
+  }
+  uint32_t i = 0;
+  while (i < c->n && c->r[i].used) i++;
+  if (i == c->n) {
+    if (c->n == c->cap) {
+      c->cap = c->cap ? c->cap * 2 : 16;
+      c->r = xrealloc(c->r, (size_t)c->cap * sizeof(CReg));
+    }
+    memset(&c->r[c->n], 0, sizeof(CReg));
+    c->n++;
+  }
+  c->r[i].cls = cls;
+  c->r[i].nslots = c->R / o->size;
+  c->r[i].inuse = 0;
+  c->r[i].used = 1;
+  c->r[i].touched = 0;
+  c->nused++;
+  if (c->nl[cls] == c->capl[cls]) {
+    c->capl[cls] = c->capl[cls] ? c->capl[cls] * 2 : 8;
+    c->lst[cls] = xrealloc(c->lst[cls], (size_t)c->capl[cls] * sizeof(uint32_t));
+  }
+  if (c->nl[cls] > 0 && c->lst[cls][c->nl[cls] - 1] > i) c->unsorted[cls] = 1;
+  c->lst[cls][c->nl[cls]++] = i;
+  c->cur[cls] = c->nl[cls] - 1;
+  class_place(c, i, o);
+}
+
+static void class_free(Policy* p, Obj* o) {
+  ClassR* c = (ClassR*)p;
+  c->r[o->pl[p->slot].region].inuse--;
+  if (o->flags & O_TAILED) c->dead_tail -= o->tail;
+}
+
+static void class_tail(Policy* p, Obj* o, uint32_t rest) {
+  (void)o;
+  ((ClassR*)p)->dead_tail += rest;
+}
+
+static int cmp_u32(const void* a, const void* b) {
+  uint32_t x = *(const uint32_t*)a, y = *(const uint32_t*)b;
+  return x < y ? -1 : x > y;
+}
+
+static void class_gc_end(Policy* p, uint64_t kind) {
+  (void)kind;
+  ClassR* c = (ClassR*)p;
+  uint64_t touched = 0;
+  for (uint32_t i = 0; i < c->n; i++) touched += c->r[i].used && c->r[i].touched;
+  stat_add(&c->words, touched * (c->R / 16 / 64));
+  for (uint32_t i = 0; i < c->n; i++) {
+    CReg* r = &c->r[i];
+    if (r->used && r->inuse == 0) { r->used = 0; c->nused--; }
+    r->touched = 0;
+  }
+  for (uint32_t cls = 1; cls < NCLS; cls++) {
+    uint32_t k = 0;
+    for (uint32_t j = 0; j < c->nl[cls]; j++)
+      if (c->r[c->lst[cls][j]].used) c->lst[cls][k++] = c->lst[cls][j];
+    c->nl[cls] = k;
+    if (c->unsorted[cls]) { qsort(c->lst[cls], k, sizeof(uint32_t), cmp_u32); c->unsorted[cls] = 0; }
+    c->cur[cls] = 0;
+  }
+}
+
+static uint64_t class_regions(const Policy* p) { return ((const ClassR*)p)->nused; }
+
+static void class_snap(Policy* p) {
+  ClassR* c = (ClassR*)p;
+  c->pk_waste = c->pk_free = c->pk_classes = 0;
+  for (uint32_t i = 0; i < c->n; i++) {
+    const CReg* r = &c->r[i];
+    if (!r->used) continue;
+    c->pk_waste += c->R - (uint64_t)r->nslots * r->cls * 16;
+    c->pk_free += (uint64_t)(r->nslots - r->inuse) * r->cls * 16;
+  }
+  for (uint32_t cls = 1; cls < NCLS; cls++) c->pk_classes += c->nl[cls] > 0;
+  c->pk_tail = c->dead_tail;
+  c->pk_regions = c->nused;
+}
+
+/* ── policy construction and the report ───────────────────────────────────────────────────── */
+static Policy* policy_new(const char* name) {
+  Policy* p = NULL;
+  if (strcmp(name, "base") == 0) {
+    Base* b = xcalloc(1, sizeof *b);
+    b->hint = -1;
+    b->p = (Policy){ .name = "base", .type = PK_BASE, .region_bytes = REGION_BYTES, .alloc = base_alloc, .free_ = base_free,
+                     .tail = base_tail, .gc_end = base_gc_end, .regions = base_regions };
+    p = &b->p;
+  } else if (strcmp(name, "holes") == 0 || strcmp(name, "holes-ovf") == 0) {
+    Holes* h = xcalloc(1, sizeof *h);
+    h->ovf = strcmp(name, "holes-ovf") == 0;
+    h->p = (Policy){ .name = h->ovf ? "holes-ovf" : "holes", .type = PK_HOLES, .region_bytes = REGION_BYTES, .alloc = holes_alloc,
+                     .free_ = holes_free, .tail = holes_tail, .gc_end = holes_gc_end, .regions = holes_regions };
+    p = &h->p;
+  } else if (strncmp(name, "class-", 6) == 0) {
+    static const struct { const char* n; uint32_t r; } sizes[] = {
+      { "class-16K", 16u << 10 }, { "class-64K", 64u << 10 }, { "class-256K", 256u << 10 }, { "class-1M", 1u << 20 } };
+    for (size_t i = 0; i < sizeof sizes / sizeof *sizes; i++)
+      if (strcmp(name, sizes[i].n) == 0) {
+        ClassR* c = xcalloc(1, sizeof *c);
+        c->R = sizes[i].r;
+        c->p = (Policy){ .name = sizes[i].n, .type = PK_CLASS, .region_bytes = c->R, .alloc = class_alloc, .free_ = class_free,
+                         .tail = class_tail, .gc_end = class_gc_end, .regions = class_regions, .snap = class_snap };
+        p = &c->p;
+      }
+  }
+  return p;
+}
+
+static const char* const ALL_POLICIES[] = { "base", "holes", "holes-ovf", "class-16K", "class-64K", "class-256K", "class-1M" };
+
+/* "all", or a comma-separated list of policy names; 0 on success. */
+static int sim_init(Sim* s, const char* list) {
+  memset(s, 0, sizeof *s);
+  s->pool_free = NO_OBJ;
+  char buf[256];
+  if (strcmp(list, "all") == 0) {
+    buf[0] = 0;
+    for (size_t i = 0; i < sizeof ALL_POLICIES / sizeof *ALL_POLICIES; i++) {
+      if (i) strcat(buf, ",");
+      strcat(buf, ALL_POLICIES[i]);
+    }
+  } else {
+    snprintf(buf, sizeof buf, "%s", list);
+  }
+  for (char* tok = strtok(buf, ","); tok != NULL; tok = strtok(NULL, ",")) {
+    Policy* p = policy_new(tok);
+    if (p == NULL || s->npol == MAX_POL) { fprintf(stderr, "replay: unknown policy '%s'\n", tok); return 1; }
+    p->slot = s->npol;
+    s->pols[s->npol++] = p;
+    s->have_base |= p->type == PK_BASE;
+  }
+  return s->npol == 0;
+}
+
+static double mib(double b) { return b / 1048576.0; }
+
+static void report(const Sim* s, const char* path) {
+  printf("== %s\n", path);
+  printf("allocs=%llu frees=%llu collections=%llu (off=%llu major=%llu minor_young=%llu minor_full=%llu) "
+         "large_allocs=%llu large_live_peak=%.1f MiB\n",
+         (unsigned long long)s->allocs, (unsigned long long)s->frees, (unsigned long long)s->collections,
+         (unsigned long long)s->ecount[0], (unsigned long long)s->ecount[1], (unsigned long long)s->ecount[2],
+         (unsigned long long)s->ecount[3], (unsigned long long)s->large_allocs, mib((double)s->large_peak));
+  printf("live after E (ordinary slot bytes + large): peak %.2f MiB, mean %.2f MiB\n", mib((double)s->live_e.max), mib(stat_mean(&s->live_e)));
+  printf("live buffer owners at E (bytes, builders, vectors with a B): peak %llu, mean %.1f\n", (unsigned long long)s->owners_e.max, stat_mean(&s->owners_e));
+  const Policy* base = NULL;
+  for (int i = 0; i < s->npol; i++) if (s->pols[i]->type == PK_BASE) base = s->pols[i];
+  if (base != NULL && s->cal_trace.n > 0) {
+    uint64_t bm = s->cal_base.max, tm = s->cal_trace.max;
+    uint64_t d = bm > tm ? bm - tm : tm - bm;
+    int ok = tm < 10 ? d <= 1 : (double)d <= 0.10 * (double)tm;
+    printf("base calibration vs the trace's E ordinary_regions: base max %llu mean %.2f | trace max %llu mean %.2f | "
+           "max per-E diff %llu | large_regions mismatches %llu | %s\n",
+           (unsigned long long)bm, stat_mean(&s->cal_base), (unsigned long long)tm, stat_mean(&s->cal_trace),
+           (unsigned long long)s->cal_maxdiff, (unsigned long long)s->cal_large_miss, ok ? "CALIBRATION OK" : "CALIBRATION MISS");
+  }
+  printf("\n%-11s %10s %10s %8s %9s %11s\n", "policy", "peak_held", "mean_held", "vs_base", "peak_reg", "mean_held@E");
+  for (int i = 0; i < s->npol; i++) {
+    const Policy* p = s->pols[i];
+    printf("%-11s %9.1fM %9.1fM ", p->name, mib((double)p->g_peak), mib(p->g_n ? p->g_sum / (double)p->g_n : 0));
+    if (base != NULL && base->g_peak) printf("%7.2fx ", (double)p->g_peak / (double)base->g_peak); else printf("%8s ", "-");
+    printf("%9llu %10.1fM\n", (unsigned long long)p->peak_regions, mib(p->e_n ? p->e_sum / (double)p->e_n : 0));
+  }
+  int any = 0;
+  for (int i = 0; i < s->npol; i++) any |= s->pols[i]->type == PK_HOLES;
+  if (any) {
+    printf("\n%-11s %9s %9s | %-17s | %-17s | %-17s | %-17s | %s\n", "holes", "waste_tot", "waste_pk", "holes/E all", "holes/E young", "live in young", "bitmap words/E", "skipped/alloc");
+    printf("%-11s %9s %9s | %8s %8s | %8s %8s | %8s %8s | %8s %8s |\n", "", "MiB", "KiB/intvl", "mean", "max", "mean", "max", "mean", "max", "mean", "max");
+    for (int i = 0; i < s->npol; i++) {
+      if (s->pols[i]->type != PK_HOLES) continue;
+      const Holes* h = (const Holes*)s->pols[i];
+      printf("%-11s %9.1f %9.1f | %8.1f %8llu | %8.1f %8llu | %8.1f %8llu | %8.0f %8llu | %.4f\n", h->p.name,
+             mib((double)h->waste_total), (double)h->waste_peak / 1024.0, stat_mean(&h->holes_all), (unsigned long long)h->holes_all.max,
+             stat_mean(&h->holes_young), (unsigned long long)h->holes_young.max, stat_mean(&h->live_young), (unsigned long long)h->live_young.max,
+             stat_mean(&h->words), (unsigned long long)h->words.max, h->allocs ? (double)h->skipped / (double)h->allocs : 0.0);
+    }
+  }
+  any = 0;
+  for (int i = 0; i < s->npol; i++) any |= s->pols[i]->type == PK_CLASS;
+  if (any) {
+    printf("\n%-11s %12s %12s %12s %8s %8s | %-17s\n", "class-R", "remainder", "tail dead", "free slots", "classes", "regions", "bitmap words/E");
+    printf("%-11s %12s %12s %12s %8s %8s | %8s %8s\n", "(at peak)", "MiB", "KiB", "MiB", "in use", "", "mean", "max");
+    for (int i = 0; i < s->npol; i++) {
+      if (s->pols[i]->type != PK_CLASS) continue;
+      const ClassR* c = (const ClassR*)s->pols[i];
+      printf("%-11s %12.2f %12.1f %12.2f %8llu %8llu | %8.0f %8llu\n", c->p.name, mib((double)c->pk_waste), (double)c->pk_tail / 1024.0,
+             mib((double)c->pk_free), (unsigned long long)c->pk_classes, (unsigned long long)c->pk_regions, stat_mean(&c->words),
+             (unsigned long long)c->words.max);
+    }
+  }
+  printf("\n");
+}
+
+static int s_alloc(void* c, uint64_t id, uint64_t kind, uint64_t sz) { return sim_alloc(c, id, kind, sz); }
+static int s_free(void* c, uint64_t id) { return sim_free(c, id); }
+static int s_tail(void* c, uint64_t id, uint64_t rest) { return sim_tail(c, id, rest); }
+static int s_vec_out(void* c, uint64_t id) { return sim_vec_out(c, id); }
+static int s_gc_start(void* c, uint64_t cycle) { (void)cycle; return sim_gc_start(c); }
+static int s_gc_end(void* c, uint64_t cycle, uint64_t kind, uint64_t heap_after, uint64_t free_slots, uint64_t ordinary, uint64_t large) {
+  (void)cycle; (void)free_slots;
+  return sim_gc_end(c, kind, heap_after, ordinary, large);
+}
+static int s_finish(void* c) { (void)c; return 0; }
+static const Handlers sim_handlers = { s_alloc, s_free, s_tail, s_vec_out, s_gc_start, s_gc_end, s_finish };
+
+/* ── --selftest: the policies on tiny hand-written traces ─────────────────────────────────── */
+static int g_fail, g_checks;
+#define CHECK(cond, ...) do { g_checks++; if (!(cond)) { g_fail++; printf("  FAIL %s:%d: ", __func__, __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
+
+typedef struct { Sim s; uint64_t next; int cycle; } T;
+
+static T* t_new(const char* policies) {
+  T* t = xcalloc(1, sizeof *t);
+  if (sim_init(&t->s, policies)) { fprintf(stderr, "selftest: bad policy list %s\n", policies); exit(2); }
+  return t;
+}
+static uint64_t t_a(T* t, uint32_t bytes) {
+  if (sim_alloc(&t->s, t->next, 3, bytes)) { printf("selftest: %s\n", g_err); exit(2); }
+  return t->next++;
+}
+static void t_f(T* t, uint64_t id) { if (sim_free(&t->s, id)) { printf("selftest: %s\n", g_err); exit(2); } }
+static void t_tail(T* t, uint64_t id, uint32_t rest) { if (sim_tail(&t->s, id, rest)) { printf("selftest: %s\n", g_err); exit(2); } }
+static void t_g(T* t) { sim_gc_start(&t->s); }
+static void t_e(T* t, uint64_t kind) { if (sim_gc_end(&t->s, kind, UINT64_MAX, UINT64_MAX, UINT64_MAX)) { printf("selftest: %s\n", g_err); exit(2); } }
+static const Obj* t_obj(T* t, uint64_t id) { return &t->s.pool[map_get(&t->s.map, id)]; }
+static Holes* t_holes(T* t, int i) { return (Holes*)t->s.pols[i]; }
+static Base* t_base(T* t, int i) { return (Base*)t->s.pols[i]; }
+static ClassR* t_class(T* t, int i) { return (ClassR*)t->s.pols[i]; }
+
+/* Objects of 16, 32 and 16 bytes at granules 0, 1, 3; the 32-byte one is freed. */
+static T* holes_setup(const char* policy) {
+  T* t = t_new(policy);
+  t_a(t, 16); t_a(t, 32); t_a(t, 16);
+  t_g(t); t_f(t, 1); t_e(t, 1);
+  return t;
+}
+
+static void test_hole_exactly_filled(void) {
+  T* t = holes_setup("holes");
+  Holes* h = t_holes(t, 0);
+  CHECK(h->nh == 2, "holes after E: %zu, want 2", h->nh);
+  CHECK(h->h[0].cur == 1 && h->h[0].end == 3, "hole 0 is [%u,%u), want [1,3)", h->h[0].cur, h->h[0].end);
+  CHECK(h->h[1].cur == 3 + 1 && h->h[1].end == REGION_GRANULES, "hole 1 is [%u,%u), want [4,%u)", h->h[1].cur, h->h[1].end, REGION_GRANULES);
+  uint64_t a = t_a(t, 32);
+  CHECK(t_obj(t, a)->pl[0].off == 1, "32 B request landed at granule %u, want 1", t_obj(t, a)->pl[0].off);
+  uint64_t b = t_a(t, 16);
+  CHECK(t_obj(t, b)->pl[0].off == 4, "next request landed at granule %u, want 4", t_obj(t, b)->pl[0].off);
+  CHECK(h->waste_total == 0 && h->skipped == 0, "an exactly filled hole wasted %llu B, skipped %llu", (unsigned long long)h->waste_total, (unsigned long long)h->skipped);
+  CHECK(h->nused == 1, "regions %u, want 1", h->nused);
+}
+
+static void test_hole_skipped(void) {
+  T* t = holes_setup("holes");
+  Holes* h = t_holes(t, 0);
+  uint64_t a = t_a(t, 48);
+  CHECK(t_obj(t, a)->pl[0].off == 4, "48 B request landed at granule %u, want 4 (past the 32 B hole)", t_obj(t, a)->pl[0].off);
+  CHECK(h->waste_total == 32 && h->waste_interval == 32 && h->skipped == 1, "waste %llu B skipped %llu, want 32 and 1", (unsigned long long)h->waste_total, (unsigned long long)h->skipped);
+  uint64_t b = t_a(t, 16);
+  CHECK(t_obj(t, b)->pl[0].off == 4 + 3, "the cursor moved back: next request at granule %u, want 7", t_obj(t, b)->pl[0].off);
+  t_g(t); t_e(t, 2);
+  CHECK(h->waste_peak == 32 && h->waste_interval == 0, "waste peak %llu interval %llu after E, want 32 and 0", (unsigned long long)h->waste_peak, (unsigned long long)h->waste_interval);
+  /* an intermediate hole that does not fit is wasted whole: holes of 32 B and 16 B, then a 48 B request */
+  t = t_new("holes");
+  uint64_t id[5];
+  for (int i = 0; i < 5; i++) id[i] = t_a(t, i == 1 ? 32 : 16);   /* granules 0, 1-2, 3, 4, 5 */
+  t_g(t); t_f(t, id[1]); t_f(t, id[3]); t_e(t, 1);
+  h = t_holes(t, 0);
+  CHECK(h->nh == 3, "holes %zu, want 3: [1,3) [4,5) [6,..)", h->nh);
+  uint64_t c = t_a(t, 48);
+  CHECK(t_obj(t, c)->pl[0].off == 6, "48 B request landed at granule %u, want 6", t_obj(t, c)->pl[0].off);
+  CHECK(h->waste_total == 48 && h->skipped == 2, "waste %llu B skipped %llu, want 32 + 16 = 48 and 2", (unsigned long long)h->waste_total, (unsigned long long)h->skipped);
+}
+
+static void test_hole_overflow(void) {
+  /* ids at granules: 0 (16 B), 1..18 (288 B, freed), 19 (16 B).  The hole [1,19) is 288 B. */
+  for (int ovf = 0; ovf < 2; ovf++) {
+    T* t = t_new(ovf ? "holes-ovf" : "holes");
+    t_a(t, 16);
+    uint64_t big = t_a(t, 288);
+    t_a(t, 16);
+    t_g(t); t_f(t, big); t_e(t, 1);
+    Holes* h = t_holes(t, 0);
+    CHECK(h->nh == 2 && h->h[0].cur == 1 && h->h[0].end == 19, "ovf=%d: hole 0 is [%u,%u)", ovf, h->h[0].cur, h->h[0].end);
+    uint64_t a = t_a(t, 304);   /* 19 granules: does not fit the 18 granule hole, and is above 256 B */
+    uint64_t b = t_a(t, 16);
+    if (ovf) {
+      CHECK(h->waste_total == 0, "holes-ovf wasted %llu B", (unsigned long long)h->waste_total);
+      CHECK(t_obj(t, a)->pl[0].off == 20 && t_obj(t, b)->pl[0].off == 1, "holes-ovf: 304 B at %u (want 20), 16 B at %u (want 1: main cursor stayed)", t_obj(t, a)->pl[0].off, t_obj(t, b)->pl[0].off);
+    } else {
+      CHECK(h->waste_total == 288, "holes wasted %llu B, want 288", (unsigned long long)h->waste_total);
+      CHECK(t_obj(t, a)->pl[0].off == 20 && t_obj(t, b)->pl[0].off == 39, "holes: 304 B at %u (want 20), 16 B at %u (want 39)", t_obj(t, a)->pl[0].off, t_obj(t, b)->pl[0].off);
+    }
+  }
+}
+
+/* 257 slots of 4096 B: 256 fill region 0, one opens region 1.  Free region 0's, E: it is released.
+ * 255 more fill region 1 and the next request opens a region, which must reuse index 0. */
+static void test_region_released_and_reused(void) {
+  static const char* const names[] = { "base", "holes", "holes-ovf", "class-1M" };
+  for (int k = 0; k < 4; k++) {
+    T* t = t_new(names[k]);
+    uint64_t id[257];
+    for (int i = 0; i < 257; i++) id[i] = t_a(t, 4096);
+    CHECK(t->s.pols[0]->regions(t->s.pols[0]) == 2, "%s: %llu regions after 257 slots, want 2", names[k], (unsigned long long)t->s.pols[0]->regions(t->s.pols[0]));
+    t_g(t);
+    for (int i = 0; i < 256; i++) t_f(t, id[i]);
+    t_e(t, 1);
+    CHECK(t->s.pols[0]->regions(t->s.pols[0]) == 1, "%s: %llu regions after region 0 emptied, want 1", names[k], (unsigned long long)t->s.pols[0]->regions(t->s.pols[0]));
+    uint64_t last = 0;
+    for (int i = 0; i < 255; i++) last = t_a(t, 4096);
+    CHECK(t_obj(t, last)->pl[0].region == 1, "%s: 255 more should still fit region 1, last landed in %u", names[k], t_obj(t, last)->pl[0].region);
+    uint64_t x = t_a(t, 4096);
+    CHECK(t->s.pols[0]->regions(t->s.pols[0]) == 2 && t_obj(t, x)->pl[0].region == 0, "%s: the new region is index %u (regions %llu), want 0 reused", names[k], t_obj(t, x)->pl[0].region, (unsigned long long)t->s.pols[0]->regions(t->s.pols[0]));
+  }
+}
+
+static void test_base_reopens_and_reuses(void) {
+  T* t = t_new("base,holes");
+  uint64_t a = t_a(t, 64);
+  t_g(t); t_f(t, a); t_e(t, 1);
+  CHECK(t->s.pols[0]->regions(t->s.pols[0]) == 1, "base keeps one fresh region, has %llu", (unsigned long long)t->s.pols[0]->regions(t->s.pols[0]));
+  CHECK(t_base(t, 0)->r[t_base(t, 0)->hint].bump == 0, "the fresh region is not bumped");
+  CHECK(t->s.pols[1]->regions(t->s.pols[1]) == 0, "holes releases every empty region");
+  /* an exact-fit slot is reused by its class, not bumped: free a 64 B slot among live ones */
+  t = t_new("base");
+  uint64_t x = t_a(t, 64), y = t_a(t, 64);
+  (void)y;
+  t_g(t); t_f(t, x); t_e(t, 3);
+  uint32_t bump = t_base(t, 0)->r[0].bump;
+  uint64_t z = t_a(t, 64), w = t_a(t, 32);
+  CHECK(t_base(t, 0)->r[0].bump == bump + 32, "64 B reused a free slot (no bump), 32 B bumped: bump %u, want %u", t_base(t, 0)->r[0].bump, bump + 32);
+  CHECK(t_obj(t, z)->pl[0].region == 0 && t_obj(t, w)->pl[0].region == 0, "both in region 0");
+}
+
+static void test_tails(void) {
+  /* a 512 B vector gives back 480 B */
+  T* t = t_new("base,holes,class-16K");
+  uint64_t v = t_a(t, 512);
+  t_tail(t, v, 480);
+  uint64_t u = t_a(t, 480);
+  /* base: the tail is a free slot of class 30 at once, so the 480 B request pops it, no bump */
+  CHECK(t_base(t, 0)->r[0].bump == 512, "base: bump %u, want 512 (the tail was reused)", t_base(t, 0)->r[0].bump);
+  CHECK(t_obj(t, u)->pl[0].region == 0, "base: placed in region 0");
+  /* holes: the tail is no hole before the next E, so the request bumps */
+  CHECK(t_obj(t, u)->pl[1].off == 512 / 16, "holes: 480 B at granule %u, want %u (past the old extent)", t_obj(t, u)->pl[1].off, 512 / 16);
+  /* class-R: nothing shrinks; the tail is dead until the vector goes */
+  CHECK(t_class(t, 2)->dead_tail == 480, "class-16K: dead tail %llu, want 480", (unsigned long long)t_class(t, 2)->dead_tail);
+  t_g(t); t_e(t, 1);
+  Holes* h = t_holes(t, 1);
+  int found = 0;
+  for (size_t i = 0; i < h->nh; i++) found |= h->h[i].cur == 2 && h->h[i].end == 512 / 16;
+  CHECK(found, "holes: after E the tail [2,32) is a hole");
+  t_g(t); t_f(t, v); t_e(t, 1);
+  CHECK(t_class(t, 2)->dead_tail == 0, "class-16K: dead tail %llu after the vector is freed, want 0", (unsigned long long)t_class(t, 2)->dead_tail);
+  CHECK(t_obj(t, u)->size == 480, "u size");
+}
+
+static void test_class_region_fills(void) {
+  T* t = t_new("class-16K");
+  ClassR* c = t_class(t, 0);
+  uint64_t id[5];
+  for (int i = 0; i < 4; i++) id[i] = t_a(t, 4096);
+  CHECK(c->nused == 1 && c->r[0].nslots == 4, "one region of 4 slots, have %u regions of %u slots", c->nused, c->r[0].nslots);
+  id[4] = t_a(t, 4096);
+  CHECK(c->nused == 2 && t_obj(t, id[4])->pl[0].region == 1, "the fifth slot opens region 1");
+  t_a(t, 5 * 16);   /* class 5: 204 slots in 16 KiB, 64 B remainder */
+  CHECK(c->nused == 3 && c->r[2].nslots == 16384 / 80, "class 5: %u slots", c->r[2].nslots);
+  t_g(t);
+  for (int i = 0; i < 4; i++) t_f(t, id[i]);
+  t_e(t, 1);
+  CHECK(c->nused == 2, "region 0 released, regions %u", c->nused);
+  uint64_t a = t_a(t, 4096), b = t_a(t, 4096), d = t_a(t, 4096);
+  CHECK(t_obj(t, a)->pl[0].region == 1 && t_obj(t, b)->pl[0].region == 1 && t_obj(t, d)->pl[0].region == 1, "the lowest region with a free slot is filled first");
+  uint64_t e = t_a(t, 4096);
+  CHECK(t_obj(t, e)->pl[0].region == 0, "a full class opens a region at the reused index 0, got %u", t_obj(t, e)->pl[0].region);
+  c->p.snap(&c->p);
+  CHECK(c->pk_classes == 2 && c->pk_regions == 3, "peak snapshot: %llu classes, %llu regions", (unsigned long long)c->pk_classes, (unsigned long long)c->pk_regions);
+  /* remainder: class 5 wastes 16384 - 204*80 = 64 B; class 256 wastes 0 */
+  CHECK(c->pk_waste == 64, "remainder %llu B, want 64", (unsigned long long)c->pk_waste);
+
+}
+
+static void test_large_counts_as_held(void) {
+  T* t = t_new("base,holes,class-1M");
+  uint64_t big = t_a(t, 8192), small = t_a(t, 32);
+  (void)small;
+  t_g(t);
+  for (int i = 0; i < 3; i++) {
+    const Policy* p = t->s.pols[i];
+    CHECK(p->g_peak == p->regions(p) * p->region_bytes + 8192, "%s: held %llu does not include the large object", p->name, (unsigned long long)p->g_peak);
+  }
+  t_f(t, big); t_e(t, 1);
+  t_g(t);
+  CHECK(t->s.large_live == 0 && t->s.large_peak == 8192, "large live %llu peak %llu", (unsigned long long)t->s.large_live, (unsigned long long)t->s.large_peak);
+}
+
+static int run_selftest(void) {
+  test_hole_exactly_filled();
+  test_hole_skipped();
+  test_hole_overflow();
+  test_region_released_and_reused();
+  test_base_reopens_and_reuses();
+  test_tails();
+  test_class_region_fills();
+  test_large_counts_as_held();
+  printf("selftest: %d checks, %d failed\n", g_checks, g_fail);
+  return g_fail != 0;
+}
+
 int main(int argc, char** argv) {
-  if (argc != 3 || strcmp(argv[1], "--check") != 0) {
-    fprintf(stderr, "usage: %s --check <trace>\n", argv[0]);
+  if (argc == 2 && strcmp(argv[1], "--selftest") == 0) return run_selftest();
+  int check = argc == 3 && strcmp(argv[1], "--check") == 0;
+  int sim = argc == 4 && strcmp(argv[1], "--policies") == 0;
+  if (!check && !sim) {
+    fprintf(stderr, "usage: %s --check <trace>\n       %s --policies all|<name>[,<name>...] <trace>\n       %s --selftest\n"
+                    "policies: base holes holes-ovf class-16K class-64K class-256K class-1M\n", argv[0], argv[0], argv[0]);
     return 2;
   }
+  const char* path = argv[argc - 1];
   Reader* rd = calloc(1, sizeof *rd);
-  rd->f = fopen(argv[2], "rb");
-  if (rd->f == NULL) { perror(argv[2]); return 2; }
+  rd->f = fopen(path, "rb");
+  if (rd->f == NULL) { perror(path); return 2; }
+  if (sim) {
+    Sim* s = xcalloc(1, sizeof *s);
+    if (sim_init(s, argv[2])) return 2;
+    if (decode(rd, &sim_handlers, s)) {
+      fprintf(stderr, "replay: %s: %s\n", path, g_err);
+      return 1;
+    }
+    report(s, path);
+    return 0;
+  }
   Check c;
   memset(&c, 0, sizeof c);
   if (decode(rd, &check_handlers, &c)) {
-    fprintf(stderr, "replay: %s: %s\n", argv[2], g_err);
+    fprintf(stderr, "replay: %s: %s\n", path, g_err);
     return 1;
   }
   printf("ok: allocs=%llu frees=%llu collections=%llu (off=%llu major=%llu minor_young=%llu minor_full=%llu) "
