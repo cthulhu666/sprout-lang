@@ -1,0 +1,21 @@
+module main
+
+import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
+
+# `borrow_field_holds_maybe.spr` with its error's hint applied.
+
+type linear Holder = (v: Maybe (LinVec Int), n: Int)
+
+fn release_maybe(m: Maybe (LinVec Int)) -> Unit =
+  match m with
+  | Just v -> linvec.drop(v)
+  | Nothing -> ()
+
+fn steal(h: consuming Holder) -> Maybe (LinVec Int) = h.v
+
+fn main() -> Unit !{IO} =
+  do
+    let h = Holder(v = Just(linvec.from_list([1, 2, 3])), n = 1)
+    release_maybe(steal(h))
+    print("done")

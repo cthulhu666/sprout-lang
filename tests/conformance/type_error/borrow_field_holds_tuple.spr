@@ -1,0 +1,25 @@
+module main
+
+import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
+
+# Same as borrow_field_holds_maybe, with a tuple field: `(LinVec Int, Int)`
+# holds a linear value, so reading it out of a borrow is rejected.
+
+type linear Holder = (p: (LinVec Int, Int), n: Int)
+
+fn release_pair(q: (LinVec Int, Int)) -> Unit =
+  match q with
+  | (v, _) -> linvec.drop(v)
+
+fn release_holder(h: consuming Holder) -> Unit = release_pair(h.p)
+
+fn steal(h: borrowing Holder) -> (LinVec Int, Int) = h.p
+
+fn main() -> Unit !{IO} =
+  do
+    let h = Holder(p = (linvec.from_list([1, 2, 3]), 0), n = 1)
+    let q = steal(h)
+    release_pair(q)
+    release_holder(h)
+    print("done")

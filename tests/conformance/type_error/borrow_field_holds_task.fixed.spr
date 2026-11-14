@@ -1,0 +1,11 @@
+module main
+
+import stdlib.task (Task)
+
+# `borrow_field_holds_task.spr` with its error's hint applied.
+
+type linear Pending = (t: Maybe (Task Int), n: Int)
+
+fn steal(p: consuming Pending) -> Maybe (Task Int) = p.t
+
+fn main() -> Unit !{IO} = print("done")

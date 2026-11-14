@@ -1,0 +1,27 @@
+module main
+
+import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
+
+# A field that HOLDS a linear value is read out of a borrow like a linear one:
+# `Maybe (LinVec Int)` is not itself linear, but copying it out gives a second
+# owner of the vector while the caller still owns the record.
+
+type linear Holder = (v: Maybe (LinVec Int), n: Int)
+
+fn release_maybe(m: Maybe (LinVec Int)) -> Unit =
+  match m with
+  | Just v -> linvec.drop(v)
+  | Nothing -> ()
+
+fn release_holder(h: consuming Holder) -> Unit = release_maybe(h.v)
+
+fn steal(h: borrowing Holder) -> Maybe (LinVec Int) = h.v
+
+fn main() -> Unit !{IO} =
+  do
+    let h = Holder(v = Just(linvec.from_list([1, 2, 3])), n = 1)
+    let m = steal(h)
+    release_maybe(m)
+    release_holder(h)
+    print("done")
