@@ -385,7 +385,7 @@ fn method_consumes_mismatch_msg(name: String) -> String =
   "instance method parameter '" ++ name ++ "' must match the class declaration's ownership: a call dispatches through the CLASS signature, so an instance that consumes where the class only borrows releases a value its caller still owns"
 
 let borrowed_field_read_msg: String =
-  "a linear field cannot be read out of a borrowed value (its owner will still release it); take the parameter `consuming` if this function should own it"
+  "a field holding a linear value cannot be read out of a borrowed value (its owner will still release it); take the parameter `consuming` if this function should own it"
 
 fn field_read_drops_msg(field: String, base: String, other: String) -> String =
   "reading `" ++ field ++ "` consumes " ++ base ++ " and drops its linear field `" ++ other ++ "`; use a constructor type and `match` it to take every linear field"
@@ -397,7 +397,7 @@ fn borrowed_binder_msg(name: String) -> String =
   "linear value '" ++ name ++ "' is borrowed and cannot be consumed (it was destructured from a borrowed value, which its owner will still release)"
 
 let nonvar_borrow_msg: String =
-  "a borrowing argument must be a variable reference (a freshly-built linear value here would never be consumed)"
+  "a borrowing argument must be a variable reference (a freshly-built value that is or holds a linear value would never be consumed)"
 
 # Why a modifier was rejected. They need different messages: an unbounded type
 # variable (BadOnTyvar) is fixed by `where linear` on it, which "is not a linear
@@ -695,9 +695,10 @@ fn lin_var(name: String, p: source.SourcePos, sc: LinScope) -> LinRes =
 # and spec-v0.md §5.8 define — which is why `get_x(p: Pos) = p.x` stays accepted
 # and `manhattan(p: Pos) = p.x + p.y` stays a reuse.
 # Reading a field of a BORROWED value borrows the base — that is what makes
-# `p.x + p.y` legal for `p: borrowing Pos`. But only when the FIELD ITSELF is
-# non-linear. A LINEAR field read out of a borrow yields an OWNED linear value
-# that the caller still owns and will release, so
+# `p.x + p.y` legal for `p: borrowing Pos`. But only when the field's type
+# neither is nor HOLDS a linear value (`holds_linear`: `Maybe File` and
+# `(File, Int)` count). Such a field read out of a borrow yields an OWNED value
+# that is or holds a linear one, which the caller still owns and will release, so
 #
 #     fn steal(w: borrowing Wrap) -> Int  = release(w.inner)   # double consume
 #     fn take (w: borrowing Wrap) -> File = w.inner            # launders it out
@@ -706,11 +707,11 @@ fn lin_var(name: String, p: source.SourcePos, sc: LinScope) -> LinRes =
 # be a borrow too, and v0 has no type for a borrow — so v0 rejects the read.
 # The `match` form of this hole is handled by `from_borrow` in arm_consumed; this
 # is the field-access form, which that path never reached.
-# Regressions: tests/conformance/type_error/borrow_field_{extract,escape}.
+# Regressions: tests/conformance/type_error/borrow_field_{extract,escape,holds_*}.
 fn lin_getfield(base: typed_ast.TypedExpr, field: String, field_ty: types.Type,
                 p: source.SourcePos, sc: LinScope, env: LinEnv) -> LinRes =
   if expr_is_borrowed_binding(base, sc) then
-    if type_is_linear(field_ty, env) then LinErr(p, borrowed_field_read_msg)
+    if holds_linear(field_ty, env) then LinErr(p, borrowed_field_read_msg)
     else lin_read(base, sc, env)
   else
     match linear_sibling(typed_ast.typed_expr_type(base), field, env) with
@@ -1039,7 +1040,7 @@ fn lin_borrow_var(name: String, p: source.SourcePos, sc: LinScope,
   else lin_consumed(a, sc, env)
 
 fn lin_nonvar_borrow(a: typed_ast.TypedExpr, sc: LinScope, env: LinEnv) -> LinRes =
-  if type_is_linear(typed_ast.typed_expr_type(a), env)
+  if holds_linear(typed_ast.typed_expr_type(a), env)
   then LinErr(typed_ast.typed_expr_pos(a), nonvar_borrow_msg)
   else lin_consumed(a, sc, env)
 

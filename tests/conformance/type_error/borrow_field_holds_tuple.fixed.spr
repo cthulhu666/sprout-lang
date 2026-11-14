@@ -1,0 +1,20 @@
+module main
+
+import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
+
+# `borrow_field_holds_tuple.spr` with its error's hint applied.
+
+type linear Holder = (p: (LinVec Int, Int), n: Int)
+
+fn release_pair(q: (LinVec Int, Int)) -> Unit =
+  match q with
+  | (v, _) -> linvec.drop(v)
+
+fn steal(h: consuming Holder) -> (LinVec Int, Int) = h.p
+
+fn main() -> Unit !{IO} =
+  do
+    let h = Holder(p = (linvec.from_list([1, 2, 3]), 0), n = 1)
+    release_pair(steal(h))
+    print("done")

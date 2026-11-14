@@ -1,0 +1,20 @@
+module main
+
+# `borrow_field_holds_adt.spr` with its error's hint applied.
+
+type linear Res = | Res Int
+type Pair = | Pair Res Int
+
+type linear Holder = (p: Pair, n: Int)
+
+fn release_pair(q: Pair) -> Unit =
+  match q with
+  | Pair (Res _) _ -> ()
+
+fn steal(h: consuming Holder) -> Pair = h.p
+
+fn main() -> Unit !{IO} =
+  do
+    let h = Holder(p = Pair(Res(1), 2), n = 3)
+    release_pair(steal(h))
+    print("done")

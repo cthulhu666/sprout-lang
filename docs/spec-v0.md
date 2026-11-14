@@ -2101,12 +2101,13 @@ a field access or as a `match` scrutinee. Every other reference consumes. So
   `f(b: borrowing File, c: File)`, `f(x, x)` is rejected, since `f` could read `b`
   after consuming `c`. Borrowing one value at two positions is fine.
 - **Branch convergence** applies to consumes only; arms need not agree on borrows.
-- **Borrowed contents** — destructuring a borrowed value binds its linear fields
-  as borrowed too, so they cannot be consumed out from under the owner. For the
-  same reason a **linear field may not be read out of a borrowed value**
-  (`w.inner` where `w: borrowing Wrap` and `inner` is linear): the result would be
-  an owned value its real owner will still release. A non-linear field reads
-  freely.
+- **Borrowed contents** — destructuring a borrowed value binds every field that is
+  or holds a linear value as borrowed, so they cannot be consumed out from under
+  the owner. For the same reason a **field that is or holds a linear value may not
+  be read out of a borrowed value** (`w.inner` where `w: borrowing Wrap` and
+  `inner` is `File`, `Maybe File` or `(File, Int)`): the result would be an owned
+  value its real owner will still release. A field that holds no linear value
+  reads freely.
 - **A consume may not follow a fallible bind.** A `<-` bind whose right-hand side is
   `Maybe` or `Result` short-circuits (§5.9), so the steps after it are conditional.
   Consuming a binding from outside the block there would be skipped on the failure
@@ -2119,7 +2120,8 @@ a field access or as a `match` scrutinee. Every other reference consumes. So
   The same holds after a `try` (§5.9.1), and the error names the `try`.
 - A `borrowing` parameter may not be consumed or returned.
 - An argument at a `borrowing` position must be a **variable reference**; a
-  freshly-built linear value there would never be consumed.
+  freshly-built value that is or holds a linear value there would never be
+  consumed.
 - The modifiers are **erased**: they reach no IR pass and emitted code is
   byte-identical with and without them.
 
