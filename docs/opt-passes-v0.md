@@ -30,8 +30,8 @@ that actually does large work, because it runs below the seam. `BACKLOG.md` P2.
 
 Scope correction up front: **DCE already exists.** `stdlib/compiler/dce.sprout` implements
 declaration reachability (dead-let elimination was removed, see the status above). Reachability
-runs inside `ir_pipeline.sprout`. The purity oracle (`is_pure_callee_type`, exposed as
-`dce.callee_is_pure`) reads the effect row. "Pure" there means the call cannot do IO; a pure call
+runs inside `ir_pipeline.sprout`. The purity oracle (`typed_ast.callee_is_pure`, moved there from
+`dce`) reads the effect row. "Pure" there means the call cannot do IO; a pure call
 can still panic. The proposed passes were CSE and LICM; DCE is the shape they copy.
 
 ## Problem
@@ -203,7 +203,7 @@ multiplier this one lacked.
 
 Narrowest useful scope: within one function body, two calls with the same callee, syntactically
 equal arguments, and no intervening effectful step become one binding and a reuse. Reuses
-`dce.is_pure_callee_type` verbatim.
+`typed_ast.callee_is_pure` verbatim.
 
 Would run before declaration reachability: shrinking bodies can only remove references, so
 running earlier can only make reachability drop more. CSE creates shared bindings, which can only

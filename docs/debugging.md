@@ -148,9 +148,9 @@ SPROUT_OPT_STATS=1 ./build/compile_driver_bin_stage1 --emit-ir stdlib prog.spr >
 ```
 
 If a program misbehaves with a pass on and behaves with it off, that is a pass bug and
-the IR diff between the two runs is the whole evidence. Note that `removed=0` is the
-normal reading for `dle` on real code — see `bench/results-2026-09-11-opt.md` — so a zero
-is not itself a sign the switch failed to take; the `on`/`off` word in the line is.
+the IR diff between the two runs is the whole evidence. A pass can legitimately change
+nothing on a given program, so a zero delta is not itself a sign the switch failed to take;
+the `on`/`off` word in the line is.
 
 ## Where is a program repeating itself? (`--phase cse-census`, `--phase cse-keys`)
 

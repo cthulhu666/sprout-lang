@@ -3741,6 +3741,11 @@ dead-let-smoke: bootstrap-from-seed
   set -euo pipefail
   TMPD=$(mktemp -d /tmp/sprout_deadlet_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
+  RTO="$TMPD/rtobj"; mkdir -p "$RTO"
+  for rtsrc in {{runtime_src}}; do
+    clang -c "$rtsrc" -O2 {{clang_extra}} -o "$RTO/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
+      || { echo "dead-let-smoke: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
+  done
   FIXTURES=(panic_discarded panic_named_unused div_by_zero mul_overflow neg_overflow)
   declare -A EXPECT=(
     [panic_discarded]="insufficient funds"
@@ -3754,7 +3759,7 @@ dead-let-smoke: bootstrap-from-seed
     if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$FIXTURE" > "$TMPD/$f.ll" 2>"$TMPD/$f.emit.err"; then
       echo "dead-let-smoke: emit-IR failed for $f" >&2; cat "$TMPD/$f.emit.err" >&2; exit 1
     fi
-    if ! clang "$TMPD/$f.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/$f.bin" 2>"$TMPD/$f.link.err"; then
+    if ! clang "$TMPD/$f.ll" "$RTO"/*.o -O2 {{clang_extra}} -o "$TMPD/$f.bin" 2>"$TMPD/$f.link.err"; then
       echo "dead-let-smoke: link failed for $f" >&2; cat "$TMPD/$f.link.err" >&2; exit 1
     fi
     set +e

@@ -178,6 +178,10 @@ The nine are all the same shape — an exhaustiveness arm that cannot be reached
 | typed_ast.TMethodRef _ _ _ _ _ -> panic("dce.is_pure_expr: TMethodRef survived lowering (internal error)")
 ```
 
+Note: this section was measured on 2026-08-16. `dce.is_pure_expr` and `dce.is_free` named above were
+removed with dead-let elimination; the same fallback arm survives in `ast_to_ir.compute_free_vars`
+and the other listed functions.
+
 ## 6. Is `panic` an effect? Decided: no
 
 `stdlib/prelude.sprout:1288` declares `extern fn panic(msg: String) -> a !{IO}`. That is why nine of

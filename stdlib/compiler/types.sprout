@@ -654,7 +654,7 @@ export fn effect_is_row(e: Effect) -> Bool =
   | EffectIO -> false
   | EffectVar _ -> false
 
-# Beside `effect_is_row` for its reason: `unifier` and `dce` each asked these and
+# Beside `effect_is_row` for its reason: `unifier` and the callee-purity check each asked these and
 # each kept its own answer. Every variant is spelled out so a fifth one has to be
 # decided rather than silently answered false.
 export fn effect_is_io(e: Effect) -> Bool =
