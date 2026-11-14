@@ -1,0 +1,13 @@
+module main
+
+import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
+
+# Same as borrow_arg_not_variable, with an argument that HOLDS a linear value:
+# a fresh `Maybe (LinVec Int)` at a `borrowing` position is borrowed and then
+# dropped, so the vector inside it would never be released.
+
+fn peek(x: borrowing a) -> Int where linear a = 0
+
+fn main() -> Unit !{IO} =
+  print(to_string(peek(Just(linvec.from_list([1, 2, 3])))))

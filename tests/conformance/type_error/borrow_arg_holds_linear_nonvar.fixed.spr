@@ -1,0 +1,19 @@
+module main
+
+import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
+
+# `borrow_arg_holds_linear_nonvar.spr` with its error's hint applied.
+
+fn peek(x: borrowing a) -> Int where linear a = 0
+
+fn release(m: Maybe (LinVec Int)) -> Unit =
+  match m with
+  | Just v -> linvec.drop(v)
+  | Nothing -> ()
+
+fn main() -> Unit !{IO} =
+  do
+    let m = Just(linvec.from_list([1, 2, 3]))
+    print(to_string(peek(m)))
+    release(m)
