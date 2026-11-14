@@ -1,0 +1,26 @@
+module main
+
+# Same as borrow_field_holds_maybe, with a field whose type is a user ADT that
+# wraps a linear value: `Pair` is not declared linear, but it holds a `Res`, so
+# reading it out of a borrow is rejected.
+
+type linear Res = | Res Int
+type Pair = | Pair Res Int
+
+type linear Holder = (p: Pair, n: Int)
+
+fn release_pair(q: Pair) -> Unit =
+  match q with
+  | Pair (Res _) _ -> ()
+
+fn release_holder(h: consuming Holder) -> Unit = release_pair(h.p)
+
+fn steal(h: borrowing Holder) -> Pair = h.p
+
+fn main() -> Unit !{IO} =
+  do
+    let h = Holder(p = Pair(Res(1), 2), n = 3)
+    let q = steal(h)
+    release_pair(q)
+    release_holder(h)
+    print("done")

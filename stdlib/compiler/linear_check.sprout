@@ -697,8 +697,8 @@ fn lin_var(name: String, p: source.SourcePos, sc: LinScope) -> LinRes =
 # Reading a field of a BORROWED value borrows the base — that is what makes
 # `p.x + p.y` legal for `p: borrowing Pos`. But only when the field's type
 # neither is nor HOLDS a linear value (`holds_linear`: `Maybe File` and
-# `(File, Int)` count). Such a field read out of a borrow yields an OWNED linear
-# value that the caller still owns and will release, so
+# `(File, Int)` count). Such a field read out of a borrow yields an OWNED value
+# that is or holds a linear one, which the caller still owns and will release, so
 #
 #     fn steal(w: borrowing Wrap) -> Int  = release(w.inner)   # double consume
 #     fn take (w: borrowing Wrap) -> File = w.inner            # launders it out
@@ -707,7 +707,7 @@ fn lin_var(name: String, p: source.SourcePos, sc: LinScope) -> LinRes =
 # be a borrow too, and v0 has no type for a borrow — so v0 rejects the read.
 # The `match` form of this hole is handled by `from_borrow` in arm_consumed; this
 # is the field-access form, which that path never reached.
-# Regressions: tests/conformance/type_error/borrow_field_{extract,escape}.
+# Regressions: tests/conformance/type_error/borrow_field_{extract,escape,holds_*}.
 fn lin_getfield(base: typed_ast.TypedExpr, field: String, field_ty: types.Type,
                 p: source.SourcePos, sc: LinScope, env: LinEnv) -> LinRes =
   if expr_is_borrowed_binding(base, sc) then
