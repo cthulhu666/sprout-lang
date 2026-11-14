@@ -2,9 +2,8 @@ import stdlib.test (check_eq, run_suite)
 import stdlib.compiler.source as source
 import stdlib.compiler.types as types
 import stdlib.compiler.typed_ast as typed_ast
-import stdlib.compiler.dce as dce
 
-# `dce.callee_is_pure` and the nullary arrow.
+# `typed_ast.callee_is_pure` and the nullary arrow.
 #
 # A call's purity is read off the CALLEE's type. A nullary callee is a
 # `TThunk ret eff`, which carries its own effect slot; a parameterised one is a
@@ -29,21 +28,21 @@ fn curried_ty(outer: types.Effect, inner: types.Effect) -> types.Type =
 fn callee(ty: types.Type) -> typed_ast.TypedExpr = typed_ast.TVar("f", ty, pos())
 
 fn main() -> Unit !{IO} =
-  run_suite("dce_callee_purity", [
+  run_suite("callee_purity", [
     check_eq("pure nullary call is pure",
-      dce.callee_is_pure(callee(types.TThunk(int_ty(), types.EffectPure)), 0), true),
+      typed_ast.callee_is_pure(callee(types.TThunk(int_ty(), types.EffectPure)), 0), true),
     check_eq("effectful nullary call is not pure",
-      dce.callee_is_pure(callee(types.TThunk(int_ty(), types.EffectIO)), 0), false),
+      typed_ast.callee_is_pure(callee(types.TThunk(int_ty(), types.EffectIO)), 0), false),
     check_eq("pure call with an argument is pure",
-      dce.callee_is_pure(callee(arrow_ty(types.EffectPure)), 1), true),
+      typed_ast.callee_is_pure(callee(arrow_ty(types.EffectPure)), 1), true),
     check_eq("effectful call with an argument is not pure",
-      dce.callee_is_pure(callee(arrow_ty(types.EffectIO)), 1), false),
+      typed_ast.callee_is_pure(callee(arrow_ty(types.EffectIO)), 1), false),
     check_eq("saturated curried call is not pure for an effect on the inner arrow",
-      dce.callee_is_pure(callee(curried_ty(types.EffectPure, types.EffectIO)), 2), false),
+      typed_ast.callee_is_pure(callee(curried_ty(types.EffectPure, types.EffectIO)), 2), false),
     check_eq("saturated curried call is pure when every arrow is pure",
-      dce.callee_is_pure(callee(curried_ty(types.EffectPure, types.EffectPure)), 2), true),
+      typed_ast.callee_is_pure(callee(curried_ty(types.EffectPure, types.EffectPure)), 2), true),
     # One argument against two arrows: the inner arrow is returned, not consumed,
     # so its effect has not happened yet.
     check_eq("partial application stops before the arrow it does not consume",
-      dce.callee_is_pure(callee(curried_ty(types.EffectPure, types.EffectIO)), 1), true)
+      typed_ast.callee_is_pure(callee(curried_ty(types.EffectPure, types.EffectIO)), 1), true)
   ])

@@ -1,12 +1,11 @@
 module stdlib.compiler.cse_census
 import stdlib.compiler.typed_ast as typed_ast
-import stdlib.compiler.dce as dce
 import stdlib.string as string
 
 # How much common subexpression elimination is there to eliminate?
 #
 # M1 proposes CSE over Sprout-level calls (docs/opt-passes-v0.md). M0 measured
-# that the existing DLE removes ZERO nodes from every real program, which is the
+# that dead-let elimination (since removed) removed ZERO nodes from every real program, the
 # reason this counter exists before the pass does: an optimisation nobody can
 # measure an opportunity for is not worth its complexity. This module counts the
 # opportunity and rewrites nothing.
@@ -210,7 +209,7 @@ fn expr_key(e: typed_ast.TypedExpr) -> Maybe String =
   | typed_ast.TUnary op operand _ _ -> wrap_keys("un" ++ length_tagged(op), [operand])
   | typed_ast.TGetField base name _ _ -> wrap_keys("get" ++ length_tagged(name), [base])
   | typed_ast.TCall callee args _ _ ->
-      if dce.callee_is_pure(callee, list_length(args))
+      if typed_ast.callee_is_pure(callee, list_length(args))
       then wrap_keys("call", [callee] ++ args)
       else Nothing
   | _ -> Nothing

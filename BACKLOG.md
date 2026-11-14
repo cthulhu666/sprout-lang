@@ -156,9 +156,10 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   block hold `<-` bindings, at the cost of reclassifying `let..in` as sometimes-effectful. Revisit
   only if the two-construct split proves to be friction (`docs/effectful-let-else-v0.md` §5).
 - [ ] `P3` **Unused named local binding is not reported.** A named `let` or parameter that is never
-  read compiles silently. Sprout has no warnings, so the question is whether it is a compile error
-  (as in Go). `_` stays the way to discard, and its RHS still runs (spec §6 rule 4). Needs a design
-  doc: the rule, and migration of the existing stdlib and compiler code that binds unused names.
+  read compiles silently. Decide between a compile error (as in Go) and a lint rule
+  (`docs/lint-rules-v0.md`; `docs/fallible-bind-diagnostic-v0.md` says `CompileResult` has no
+  warning channel). `_` stays the way to discard, and its RHS still runs (spec §6 rule 4). Needs a
+  design doc: the rule, and migration of stdlib and compiler code that binds unused names.
 
 **Existentials / GADTs**
 
@@ -372,12 +373,11 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 - [ ] `P3` **Named `RuntimeLet` record for the runtime-let representation.** `classify_let_decls_ir`
   returns an anonymous positional pair. Blocked on records maturing in compiler code. Broader
   follow-on: adopt `GlobalName` at the other global-name sites so the wrap/unwrap seam shrinks.
-- [ ] `P2` **`SPROUT_OPT_OFF` cannot reach the one pass known to do work.** The M0 switchboard sits
-  at the `compiler.sprout` seam, but `dce.elim_unreachable` — which drops the ~98% of declarations a
-  program cannot reach — runs inside `ir_pipeline.sprout:338`, below it. So the harness A/Bs `dle`,
-  which removes 0 nodes from every real program (`bench/results-2026-09-11-opt.md`), and cannot A/B
-  the pass whose numbers would be large. Add a `reach` pass name and thread an `OptConfig` into
-  `compile_program_streaming` (two callers). `docs/opt-passes-v0.md` §M0.
+- [ ] `P2` **`SPROUT_OPT_OFF` cannot reach `dce.elim_unreachable`.** The M0 switchboard sits at the
+  `compiler.sprout` seam, but `dce.elim_unreachable` — which drops the ~98% of declarations a
+  program cannot reach — runs inside `ir_pipeline.sprout`, below it. So the harness (now on `spec`)
+  cannot A/B the one pass whose numbers would be large. Add a `reach` pass name and thread an
+  `OptConfig` into `compile_program_streaming` (two callers). `docs/opt-passes-v0.md` §M0.
 - [ ] `P3` **No LICM over self-recursion, and LLVM cannot supply it.** The shadow stack makes every
   allocating function look `memory(readwrite)` to `FunctionAttrs`
   (`tests/golden/ir/examples__aoc_2025_day_1.sprout.ll:393-396`) and there is no LTO, so LLVM's
@@ -1252,9 +1252,9 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 - [ ] `P3` **Test recipes copy the same shell.** 29 `clang` lines compile `runtime/*.c` from source
   at link time, and the parallel fan-out loop is pasted 5 times. `overflow-smoke` recompiles the
   runtime per fixture; `test-conformance-run` is serial (see "`test-gates` is the slowest CI
-  job"). The `div-by-zero`, `negative-shift`, `overflow` and `closure-arity` smokes all do
-  emit→link→run→expect a nonzero exit and a stderr text. Fix: fan-out and replay helpers in
-  `scripts/test_lib.sh`, cached runtime objects under "Compile caching for the stdlib test
+  job"). The `div-by-zero`, `negative-shift`, `overflow`, `dead-let` and `closure-arity` smokes
+  all do emit→link→run→expect a nonzero exit and a stderr text. Fix: fan-out and replay helpers
+  in `scripts/test_lib.sh`, cached runtime objects under "Compile caching for the stdlib test
   runner", and one `tests/conformance/runtime_panic/` dir with one runner for the panic smokes.
 - [ ] `P3` **20 suites write fixed `/tmp/sprout_*` paths** (e.g. `tests/stdlib/test_fs.spr`), so two
   worktrees running `just test` at once can collide, and stale files stay behind. Fix: the runner

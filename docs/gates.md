@@ -115,14 +115,14 @@ diff is large even for a small deletion — IR temporaries and `@.str.N` constan
 sequentially, so removing code from mid-function renumbers everything after it; the *goldens* are
 the load-bearing half, not the seed diff's size.
 
-### 0 differences is weak evidence for a purity change in `dce`
+### 0 differences is weak evidence for a purity change in `callee_is_pure`
 
 Both halves of the 2026-09-08 nullary work reported 62 files, 0 differences: the arm that
 *eliminated* more (a pure nullary call bound to an unused name, dead-let elimination, since
 removed) and the arrow walk that *keeps* more (a curried `!{IO}` call that was being dropped — a
 real dropped-effect miscompile). No golden program binds a call it then ignores, in either
 direction, so the corpus cannot observe `is_pure_callee_type` at all. A change there needs a
-synthetic test over `dce.callee_is_pure` (`tests/stdlib/compiler/test_dce_callee_purity.spr`) and
+synthetic test over `typed_ast.callee_is_pure` (`tests/stdlib/compiler/test_callee_purity.spr`) and
 an executable fixture; the golden gate will report clean either way.
 
 ## Bootstrap seed — `scripts/seed_gate.sh`, `just refresh-seed`

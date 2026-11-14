@@ -58,7 +58,6 @@ fn main() -> Unit !{IO} =
     # `Spec` runs by default and `SPROUT_OPT_OFF=spec` turns it off.
     check_true("spec on with no variables", opt_config.enabled(parsed(Nothing), opt_config.Spec)),
     check_false("OFF=spec turns spec off", opt_config.enabled(parsed(Just("spec")), opt_config.Spec)),
-    check_true("OFF=dle leaves spec on", opt_config.enabled(parsed(Just("dle")), opt_config.Spec)),
     # Dead-let elimination was removed; its old name is now an unknown one.
     check_eq("dle is an unknown name", unrecognised_of("dle"), "dle"),
     check_true("pass_from_name spec", opt_config.pass_from_name("spec") == Just(opt_config.Spec)),

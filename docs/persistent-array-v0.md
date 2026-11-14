@@ -359,8 +359,8 @@ call pure, for any later pass to keep. Read "write" below as "write or change a 
   fresh buffer, linear or not: `linvec.new`'s `vec_make_filled` returns a plain `Vector`, and
   only the wrap makes it linear; `vector_empty` under `mutvec_empty` is the same case today.
 - No pass changes how many times an `unsafe_pure` action runs, or its order relative to other
-  calls on the same value. Dead-code elimination may delete a call whose result is unused: by the
-  contract nothing else saw it. Copying code is allowed when each run still runs each action once,
+  calls on the same value. An unused `let` always runs (spec §6 rule 4), so no pass deletes a call
+  because its result is unused. Copying code is allowed when each run still runs each action once,
   as bounds-check elimination's `$fast` clones do. No pass moves, merges or repeats a call today;
   a pass that does must test this.
 
@@ -536,7 +536,7 @@ stop the optimiser deleting or merging a write. The `local` marker can do that f
 buffer reaches code only as a `local` parameter, and a lambda that captures one only at a
 `local` slot (`types.OwnLocal` on the arrow, which unification keeps invariant). The rule: a
 call may be deleted or merged only if its arrow is pure and no `local` appears in its callee's
-or arguments' types. The code that relies on purity is `dce.callee_is_pure`,
+or arguments' types. The code that relies on purity is `typed_ast.callee_is_pure`,
 `bind_census.rhs_purity`, `bce.decl_node` and `cse_census`. B drops the effect rows of the size
 table; the rest stays. It over-approximates: an unused call through a `local` combinator is
 kept even when its lambda captures nothing.

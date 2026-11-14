@@ -1,6 +1,5 @@
 module stdlib.compiler.dce
 import stdlib.compiler.typed_ast as typed_ast
-import stdlib.compiler.types as types
 import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
 
@@ -11,44 +10,8 @@ import stdlib.compiler.source as source
 # There is no dead-`let` elimination. A do-block `let` runs even when its name is
 # never read (docs/spec-v0.md §6 rule 4), and a pure right-hand side can still
 # panic: `panic` is pure, Int `+ - *` and unary `-` panic on overflow, `/` panics
-# on zero. Deleting the binding would delete the panic.
-
-# ---------------------------------------------------------------------------
-# Callee purity
-# ---------------------------------------------------------------------------
-
-# A call performs the effect of every arrow it CONSUMES, and `infer` records a
-# declared effect on the innermost one — so a two-parameter `!{IO}` function has a
-# pure outer arrow, and reading that alone calls an effectful callee pure. Mirrors
-# `infer.arrows_effect`, which decides the same question at check time.
-#
-# `argc <= 0` means two things, as it does there: at the entry a zero-argument
-# call, which consumes a thunk arrow and performs its effect; through the
-# recursion the end of the consumed chain, where what is left is returned rather
-# than invoked. Every catch-all answers "impure" — the direction that costs an
-# optimisation rather than an effect.
-#
-# "Pure" means the call cannot do IO. It does not mean the call cannot fail: a pure
-# callee may still panic, so this is no licence to drop a call whose result is unused.
-fn is_pure_callee_type(t: types.Type, argc: Int) -> Bool =
-  if argc <= 0 then thunk_is_pure(t) else consumed_arrows_pure(t, argc)
-
-# The same question asked from a call site, for the passes that need it (bce,
-# cse_census). One definition, so a purity fix cannot reach one pass and miss another.
-export fn callee_is_pure(callee: typed_ast.TypedExpr, argc: Int) -> Bool =
-  is_pure_callee_type(typed_ast.typed_expr_type(callee), argc)
-
-fn thunk_is_pure(t: types.Type) -> Bool =
-  match t with
-  | types.TThunk _ eff -> types.effect_is_pure(eff)
-  | _ -> false
-
-fn consumed_arrows_pure(t: types.Type, argc: Int) -> Bool =
-  if argc <= 0 then true
-  else
-    match t with
-    | types.TFunc _ ret eff _ -> types.effect_is_pure(eff) && consumed_arrows_pure(ret, argc - 1)
-    | _ -> false
+# on zero. Deleting the binding would delete the panic. The call-purity oracle ("can this
+# call do IO") is `typed_ast.callee_is_pure`.
 
 # ---------------------------------------------------------------------------
 # Binders

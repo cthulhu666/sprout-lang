@@ -4,7 +4,6 @@ import stdlib.compiler.types as types
 import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
 import stdlib.compiler.vec_wrappers as vec_wrappers
-import stdlib.compiler.dce as dce
 
 # Bounds-check elimination by loop versioning (docs/bounds-check-elimination-v0.md).
 #
@@ -748,7 +747,7 @@ fn note_callee_kind(callee: typed_ast.TypedExpr, argc: Int, locals: Set, tables:
   | _ -> by_effect(callee, argc, acc)
 
 fn by_effect(callee: typed_ast.TypedExpr, argc: Int, acc: Calls) -> Calls =
-  if dce.callee_is_pure(callee, argc) then acc else note_unsafe(acc)
+  if typed_ast.callee_is_pure(callee, argc) then acc else note_unsafe(acc)
 
 type Node (..) = (name: String, calls: Calls)
 

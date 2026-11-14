@@ -65,7 +65,7 @@ pass's.
 - **Function values** (§1). Inlining a combinator or copying it per function argument needs its
   own design: size limits, code growth, `local`/`once` closures and their borrowed captures, and
   rooting. M0 counts the sites; it does not choose the lever.
-- **A new IR tier or a general optimiser.** The pass is `TypedExpr` → `TypedExpr`. DLE and CSE
+- **A new IR tier or a general optimiser.** The pass is `TypedExpr` → `TypedExpr`. dead-let elimination (since removed) and CSE
   measured nil on real code (`docs/opt-passes-v0.md`), so nothing beyond this one pass is proposed.
 - **New syntax.** No `SPECIALIZE`-style annotation in v0; see §9.
 - **Rewriting at known instances** (e.g. `vec_sort` at `Int` choosing a primitive sort). This pass
