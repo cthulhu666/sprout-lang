@@ -338,7 +338,13 @@ static const Handlers check_handlers = { chk_alloc, chk_free, chk_tail, chk_vec_
 #define KIND_BUILDER 6
 #define NO_OBJ UINT32_MAX
 
-enum { O_OWNER = 1, O_LARGE = 2, O_TAILED = 4 };
+enum { O_OWNER = 1, O_LARGE = 2, O_TAILED = 4, O_DEAD = 8 };
+
+/* g_gen.promote_age = 3: a survivor of a keep-colour sweep stays young while its age before the
+ * sweep is below PROMOTE_AGE - 1 (sprout_gc_stays_young); every survivor's age is bumped. */
+#define PROMOTE_AGE 3
+#define YOUNG_BELOW (PROMOTE_AGE - 1)
+#define AGE_MAX 15
 enum { PK_BASE, PK_HOLES, PK_CLASS };
 
 static void* xcalloc(size_t n, size_t sz) {
@@ -364,6 +370,8 @@ typedef struct {
   uint32_t size;   /* slot bytes now: a T takes the tail off */
   uint32_t tail;   /* bytes a T freed from this object */
   uint8_t kind, flags;
+  uint8_t age, young;   /* collections survived (saturating at 15); young: not yet promoted */
+  uint32_t ypos;        /* index in Sim.yl while young */
   Place pl[MAX_POL];
 } Obj;
 
@@ -382,6 +390,8 @@ struct Policy {
   uint64_t (*chunks)(const Policy*);   /* NULL, or the 1 MiB chunks the regions are carved from */
   uint64_t (*free_units)(const Policy*);   /* free slots (base, class-R) or granules (holes), after an E */
   void (*snap)(Policy*);   /* at a new G peak */
+  /* an ordinary object enters (+1) or leaves (-1) the young set; in_free: a free during a collection */
+  void (*young_adj)(Policy*, const Obj*, int delta, int in_free);
   uint64_t g_n, g_peak, peak_regions, pk_regs;   /* pk_regs: regions at the peak G */
   double g_sum, e_sum;
   uint64_t e_n;
@@ -393,6 +403,8 @@ struct Policy {
   Stat iv_ex, iv_w;   /* per collection interval */
   uint32_t nbitmaps;   /* bitmaps a region has to sweep (C and E) */
   Stat sw_words[4], sw_regions[4];   /* per E kind: words of ONE bitmap, regions swept */
+  Stat sw_words_old[4], sw_regions_old[4];   /* the same with kind 2 on touched regions only (the earlier model) */
+  Stat eager_words[4];   /* holes: words an eager hole scan over every used region reads, per E kind */
   FloorStat fl[2];
 };
 
@@ -478,7 +490,11 @@ typedef struct {
   uint64_t fl_applying, fl_skipped;   /* intervals counted, and left out because the trace's floor was already above */
   Stat fl_interval;   /* allocations between the E and the next G, intervals counted */
   Stat walked_k[4];   /* filled by --walked: today's walked= slots per E kind */
+  uint32_t* yl;       /* pool indices of the live young ordinary objects */
+  size_t ny, ycap;
 } Sim;
+
+static int g_in_gc;   /* between a G and its E: frees are the collection's sweep */
 
 static Obj* pool_new(Sim* s, uint32_t* idx) {
   uint32_t i;
@@ -515,6 +531,51 @@ static void measure(Sim* s, Policy* p, int at_g) {
   }
 }
 
+/* Moves an ordinary object into or out of the young set, and tells every policy. */
+static void young_set(Sim* s, uint32_t idx, int young, int in_free) {
+  Obj* o = &s->pool[idx];
+  if (o->young == young) return;
+  if (young) {
+    if (s->ny == s->ycap) {
+      s->ycap = s->ycap ? s->ycap * 2 : 1 << 16;
+      s->yl = xrealloc(s->yl, s->ycap * sizeof(uint32_t));
+    }
+    o->ypos = (uint32_t)s->ny;
+    s->yl[s->ny++] = idx;
+  } else {
+    uint32_t last = s->yl[--s->ny];
+    s->yl[o->ypos] = last;
+    s->pool[last].ypos = o->ypos;
+  }
+  o->young = (uint8_t)young;
+  for (int i = 0; i < s->npol; i++)
+    if (s->pols[i]->young_adj) s->pols[i]->young_adj(s->pols[i], o, young ? 1 : -1, in_free);
+}
+
+/* After the policies' gc_end (which read the young set as the sweep found it): ages and promotion.
+ * Kind 2 sweeps the young set and keeps colour.  Kind 1 (a major followed by a minor) marks
+ * everything and sweeps with keep-colour, so each survivor's young state is recomputed from its age.
+ * Kinds 0 and 3 clear colour (no generations / the next collection is a major): nothing stays young. */
+static void sim_age(Sim* s, uint64_t kind) {
+  if (kind == 2) {
+    for (size_t i = s->ny; i-- > 0;) {
+      uint32_t idx = s->yl[i];
+      Obj* o = &s->pool[idx];
+      int stays = o->age < YOUNG_BELOW;
+      if (o->age < AGE_MAX) o->age++;
+      if (!stays) young_set(s, idx, 0, 0);
+    }
+    return;
+  }
+  for (uint32_t idx = 0; idx < s->pool_used; idx++) {
+    Obj* o = &s->pool[idx];
+    if (o->flags & (O_DEAD | O_LARGE)) continue;
+    int stays = kind == 1 && o->age < YOUNG_BELOW;
+    if (o->age < AGE_MAX) o->age++;
+    young_set(s, idx, stays, 0);
+  }
+}
+
 static int sim_alloc(Sim* s, uint64_t id, uint64_t kind, uint64_t slot_bytes) {
   if (slot_bytes == 0 || slot_bytes % 16 != 0) return err("A %llu: slot_bytes %llu is not a positive multiple of 16", (unsigned long long)id, (unsigned long long)slot_bytes);
   uint32_t idx;
@@ -534,6 +595,7 @@ static int sim_alloc(Sim* s, uint64_t id, uint64_t kind, uint64_t slot_bytes) {
   } else {
     s->live_bytes += slot_bytes;
     for (int i = 0; i < s->npol; i++) { s->pols[i]->allocs++; s->pols[i]->alloc(s->pols[i], o); }
+    young_set(s, idx, 1, 0);
   }
   map_put(&s->map, id, idx);
   return 0;
@@ -549,8 +611,10 @@ static int sim_free(Sim* s, uint64_t id) {
     s->large_cnt--;
   } else {
     s->live_bytes -= o->size;
+    young_set(s, idx, 0, g_in_gc);
     for (int i = 0; i < s->npol; i++) s->pols[i]->free_(s->pols[i], o);
   }
+  o->flags |= O_DEAD;
   s->frees++;
   s->live_objs--;
   map_del(&s->map, id);
@@ -620,6 +684,7 @@ static int sim_gc_start(Sim* s) {
     }
   }
   for (int i = 0; i < s->npol; i++) measure(s, s->pols[i], 1);
+  g_in_gc = 1;
   return 0;
 }
 
@@ -652,6 +717,8 @@ static int sim_gc_end(Sim* s, uint64_t kind, uint64_t heap_after, uint64_t ordin
       s->cal_free_n++;
     }
   }
+  sim_age(s, kind);
+  g_in_gc = 0;
   if (ordinary != UINT64_MAX && large != s->large_cnt) s->cal_large_miss++;
   stat_add(&s->owners_e, s->owners);
   stat_add(&s->live_e, s->live_bytes + s->large_live);
@@ -771,7 +838,7 @@ static uint64_t base_regions(const Policy* p) { return ((const Base*)p)->nused; 
 static uint64_t base_free_units(const Policy* p) { return ((const Base*)p)->free; }
 
 /* ── holes (option C) ─────────────────────────────────────────────────────────────────────── */
-typedef struct { uint64_t* bm; uint32_t live; uint8_t used, touched; } HReg;   /* bm: live granules */
+typedef struct { uint64_t* bm; uint32_t live, young; uint8_t used, touched, yfree; } HReg;   /* bm: live granules */
 typedef struct {
   uint32_t reg, cur, end;   /* granule offsets: [cur, end) is free */
   uint32_t words;           /* occupancy-bitmap words a cursor reads to find this hole */
@@ -830,6 +897,8 @@ static void holes_open(Holes* h) {
   r->live = 0;
   r->used = 1;
   r->touched = 0;
+  r->young = 0;
+  r->yfree = 0;
   h->nused++;
   holes_push(h, i, 0, REGION_GRANULES, 0);
 }
@@ -941,6 +1010,12 @@ static void holes_free(Policy* p, Obj* o) {
   r->live--;
 }
 
+static void holes_young_adj(Policy* p, const Obj* o, int delta, int in_free) {
+  HReg* r = &((Holes*)p)->r[o->pl[p->slot].region];
+  r->young += (uint32_t)delta;
+  if (delta < 0 && in_free) r->yfree = 1;
+}
+
 static void holes_tail(Policy* p, Obj* o, uint32_t rest) {
   Holes* h = (Holes*)p;
   HReg* r = &h->r[o->pl[p->slot].region];
@@ -986,14 +1061,18 @@ done:
 
 static void holes_gc_end(Policy* p, uint64_t kind) {
   Holes* h = (Holes*)p;
-  uint64_t touched = 0, used = 0;
+  uint64_t touched = 0, used = 0, young = 0;
   for (uint32_t i = 0; i < h->n; i++) {
-    used += h->r[i].used;
-    touched += h->r[i].used && h->r[i].touched;
+    const HReg* r = &h->r[i];
+    used += r->used;
+    touched += r->used && r->touched;
+    young += r->used && (r->touched || r->young > 0 || r->yfree);
   }
-  uint64_t swept = kind == 2 ? touched : used;
+  uint64_t swept = kind == 2 ? young : used;
   stat_add(&p->sw_regions[kind], swept);
   stat_add(&p->sw_words[kind], swept * BM_WORDS);
+  stat_add(&p->sw_regions_old[kind], kind == 2 ? touched : used);
+  stat_add(&p->sw_words_old[kind], (kind == 2 ? touched : used) * BM_WORDS);
   for (uint32_t i = 0; i < h->n; i++) {
     HReg* r = &h->r[i];
     if (r->used && r->live == 0) {
@@ -1003,17 +1082,19 @@ static void holes_gc_end(Policy* p, uint64_t kind) {
       h->nused--;
     }
   }
+  stat_add(&p->eager_words[kind], (uint64_t)h->nused * BM_WORDS);
   h->nh = 0;
-  uint64_t all = 0, young = 0, live_young = 0, carry = 0;
+  uint64_t all = 0, young_holes = 0, live_young = 0, carry = 0;
   for (uint32_t i = 0; i < h->n; i++) {
+    h->r[i].yfree = 0;
     if (!h->r[i].used) continue;
     uint64_t c = holes_scan(h, i, &carry);
     all += c;
-    if (h->r[i].touched) { young += c; live_young += h->r[i].live; }
+    if (h->r[i].touched) { young_holes += c; live_young += h->r[i].live; }
     h->r[i].touched = 0;
   }
   stat_add(&h->holes_all, all);
-  stat_add(&h->holes_young, young);
+  stat_add(&h->holes_young, young_holes);
   stat_add(&h->live_young, live_young);
   h->free_g = 0;
   for (size_t j = 0; j < h->nh; j++) h->free_g += h->h[j].end - h->h[j].cur;
@@ -1032,7 +1113,8 @@ typedef struct {
   uint32_t cls, nslots, inuse, nw, hint_w;   /* nw alloc-bitmap words; hint_w: lowest word that may hold a free bit */
   uint32_t chunk, cslot;                     /* where the region sits among 1 MiB chunks (R < 1 MiB) */
   uint64_t* ab;                              /* alloc bitmap, padding bits set */
-  uint8_t used, touched;
+  uint32_t young;                            /* live young objects */
+  uint8_t used, touched, yfree;              /* yfree: this collection freed a young object here */
 } CReg;
 typedef struct {
   Policy p;
@@ -1125,7 +1207,9 @@ static void class_alloc(Policy* p, Obj* o) {
   r->inuse = 0;
   r->used = 1;
   r->touched = 0;
-  r->nw = (r->nslots + 63) / 64;
+  r->young = 0;
+  r->yfree = 0;
+  r->nw =(r->nslots + 63) / 64;
   r->hint_w = 0;
   r->ab = xcalloc(r->nw, sizeof(uint64_t));
   if (r->nslots % 64) r->ab[r->nw - 1] = ~0ull << (r->nslots % 64);   /* padding is never free */
@@ -1153,6 +1237,12 @@ static void class_free(Policy* p, Obj* o) {
   if (o->flags & O_TAILED) c->dead_tail -= o->tail;
 }
 
+static void class_young_adj(Policy* p, const Obj* o, int delta, int in_free) {
+  CReg* r = &((ClassR*)p)->r[o->pl[p->slot].region];
+  r->young += (uint32_t)delta;
+  if (delta < 0 && in_free) r->yfree = 1;
+}
+
 static void class_tail(Policy* p, Obj* o, uint32_t rest) {
   (void)o;
   ((ClassR*)p)->dead_tail += rest;
@@ -1165,13 +1255,16 @@ static int cmp_u32(const void* a, const void* b) {
 
 static void class_gc_end(Policy* p, uint64_t kind) {
   ClassR* c = (ClassR*)p;
-  uint64_t swept = 0, words = 0;
+  uint64_t swept = 0, words = 0, swept_old = 0, words_old = 0;
   for (uint32_t i = 0; i < c->n; i++) {
     const CReg* r = &c->r[i];
-    if (r->used && (kind != 2 || r->touched)) { swept++; words += r->nw; }
+    if (r->used && (kind != 2 || r->touched || r->young > 0 || r->yfree)) { swept++; words += r->nw; }
+    if (r->used && (kind != 2 || r->touched)) { swept_old++; words_old += r->nw; }
   }
   stat_add(&p->sw_regions[kind], swept);
   stat_add(&p->sw_words[kind], words);
+  stat_add(&p->sw_regions_old[kind], swept_old);
+  stat_add(&p->sw_words_old[kind], words_old);
   for (uint32_t i = 0; i < c->n; i++) {
     CReg* r = &c->r[i];
     if (r->used && r->inuse == 0) {
@@ -1183,6 +1276,7 @@ static void class_gc_end(Policy* p, uint64_t kind) {
       r->ab = NULL;
     }
     r->touched = 0;
+    r->yfree = 0;
   }
   for (uint32_t cls = 1; cls < NCLS; cls++) {
     uint32_t k = 0;
@@ -1231,7 +1325,7 @@ static Policy* policy_new(const char* name) {
     h->last_ex[0] = h->last_ex[1] = SIZE_MAX;
     h->p = (Policy){ .name = h->tails ? "holes-ovf-tails" : h->ovf ? "holes-ovf" : "holes", .type = PK_HOLES, .region_bytes = REGION_BYTES, .alloc = holes_alloc,
                      .free_ = holes_free, .tail = holes_tail, .gc_end = holes_gc_end, .regions = holes_regions,
-                     .free_units = holes_free_units, .nbitmaps = HOLES_BITMAPS };
+                     .free_units = holes_free_units, .nbitmaps = HOLES_BITMAPS, .young_adj = holes_young_adj };
     p = &h->p;
   } else if (strncmp(name, "class-", 6) == 0) {
     static const struct { const char* n; uint32_t r; } sizes[] = {
@@ -1245,7 +1339,7 @@ static Policy* policy_new(const char* name) {
         c->p = (Policy){ .name = sizes[i].n, .type = PK_CLASS, .region_bytes = c->R, .alloc = class_alloc, .free_ = class_free,
                          .tail = class_tail, .gc_end = class_gc_end, .regions = class_regions,
                          .chunks = c->R < REGION_BYTES ? class_chunks : NULL, .free_units = class_free_units,
-                         .snap = class_snap, .nbitmaps = CLASS_BITMAPS };
+                         .snap = class_snap, .nbitmaps = CLASS_BITMAPS, .young_adj = class_young_adj };
         p = &c->p;
       }
   }
@@ -1310,7 +1404,7 @@ static const int KIND_ORDER[4] = { 1, 2, 3, 0 };
 
 static void report_sweep(const Sim* s) {
   printf("\nsweep work per E, mean by E kind: words of ONE bitmap (a region updates `bm` bitmaps), then regions swept.\n"
-         "Kinds 0, 1, 3 sweep every region, kind 2 those allocated into since the last E.  Hole counts are not a cost.\n");
+         "Kinds 0, 1, 3 sweep every region, kind 2 those allocated into since the last E or holding a live young object.\nHole counts are not a cost.\n");
   printf("%-16s %3s |", "", "bm");
   for (int k = 0; k < 4; k++) printf(" %14s |", KIND_NAME[KIND_ORDER[k]]);
   printf(" %12s\n", "all E");
@@ -1345,7 +1439,26 @@ static void report_sweep(const Sim* s) {
       }
       printf(" %12.1f\n", s->collections ? tot / (double)s->collections : 0.0);
     }
+    for (int row = 0; row < 3; row++) {
+      const Stat* st = row == 0 ? p->sw_words_old : row == 1 ? p->sw_regions_old : p->eager_words;
+      if (row == 2 && p->type != PK_HOLES) continue;
+      if (row == 2) snprintf(lab, sizeof lab, "%s eager", p->name);
+      else snprintf(lab, sizeof lab, "%s %s*", p->name, row ? "regions" : "words");
+      printf("%-16s %3s |", lab, "");
+      double tot = 0;
+      for (int k = 0; k < 4; k++) {
+        const Stat* x = &st[KIND_ORDER[k]];
+        if (x->n) printf(" %14.1f |", stat_mean(x)); else printf(" %14s |", "-");
+        tot += x->sum;
+      }
+      printf(" %12.1f\n", s->collections ? tot / (double)s->collections : 0.0);
+    }
   }
+  printf("* kind 2 on regions allocated into since the last E only (the earlier model); the rows above also sweep every\n"
+         "region holding a live young object (a survivor stays young until it has survived %d collections), as\n"
+         "sprout_gc_sweep_young does.  Ages: kind 2 and 1 recompute young from age, 0 and 3 promote everything.\n"
+         "eager: words an eager hole scan over every used region reads at each E -- eager hole scan, not in the design.\n",
+         PROMOTE_AGE);
 }
 
 static void report_alloc_side(const Sim* s) {
@@ -1826,7 +1939,39 @@ static void test_floor_indicator(void) {
   CHECK(t->s.fl_skipped == 1 && b->fl[0].n == 2, "left out: %llu skipped, %llu applying", U(t->s.fl_skipped), U(b->fl[0].n));
 }
 
+/* A young-only minor sweeps a region holding a stay-young survivor with no new allocation; it drops
+ * out when the object is promoted (age 3rd E) or dies. */
+static void test_young_regions_swept(void) {
+  T* t = t_new("holes,class-16K");
+  const char* nm[2] = { "holes", "class-16K" };
+  uint64_t a = t_a(t, 16);
+  uint64_t sw[2], old[2];
+  int want[4] = { 1, 1, 1, 0 };   /* E1 touched; E2, E3 young-only; promoted at E3, so E4 skips it */
+  for (int e = 0; e < 4; e++) {
+    for (int i = 0; i < 2; i++) { sw[i] = (uint64_t)t->s.pols[i]->sw_regions[2].sum; old[i] = (uint64_t)t->s.pols[i]->sw_regions_old[2].sum; }
+    t_g(t); t_e(t, 2);
+    for (int i = 0; i < 2; i++) {
+      uint64_t d = (uint64_t)t->s.pols[i]->sw_regions[2].sum - sw[i], dold = (uint64_t)t->s.pols[i]->sw_regions_old[2].sum - old[i];
+      CHECK(d == (uint64_t)want[e], "%s E%d swept %llu regions, want %d", nm[i], e + 1, U(d), want[e]);
+      CHECK(dold == (e == 0 ? 1u : 0u), "%s E%d touched-only %llu", nm[i], e + 1, U(dold));
+    }
+  }
+  CHECK(t_obj(t, a)->young == 0, "object still young after 4 Es");
+  CHECK(t_holes(t, 0)->r[0].young == 0 && t_class(t, 1)->r[0].young == 0, "region young counts not back to 0");
+  /* a young object freed by the collection keeps its region in that E's set, not the next */
+  uint64_t b = t_a(t, 16);
+  for (int e = 0; e < 2; e++) {
+    for (int i = 0; i < 2; i++) sw[i] = (uint64_t)t->s.pols[i]->sw_regions[2].sum;
+    t_g(t); if (e == 0) t_f(t, b); t_e(t, 2);
+    for (int i = 0; i < 2; i++) {
+      uint64_t d = (uint64_t)t->s.pols[i]->sw_regions[2].sum - sw[i];
+      CHECK(d == (e == 0 ? 1u : 0u), "%s dead-young E%d swept %llu", nm[i], e + 1, U(d));
+    }
+  }
+}
+
 static int run_selftest(void) {
+  test_young_regions_swept();
   test_hole_exactly_filled();
   test_hole_skipped();
   test_hole_overflow();

@@ -38,16 +38,20 @@ Per-region metadata is 0.4–2.3% of held on the self-compile in every policy.
 
 **Sweep work**, mean per collection over all kinds: words of one bitmap (both C and E update
 four per region), and regions swept. Full sweeps (majors and the minor before one) count every
-region, young-only minors the regions allocated into since the last collection. Today: slots
+region, young-only minors every region holding a young object or allocated into since the last
+collection, as `sprout_gc_sweep_young` does. Today: slots
 walked, from the same run's `walked=`.
 
-| workload | today, slots | holes-ovf words / regions | class-16K words / regions | class-64K words / regions |
+| workload | today, slots | holes-ovf-tails words / regions | class-16K words / regions | class-64K words / regions |
 |---|---|---|---|---|
-| selfcompile | 660,103 | 34,189 / 33 | 14,761 / 1,890 | 14,625 / 494 |
-| load_spike | 58,476 | 2,424 | 549 | 889 |
-| rotate_classes | 24,286 | 1,570 | 237 | 260 |
-| mutvec_push | 12,984 | 5,103 | 464 | 474 |
+| selfcompile | 660,103 | 36,056 / 35 | 15,694 / 2,016 | 15,664 / 530 |
+| load_spike | 58,476 | 2,524 | 598 | 939 |
+| rotate_classes | 24,286 | 1,853 | 242 | 280 |
+| mutvec_push | 12,984 | 2,239 | 469 | 478 |
 | nqueens | 4,676 | 1,024 | 87 | 105 |
+
+The replay keeps a full sweep for the minor before a major; the design in §5.7 sweeps that minor
+young-only, so these overstate both options there.
 
 **Allocation side**, self-compile, per allocation: `holes-ovf` examines 0.49 holes and reads
 0.57 occupancy words; `class-16K` tests 1.00 regions and reads 1.03 bitmap words; `base`'s
@@ -63,9 +67,9 @@ little; in raw granules it would be understated much more, and C needs the norma
 
 **Findings.**
 
-- Against today's slots walked, holes update 2.5–24× fewer words and class regions 28–107×
+- Against today's slots walked, holes update 4.6–23× fewer words and class regions 28–100×
   fewer (units differ: a slot visit reads a header and writes two words; a word is one load and
-  store). On the self-compile class regions update 2.3× fewer words than holes but sweep 15–57×
+  store). On the self-compile class regions update 2.3× fewer words than holes but sweep 15–58×
   more regions per collection.
 - Memory: holes-ovf is lowest on the self-compile (0.86× base, against 0.93–0.96× for class
   regions chunked). On rotate_classes both beat today's exact fit (holes 0.41×, class 0.49–0.51×).
