@@ -1,0 +1,33 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
+import stdlib.fs as fs
+import testsupport.envvar as envvar
+
+# A bare class method (`to_string` passed as a value) is a TMethodRef. Lowering builds it
+# from resolve's Evidence only, so compile_full must run the dictionary passes before it
+# lowers: without them the ref keeps infer's placeholder and lowering aborts.
+
+fn stdlib_root() -> String !{IO} = maybe_with_default("stdlib", envvar.read("SPROUT_STDLIB_ROOT"))
+
+fn compiles(body: String) -> Bool !{IO} =
+  do
+    let path = "/tmp/sprout_compile_full_method_value_fixture.spr"
+    fs.write_text(path, "module main\n\n" ++ body ++ "\n")
+    root <- stdlib_root()
+    r <- compiler.compile_full(source.FilePath(path), source.StdlibRoot(root))
+    match r with
+    | compiler.FullOk _ _ -> true
+    | compiler.FullFail _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    ok_method <- compiles("fn app(f: Int -> String, n: Int) -> String = f(n)\n\nfn main() -> Unit !{IO} = print(app(to_string, 3))")
+    assert_true(state, "a bare class method passed as a value compiles", ok_method)
+    ok_call <- compiles("fn main() -> Unit !{IO} = print(to_string(3))")
+    assert_true(state, "a class method call compiles", ok_call)
+    bad <- compiles("fn main() -> Unit !{IO} = print(1 + true)")
+    assert_true(state, "a type error still fails", !bad)
+    summary(state)

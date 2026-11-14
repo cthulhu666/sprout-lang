@@ -5,8 +5,7 @@ import stdlib.test (check_eq, run_suite)
 # concrete types for eta-expansion.
 #
 # Without the fix, to_string inside showcase_int has type ?K->String (fresh TVar)
-# when it reaches lowering; eta-expansion fails; the sentinel emits
-# __eta_unresolved_ToString_to_string, producing a linker error at compile time.
+# when it reaches lowering; eta-expansion fails and compilation stops at lowering.
 
 class Showcase a
   fn showcase(x: a) -> String

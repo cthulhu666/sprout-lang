@@ -1,7 +1,8 @@
 module main
 
 # Both constraints at one instance: the two slots then carry the same impl, and
-# each occurrence must still resolve (to the right slot, not by the any-slot scan).
+# each occurrence must still resolve to the right slot: resolve.method_evidence keys it
+# from the annotated class type and lowering takes the EvForward slot.
 
 class Make t
   fn from_int(n: Int) -> t

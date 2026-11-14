@@ -164,9 +164,8 @@ superclass and one method hides the bug entirely.
 
 ## 9. References
 
-- `BACKLOG.md` §7.5 (Type Classes) tracks the surrounding gaps: the missing
-  conformance check above, and the unrelated ambiguous-forwarded-reference entry
-  that also emits an `__eta_unresolved_*` sentinel.
+- `BACKLOG.md` §7.5 (Type Classes) tracks the surrounding gaps, such as the missing
+  conformance check above.
 - `docs/scoped-type-variables-analysis-2026-07-26.md` (why no `forall`).
 - `docs/compiler-internals.md` §Type-aware GC rooting (the dictionary-slot rule).
 - `tests/stdlib/test_method_level_constraint.spr`.

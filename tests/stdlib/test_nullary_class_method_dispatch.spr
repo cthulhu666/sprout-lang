@@ -8,8 +8,8 @@ import stdlib.test (check_eq, run_suite)
 # Value position is the second axis: `combine` passed unapplied is the
 # eta-expansion path for a PARAMETERISED method, `blank` passed unapplied the
 # same path for a nullary one. A nullary method's type is a `TThunk`, which
-# `lowering.try_eta_forwarded_without_class` must admit alongside `TFunc` — it
-# once gated on `TFunc` and this shape died as `__eta_unresolved_Blank_blank`.
+# `lowering.eta_from_evidence` must admit alongside `TFunc`: its eta-lambda has no
+# parameters.
 
 class Blank t
   fn blank() -> t

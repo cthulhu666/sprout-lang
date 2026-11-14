@@ -1,0 +1,20 @@
+module main
+
+# A class method from another module, named qualified and bare as a value. infer
+# routes it to TMethodRef only when the method's `@class:` marker is in scope under
+# that spelling; lowering has no other way to build the lambda.
+import stdlib.json as json
+
+type Flag = Flag Bool
+
+instance json.JsonEncode Flag
+  fn encode_json(f: Flag) -> json.Json =
+    match f with
+    | Flag b -> json.string(if b then "yes" else "no")
+
+fn apply(f: Flag -> json.Json, b: Flag) -> json.Json = f(b)
+
+fn main() -> Unit !{IO} =
+  match json.stringify(apply(json.encode_json, Flag(true))) with
+  | Ok text -> print(text)
+  | Err _ -> print("error")

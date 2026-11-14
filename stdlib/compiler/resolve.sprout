@@ -661,8 +661,9 @@ fn unann_slot(owner_and_param: String) -> String =
 #                                  that lowering null-fills on the ctx_fwd miss)
 #   * concrete head, bundled    → EvInstance key children  (children = one Evidence
 #                                  per substituted instance context constraint)
-#   * concrete head, env-marker → EvUnresolved    (imported instance not bundled;
-#                                  lowering emits __unresolved_ sentinels)
+#   * concrete head, env-marker → EvUnresolved    (a multi-parameter class: its marker
+#                                  names the first parameter only; lowering emits
+#                                  __unresolved_ sentinels)
 #   * concrete head, no instance→ EvMissing       (unreachable once check passes)
 #
 # fwd_keys is the set of constraint_keys the enclosing function forwards (its
@@ -821,13 +822,22 @@ fn method_evidence(method: String, class_name: String, t: types.Type, pos: sourc
     match types.first_concrete_head_str(class_type) with
     | Just _ ->
         let Nothing = check_dictionary(c, pos, kind, fwd_keys, tables) else Just err -> Err(err)
-        in Ok(produce_one_class(class_name, slot_type, [slot_type], fwd_keys, tables))
+        in reject_unresolved(produce_one_class(class_name, slot_type, [slot_type], fwd_keys, tables),
+                             method, class_name, pos)
     | Nothing ->
         if types.head_is_var(class_type) then
           let Just slot = forwarded_slot(class_name, [slot_type], fwd_keys)
                 else Err((pos, typed_ast.ambiguous_method_message(method, class_name)))
           in Ok(typed_ast.EvForward(class_name, slot))
         else Err((pos, typed_ast.function_instance_message(class_name)))
+
+# Lowering builds the value from an instance or a forwarded slot, so evidence naming
+# neither is reported here. check_dictionary has already rejected a missing instance.
+fn reject_unresolved(ev: typed_ast.Evidence, method: String, class_name: String,
+                     pos: source.SourcePos) -> Result(source.SourcePos, String) typed_ast.Evidence =
+  match ev with
+  | typed_ast.EvUnresolved -> Err((pos, typed_ast.unresolved_method_message(method, class_name)))
+  | _ -> Ok(ev)
 
 # A method with no class type, whose use nothing can fix: accepted when the declaration
 # forwards exactly one slot for its class, which lowering's eta lambda then takes.

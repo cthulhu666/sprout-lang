@@ -1,0 +1,21 @@
+module main
+
+# As bare_method_imported_class_qualified, with the method imported by name: the
+# marker is aliased with the method (compiler.bare_alias), so the bare spelling is
+# classified the same way.
+import stdlib.json (JsonEncode, encode_json, Json)
+import stdlib.json as json
+
+type Flag = Flag Bool
+
+instance JsonEncode Flag
+  fn encode_json(f: Flag) -> Json =
+    match f with
+    | Flag b -> json.string(if b then "yes" else "no")
+
+fn apply(f: Flag -> Json, b: Flag) -> Json = f(b)
+
+fn main() -> Unit !{IO} =
+  match json.stringify(apply(encode_json, Flag(true))) with
+  | Ok text -> print(text)
+  | Err _ -> print("error")

@@ -1392,8 +1392,8 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `where Boxed (Tagged k), Boxed (Tagged j)` gets two hidden slots now —
   `typed_ast.dict_slot_key` names the arguments — but `infer.check_indistinct_constraints` still
   rejects it (spec "Two constraints of one class must not differ only in their arguments"). What
-  is left: the eta fallback that takes the only slot carrying a method
-  (`lowering.find_forwarded_method_any`) must pick by key.
+  is left: check that a bare method under both slots resolves by key in
+  `resolve.method_evidence`, the only authority for it now.
   Then drop the rule and its spec paragraph, and turn `type_error/same_class_heads_share_dict_slot`
   and `tuple_heads_share_dict_slot` into run fixtures.
 - [ ] `P2` **A class method's `.iface` scheme quantifies fewer binders than the live
@@ -1422,15 +1422,6 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   itself, as GHC's `ConPatTc` carries `cpt_dicts`, and lowering would read them. First audit the
   passes after resolve that would see the binders: `verify_dispatch`, `linear_check`,
   `specialise`, `dce`, `bce`.
-- [ ] `P2` **Complete the M3b eta→single-authority collapse: delete lowering's `try_eta_*`.**
-  `resolve.method_evidence` gives a `TMethodRef` `EvInstance` or `EvForward`, except
-  `EvUnresolved` for an imported, unbundled instance (env marker only); over 1001 sources
-  (examples, conformance/run, tests/stdlib, smoke shapes, self-compile) the
-  `TMethodRef` arm of `lowering.lower_expr` never falls back to `lower_value_var`. Lowering's
-  `try_eta_in_class`/`try_eta_forwarded_without_class` (and `find_forwarded_method_any`) are
-  still a second authority reachable from that fallback and the `TVar` arm. Fix: make a
-  consumption miss a located panic, measure the `TVar` arm the same way, then delete `try_eta_*`
-  with the deferred `TFunc` gate and marker-miss test.
 - [ ] `P2` **Widen the `@inst:` key to full-head matching (GHC `FlexibleInstances` position).**
   Would make `instance C (List Int)` and `instance C (List Bool)` both legal *and* sound, lifting
   the distinct-type-variables restriction on instance heads. Exact-string widening does not work
@@ -3019,6 +3010,20 @@ acting.
 > (core verifier, dispatch trace, loud heuristic, canonical identity) are landed; what follows is
 > the residue, ordered by leverage.
 
+- [ ] `P3` **A bare class method with its own `where` fails at codegen.** `class Biggest f` with
+  `fn biggest(xs: f a) -> a where Ord a`, `instance Biggest List`, used as `apply(biggest, [3, 9,
+  2])` with `apply(f: List Int -> Int, ...)`, fails at emit with "internal error:
+  under-application of '__tc_Biggest_List_biggest' reached codegen (arity 3, got 1)". The eta
+  lambda `lowering.eta_from_evidence` builds omits the method's own hidden `Ord` dictionary. Same
+  on master. `TMethodRef`'s Evidence covers the class constraint only, not the method's own.
+- [ ] `P3` **An instance context on a variable the head does not bind panics lowering.**
+  `instance Mk Box where Eq b` passes check (`resolve.head_bound` drops the constraint). The
+  call `mk(Box(1))` compiles and runs; the bare method `ap(mk, Box(1))` stops in lowering with
+  "method `mk` of class `Mk` used as a value at L:C has evidence lowering cannot use (internal
+  error)", as on master. No caller can fill the slot, so the context is dead. Fix: reject it at
+  the instance declaration with a located message, and state the rule in spec §8.5 (*An
+  instance's context is needed too*), which says the context reaches only variables the head
+  binds but not that naming another is an error.
 - [ ] `P3` **A compound constraint with no instance for its head fails at codegen.** A caller
   that neither declares `where C (T a)` nor can build it (the class has no `T` instance) gets
   `under-application ... reached codegen` instead of a diagnostic: `infer.compound_head_tdict`
@@ -3112,9 +3117,11 @@ acting.
   seeded nor signature-checked. Its bare `b` in `instance Show2 (Box a) Int where ToString a` gets
   the `fn` remedy ("write that type out … add a `where`"), and with `b: Box a` the call fails as
   "No instance of Show2". The spec states neither limit. Fix: reject a multi-parameter class at its
-  declaration, or say in §8.5 what holds for one. A bare method of such a class passes check and
-  fails at emit with `__eta_unresolved_`; under `where Mk t u` it gets the ambiguity hint asking
-  for that `where`.
+  declaration, or say in §8.5 what holds for one. A bare method of such a class is rejected at
+  check ("no instance of `Conv` could be determined for `conv` used as a value: a class with more
+  than one parameter is not supported"); the call `show_bool(conv(1))` with only `instance Conv
+  Int String` compiles and traps at run time ("dispatched through an unresolved typeclass
+  dictionary"). Under `where Mk t u` a bare method gets the ambiguity hint asking for that `where`.
 - [ ] `P3` **A `where` headed by a type alias is keyed by the alias.** `type alias M a = Maybe
   a` with `fn f(y: M a, z: M a) -> Bool where Eq (M a) = y == z` is rejected ("add `where Eq
   a`"): `resolve.add_eff_keys` keys it `Eq_M` from the written head while the use site looks up

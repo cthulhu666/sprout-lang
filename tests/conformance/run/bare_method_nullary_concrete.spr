@@ -1,0 +1,22 @@
+module main
+
+# A nullary method in value position is a thunk (`() -> t`), so its eta-lambda takes
+# no parameters and calls the instance's impl with none. Two instances, because one
+# impl chosen for both would still pass at one type.
+
+class Blank t
+  fn blank() -> t
+
+instance Blank Int
+  fn blank() -> Int = 7
+
+instance Blank String
+  fn blank() -> String = "blk"
+
+fn run_int(th: () -> Int) -> Int = th()
+
+fn run_str(th: () -> String) -> String = th()
+
+fn main() -> Unit !{IO} = do
+  print(run_str(blank))
+  print(int_to_string(run_int(blank)))

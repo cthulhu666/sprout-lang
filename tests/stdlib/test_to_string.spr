@@ -15,8 +15,8 @@ fn apply_stringer(f: Int -> String, xs: List Int) -> List String =
   list_map(f, xs)
 
 # Regression: class method passed as value to a user-defined higher-order function in a
-# let-decl. If lowering's eta-expansion fails, the sentinel (__eta_unresolved_*) causes
-# a linker error rather than SIGBUS — ensuring compile-time detection.
+# let-decl. If lowering's eta-expansion fails, it stops with a located error rather
+# than a SIGBUS at run time — ensuring compile-time detection.
 let applied_via_ho = apply_stringer(to_string, [10, 20, 30])
 
 fn show_via_value_method(x: a) -> String where ToString a =

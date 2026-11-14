@@ -1,10 +1,10 @@
 import stdlib.test (check_eq, run_suite)
 
 # Eta-forwarding of a class method used in VALUE position inside a polymorphic constrained function.
-# This routes through lowering's eta-expansion path (try_eta_in_class / try_eta_forwarded_without_class):
+# This routes through lowering's eta-expansion path (eta_from_evidence):
 # `to_string` / `ordinal` here are not applied directly but passed as first-class functions, so the
-# lowering must reconstruct an eta-lambda that forwards the (hidden) dictionary slot. This is a
-# behavior guard for that lowering path (a refactor of those functions must keep these results).
+# lowering must build an eta-lambda that forwards the (hidden) dictionary slot. This is a
+# behavior guard for that lowering path (a refactor of it must keep these results).
 
 type Tri (..) deriving (Enum) = A | B | C
 

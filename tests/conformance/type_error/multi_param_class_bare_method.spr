@@ -1,0 +1,13 @@
+# A bare method of a class with more than one parameter. The instance exists, but
+# resolve keys its evidence on the first parameter alone and finds none, so the mention
+# is rejected where it is written.
+class Conv a b
+  fn conv(x: a) -> b
+
+instance Conv Int String
+  fn conv(x: Int) -> String = "int->string"
+
+fn apply(f: Int -> String, n: Int) -> String = f(n)
+
+fn main() -> Unit !{IO} = print(apply(conv, 1))
+#~^ ERROR
