@@ -7,7 +7,7 @@ happened; `spec-v0.md` is untouched, as planned.
 read (`spec-v0.md` §6 rule 4), and a pure right-hand side can still panic: `panic` is pure, Int
 `+ - *` and unary `-` panic on overflow, `/` panics on zero. Deleting the binding deleted the
 panic. It removed 0 nodes from real programs, so nothing was lost. The harness below now runs on
-`spec`; where this document says DLE, read it as history. `just dead-let-smoke` pins the behaviour.
+`spec`; where this document says DLE, read it as history. `just overflow-smoke` pins the behaviour (the `dead_let_*` cases).
 
 | milestone | outcome |
 |---|---|

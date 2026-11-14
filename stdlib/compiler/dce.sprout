@@ -3,9 +3,8 @@ import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
 
-# Declaration reachability — `elim_unreachable`. Drops whole declarations that the
-# entry point cannot reach, applied after typeclass lowering and before IR emission.
-# See the section at the bottom of this file.
+# Declaration reachability: `elim_unreachable` drops whole declarations that the entry
+# point cannot reach. It is applied after typeclass lowering and before IR emission.
 #
 # There is no dead-`let` elimination. A do-block `let` runs even when its name is
 # never read (docs/spec-v0.md §6 rule 4), and a pure right-hand side can still

@@ -1,6 +1,6 @@
 module main
 
-# Same as panic_discarded.spr, with a named binding that is never read.
+# Same as dead_let_panic_discarded.spr, with a named binding that is never read.
 
 fn require(ok: Bool, msg: String) -> Unit =
   if ok then () else panic(msg)

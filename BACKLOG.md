@@ -1250,11 +1250,11 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   with one shape per compiler phase, as "The golden corpus covers the compiler's FRONT END only"
   asks. See also "`just ir-golden-diff` truncates each file's diff at 40 lines".
 - [ ] `P3` **Test recipes copy the same shell.** 29 `clang` lines compile `runtime/*.c` from source
-  at link time, and the parallel fan-out loop is pasted 5 times. `overflow-smoke` recompiles the
+  at link time, and the parallel fan-out loop is pasted 5 times. Most smokes recompile the
   runtime per fixture; `test-conformance-run` is serial (see "`test-gates` is the slowest CI
-  job"). The `div-by-zero`, `negative-shift`, `overflow`, `dead-let` and `closure-arity` smokes
-  all do emit→link→run→expect a nonzero exit and a stderr text. Fix: fan-out and replay helpers
-  in `scripts/test_lib.sh`, cached runtime objects under "Compile caching for the stdlib test
+  job"). The `div-by-zero`, `negative-shift`, `overflow` and `closure-arity` smokes all do
+  emit→link→run→expect a nonzero exit and a stderr text. Fix: fan-out and replay helpers in
+  `scripts/test_lib.sh`, cached runtime objects under "Compile caching for the stdlib test
   runner", and one `tests/conformance/runtime_panic/` dir with one runner for the panic smokes.
 - [ ] `P3` **20 suites write fixed `/tmp/sprout_*` paths** (e.g. `tests/stdlib/test_fs.spr`), so two
   worktrees running `just test` at once can collide, and stale files stay behind. Fix: the runner
