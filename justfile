@@ -4448,6 +4448,81 @@ gc-gen-check: bootstrap-from-seed
   (( failed == 0 )) || exit 1
   echo "==> gc-gen-check ✓"
 
+# The allocation-trace recorder (-DSPROUT_GC_ALLOCTRACE, docs/compiler-internals.md): runs a few
+# programs with the trace on and checks each trace with `bench/gc_place/replay --check` (every free
+# names a live allocation, allocs - frees equals heap_after at every collection end, vector tail
+# and buffer records are well formed). Each trace must end with the atexit collection's end
+# record, whose cycle is the run's last, and the program's stdout must be what it is without the
+# flag. Covers minors off, minors on, collect-every-allocation, per-region lists and large objects.
+[group('test')]
+gc-alloctrace-check: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -uo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_alloctrace_XXXXXX); trap 'rm -rf "$TMPD"' EXIT
+  mkdir -p "$TMPD/rtobj"
+  clang bench/gc_place/replay.c -O2 -Wall -Wextra -o "$TMPD/replay" 2>"$TMPD/rt.err" \
+    || { echo "gc-alloctrace-check: replay.c failed to build" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
+  for rtsrc in {{runtime_src}}; do
+    clang -c "$rtsrc" -O2 -DSPROUT_GC_ALLOCTRACE {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
+      || { echo "gc-alloctrace-check: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
+  done
+  build_one() { # build_one <src> <name>
+    "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$1" > "$TMPD/$2.ll" 2>"$TMPD/$2.err" \
+      || { echo "gc-alloctrace-check: compile failed: $1" >&2; cat "$TMPD/$2.err" >&2; return 1; }
+    clang "$TMPD/$2.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$2.bin" 2>"$TMPD/$2.err" \
+      || { echo "gc-alloctrace-check: link failed: $1" >&2; cat "$TMPD/$2.err" >&2; return 1; }
+  }
+  SUMMARY=""
+  field() { grep -o "$1=[0-9]*" <<<"$SUMMARY" | head -1 | cut -d= -f2; }
+  # run_case <name> <label> [ENV=V ...]: sets SUMMARY, returns nonzero (after saying why) on failure.
+  run_case() {
+    local name="$1" label="$2" tag="$1.$2" spat want last
+    shift 2
+    spat="$TMPD/$tag.spat"
+    env "$@" SPROUT_DEBUG_GC=1 SPROUT_GC_ALLOCTRACE="$spat" "$TMPD/$name.bin" > "$TMPD/$tag.out" 2>"$TMPD/$tag.gc" \
+      || { echo "gc-alloctrace-check: $tag: program failed" >&2; tail -5 "$TMPD/$tag.gc" >&2; return 1; }
+    want="tests/gc_gen/$name.out"
+    if [ -f "$want" ]; then
+      cmp -s "$want" "$TMPD/$tag.out" || { echo "gc-alloctrace-check: $tag: stdout differs from $want" >&2; return 1; }
+    else
+      grep -q "SUITE PASSED" "$TMPD/$tag.out" || { echo "gc-alloctrace-check: $tag: SUITE PASSED missing" >&2; return 1; }
+    fi
+    SUMMARY=$("$TMPD/replay" --check "$spat" 2>&1) \
+      || { echo "gc-alloctrace-check: $tag: $SUMMARY" >&2; return 1; }
+    last=$(grep '^\[sprout gc\] cycle=' "$TMPD/$tag.gc" | tail -1)
+    [[ "$last" == *"reason=atexit"* && "$last" == *" cycle=$(field last_cycle) "* && "$SUMMARY" == *"ends_with=E" ]] \
+      || { echo "gc-alloctrace-check: $tag: trace does not end with the atexit collection (last log line: $last; $SUMMARY)" >&2; return 1; }
+    echo "  $tag: $SUMMARY"
+  }
+  failed=0
+  build_one tests/gc_gen/inline_tail_reuse.spr inline_tail_reuse || exit 1
+  for case in "default|A=1" "minor0|SPROUT_GC_MINOR=0" "stress|SPROUT_GC_STRESS=1" \
+              "stress_rl|SPROUT_GC_STRESS=1 SPROUT_GC_REGION_LISTS=1"; do
+    # shellcheck disable=SC2086
+    run_case inline_tail_reuse "${case%%|*}" ${case#*|} || { failed=1; continue; }
+    # This program grows inline vectors out of line: T and B records must appear.
+    (( $(field tails) > 0 && $(field vec_out) > 0 )) \
+      || { echo "gc-alloctrace-check: inline_tail_reuse.${case%%|*}: no T/B records, the inline-tail path was not traced" >&2; failed=1; }
+  done
+  build_one tests/gc_gen/vector_push.spr vector_push || exit 1
+  run_case vector_push stress SPROUT_GC_STRESS=1 || failed=1
+  build_one tests/gc_gen/region_empty_minor.spr region_empty_minor || exit 1
+  run_case region_empty_minor stress SPROUT_GC_STRESS=1 || failed=1
+  # Minors and majors without STRESS, and objects past the large-slot threshold.
+  build_one tests/stdlib/test_gc_large_object_arena.spr test_gc_large_object_arena || exit 1
+  for case in "default|A=1" "minor0|SPROUT_GC_MINOR=0" "stress|SPROUT_GC_STRESS=1"; do
+    # shellcheck disable=SC2086
+    run_case test_gc_large_object_arena "${case%%|*}" ${case#*|} || { failed=1; continue; }
+    (( $(field large) > 0 )) \
+      || { echo "gc-alloctrace-check: test_gc_large_object_arena.${case%%|*}: no large allocation in the trace" >&2; failed=1; }
+    if [ "${case%%|*}" = default ]; then
+      (( $(field major) > 0 && $(field minor_young) > 0 )) \
+        || { echo "gc-alloctrace-check: test_gc_large_object_arena.default: expected both major and young-only minor collections" >&2; failed=1; }
+    fi
+  done
+  (( failed == 0 )) || exit 1
+  echo "==> gc-alloctrace-check ✓"
+
 # Validate the sweep-walk counter (`walked=` on every SPROUT_DEBUG_GC cycle line):
 # slots the sweep stepped over, live and FREE included. Divided by `swept` it is the
 # work spent per object reclaimed, which a sweep's cost tracks and no trigger reads.
@@ -4746,6 +4821,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "test-gc-safety-check|test-gc-safety-check"
     "freelist-verify|test-freelist-verify"
     "gc-ageprof|gc-ageprof-check"
+    "gc-alloctrace|gc-alloctrace-check"
     "gc-adapt|gc-adapt-check"
     "gc-gen|gc-gen-check"
     "gc-arena|gc-arena-check"

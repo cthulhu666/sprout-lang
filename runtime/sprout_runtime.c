@@ -635,8 +635,15 @@ static void sprout_gc_livelock_maybe_enable(void) {
   }
 }
 
+#if defined(SPROUT_GC_ALLOCTRACE)
+static void sprout_at_register_flush(void);
+#endif
+
 static void sprout_gc_maybe_register(void) {
   if (g_gc_collect_registered) return;
+#if defined(SPROUT_GC_ALLOCTRACE)
+  sprout_at_register_flush();   /* atexit is LIFO: the flush must run after the collection */
+#endif
   atexit(sprout_gc_collect);
   g_gc_collect_registered = 1;
 }
@@ -1207,6 +1214,9 @@ typedef struct {
   long long young_count;  /* set bits */
   long long old_count;    /* live objects that kept their colour bit through the last sweep */
   long long marked_young; /* objects this collection's mark newly reached; in a minor all young */
+#if defined(SPROUT_GC_ALLOCTRACE)
+  uint64_t* tr_ids;       /* trace id per slot granule, indexed like slotmap; one entry if large */
+#endif
 } SproutRegion;
 
 /* Slot index <-> slotmap bit.  One spelling: the sweep's HDRCHECK walk has to
@@ -1678,6 +1688,10 @@ static void region_table_remove(size_t i) {
     }
 }
 
+#if defined(SPROUT_GC_ALLOCTRACE)
+static int sprout_at_on(void);
+#endif
+
 /* Open a fresh 1-MiB region and append it to the table. */
 static SproutRegion* open_new_region(void) {
   /* Prefer an arena chunk so lookups into this region take the O(1) path; fall
@@ -1688,12 +1702,18 @@ static SproutRegion* open_new_region(void) {
   uint8_t* slotmap = (uint8_t*)calloc(SPROUT_SLOTMAP_BYTES, 1);
   uint64_t* youngmap = (uint64_t*)calloc(SPROUT_SLOTMAP_BYTES, 1);
   SproutRegionFl* fl = g_gen.region_lists ? (SproutRegionFl*)calloc(1, sizeof(SproutRegionFl)) : NULL;
+#if defined(SPROUT_GC_ALLOCTRACE)
+  uint64_t* tr_ids = sprout_at_on() ? (uint64_t*)calloc(SPROUT_SLOTS_PER_REGION, sizeof(uint64_t)) : NULL;
+#endif
   /* base may be an arena chunk, which must NOT be passed to free(). */
   if (slotmap == NULL || youngmap == NULL || (g_gen.region_lists && fl == NULL)) {
     if (arena_contains(base)) arena_chunk_release(base); else free(base);
     free(slotmap);
     free(youngmap);
     free(fl);
+#if defined(SPROUT_GC_ALLOCTRACE)
+    free(tr_ids);
+#endif
     sprout_fail("open_new_region: out of memory for slotmap");
   }
   SproutRegion r;
@@ -1710,6 +1730,9 @@ static SproutRegion* open_new_region(void) {
   r.young_count = 0;
   r.old_count = 0;
   r.marked_young = 0;
+#if defined(SPROUT_GC_ALLOCTRACE)
+  r.tr_ids = tr_ids;
+#endif
   region_table_insert(r);
   /* Binary search for the entry we just inserted (table may have realloc'd). */
   size_t lo = 0, hi = g_region_count;
@@ -1746,6 +1769,9 @@ static void region_release_ordinary(size_t ri) {
   free(r->slotmap);
   free(r->youngmap);
   free(r->fl);
+#if defined(SPROUT_GC_ALLOCTRACE)
+  free(r->tr_ids);
+#endif
   region_table_remove(ri);
 }
 
@@ -1871,6 +1897,114 @@ __attribute__((destructor)) static void sprout_gc_profile_dump(void) {
 #  define SPROUT_PROF_COLD(stmt) ((void)0)
 #endif
 
+/* ── Allocation trace (opt-in): -DSPROUT_GC_ALLOCTRACE, then SPROUT_GC_ALLOCTRACE=<path> ──
+ * Records every managed allocation and every object a collection frees, for offline replay of
+ * other placement policies (docs/gc-stage2-v0.md §5.7).  The format is described at the top of
+ * bench/gc_place/replay.c; `just gc-alloctrace-check` validates it.  An object's id is the count
+ * of A records before its own; SproutRegion.tr_ids maps a slot to it.  Without the compile flag
+ * none of this exists; with it and no env var each hook returns at sprout_at_on(). */
+#if defined(SPROUT_GC_ALLOCTRACE)
+#define SPROUT_AT_BUF (1u << 20)
+static FILE* g_at_file;
+static int g_at_state;                 /* 0 undecided, 1 recording, -1 off */
+static int g_at_flush_registered;
+static unsigned char* g_at_buf;
+static size_t g_at_len;
+static uint64_t g_at_next_id;
+
+static void sprout_at_drain(void) {
+  if (g_at_file != NULL && g_at_len > 0) fwrite(g_at_buf, 1, g_at_len, g_at_file);
+  g_at_len = 0;
+}
+
+static void sprout_at_flush(void) {
+  sprout_at_drain();
+  if (g_at_file != NULL) fclose(g_at_file);
+  g_at_file = NULL;
+  g_at_state = -1;
+}
+
+static void sprout_at_register_flush(void) {
+  if (g_at_flush_registered) return;
+  g_at_flush_registered = 1;
+  atexit(sprout_at_flush);
+}
+
+static int sprout_at_on(void) {
+  if (g_at_state == 0) {
+    const char* path = getenv("SPROUT_GC_ALLOCTRACE");
+    g_at_state = -1;
+    if (path != NULL && path[0] != '\0') {
+      g_at_file = fopen(path, "wb");
+      g_at_buf = (unsigned char*)malloc(SPROUT_AT_BUF);
+      if (g_at_file == NULL || g_at_buf == NULL) sprout_fail("SPROUT_GC_ALLOCTRACE: cannot open the trace file");
+      sprout_at_register_flush();
+      memcpy(g_at_buf, "SPAT1\n", 6);
+      g_at_len = 6;
+      g_at_state = 1;
+    }
+  }
+  return g_at_state > 0;
+}
+
+/* One record: the tag byte, then n unsigned LEB128 varints. */
+static void sprout_at_emit(char tag, const uint64_t* v, int n) {
+  if (g_at_len + 1 + 10 * (size_t)n > SPROUT_AT_BUF) sprout_at_drain();
+  g_at_buf[g_at_len++] = (unsigned char)tag;
+  for (int i = 0; i < n; i++) {
+    uint64_t x = v[i];
+    while (x >= 0x80) { g_at_buf[g_at_len++] = (unsigned char)(x | 0x80); x >>= 7; }
+    g_at_buf[g_at_len++] = (unsigned char)x;
+  }
+}
+
+static uint64_t* sprout_at_slot_id(void* payload) {
+  SproutRegion* r = region_find(payload);
+  if (r == NULL || r->tr_ids == NULL) sprout_fail("alloctrace: object is not in a traced region");
+  return r->is_large ? &r->tr_ids[0] : &r->tr_ids[(size_t)((char*)payload - 8 - r->base) / SPROUT_SLOT_GRAN];
+}
+
+static uint64_t sprout_at_alloc(SproutHeapKind kind, size_t slot_bytes) {
+  uint64_t v[2] = { (uint64_t)kind, (uint64_t)slot_bytes };
+  sprout_at_emit('A', v, 2);
+  return g_at_next_id++;
+}
+
+static void sprout_at_free(void* payload) {
+  if (!sprout_at_on()) return;
+  uint64_t id = *sprout_at_slot_id(payload);
+  sprout_at_emit('F', &id, 1);
+}
+
+static void sprout_at_tail(void* payload, size_t rest_bytes) {
+  if (!sprout_at_on()) return;
+  uint64_t v[2] = { *sprout_at_slot_id(payload), (uint64_t)rest_bytes };
+  sprout_at_emit('T', v, 2);
+}
+
+static void sprout_at_vec_out(void* payload) {
+  if (!sprout_at_on()) return;
+  uint64_t id = *sprout_at_slot_id(payload);
+  sprout_at_emit('B', &id, 1);
+}
+
+static void sprout_at_gc_start(long long cycle) {
+  if (!sprout_at_on()) return;
+  uint64_t c = (uint64_t)cycle;
+  sprout_at_emit('G', &c, 1);
+}
+
+/* kind: 0 minors off, 1 major, 2 minor with the young-only sweep, 3 minor with the full sweep. */
+static void sprout_at_gc_end(long long cycle, int kind) {
+  if (!sprout_at_on()) return;
+  uint64_t large = 0;
+  for (size_t i = 0; i < g_region_count; i++) large += (uint64_t)g_regions[i].is_large;
+  uint64_t v[6] = { (uint64_t)cycle, (uint64_t)kind, (uint64_t)g_managed_heap_count,
+                    (uint64_t)g_gc_freelist_len, (uint64_t)g_region_count - large, large };
+  sprout_at_emit('E', v, 6);
+}
+#endif
+
 /* Allocate one heap slot from the region arena. Selects from per-class freelist,
  * bump-allocates in the current open region, or opens a new region. Large objects
  * (slot_bytes > SPROUT_LARGE_THRESHOLD) get a dedicated malloc block.
@@ -1880,6 +2014,10 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
                                    size_t payload_bytes, const char* ctx) {
   size_t needed_slot = round16(8 + payload_bytes);
   if (g_debug_alloc_enabled) g_debug_alloc_arena_bytes += (long long)needed_slot;
+#if defined(SPROUT_GC_ALLOCTRACE)
+  const int tr_on = sprout_at_on();
+  const uint64_t tr_id = tr_on ? sprout_at_alloc(kind, needed_slot) : 0;
+#endif
   if (SPROUT_SLOT_IS_LARGE(needed_slot)) {
     /* Large object path: dedicated malloc block. */
     char* block = (char*)malloc(needed_slot);
@@ -1899,6 +2037,14 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
     r.young_count = g_gen.on ? 1 : 0;
     r.old_count = 0;
     r.marked_young = 0;
+#if defined(SPROUT_GC_ALLOCTRACE)
+    r.tr_ids = NULL;
+    if (tr_on) {
+      r.tr_ids = (uint64_t*)malloc(sizeof(uint64_t));
+      if (r.tr_ids == NULL) sprout_fail(ctx);
+      r.tr_ids[0] = tr_id;
+    }
+#endif
     region_table_insert(r);
     g_managed_heap_count++;
     g_managed_alloc_since_gc++;
@@ -1922,6 +2068,9 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
       youngmap_set(fr, (size_t)((char*)payload - 8 - fr->base) / SPROUT_SLOT_GRAN);
       fr->young_count++;
     }
+#if defined(SPROUT_GC_ALLOCTRACE)
+    if (tr_on) *sprout_at_slot_id(payload) = tr_id;
+#endif
     g_managed_heap_count++;
     g_managed_alloc_since_gc++;
     if (g_gc_stress == 1 || sprout_gc_lineage_on()) sprout_gc_trace_alloc(payload);
@@ -1955,6 +2104,9 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
     youngmap_set(r, off / SPROUT_SLOT_GRAN);
     r->young_count++;
   }
+#if defined(SPROUT_GC_ALLOCTRACE)
+  if (tr_on) r->tr_ids[off / SPROUT_SLOT_GRAN] = tr_id;
+#endif
   g_managed_heap_count++;
   g_managed_alloc_since_gc++;
   if (g_gc_stress == 1 || sprout_gc_lineage_on()) sprout_gc_trace_alloc(slot_base + 8);
@@ -2491,7 +2643,12 @@ static VectorVal* sprout_alloc_vector_sized(size_t count, const char* ctx) {
   out->data = NULL;
   if (count == 0) { /* nothing to point at */ }
   else if (inline_count == count) out->data = vec_inline_data(out);
-  else out->data = sprout_alloc_vector_data(count, ctx);
+  else {
+    out->data = sprout_alloc_vector_data(count, ctx);
+#if defined(SPROUT_GC_ALLOCTRACE)
+    sprout_at_vec_out(out);
+#endif
+  }
   /* Counts ALLOCATIONS, not vectors: one for an inline vector, two for an
    * out-of-line one (the second in sprout_alloc_vector_data).  It was 2 for
    * every vector before inlining, so figures from either side of that do not
@@ -2569,6 +2726,9 @@ static void sprout_vec_release_inline_tail(VectorVal* v) {
   uint64_t free_hdr = (uint64_t)SPROUT_HEAP_FREE | ((uint64_t)rest << 14);
   memcpy(tail, &free_hdr, 8);
   slotmap_set(r, (size_t)(tail - r->base) / SPROUT_SLOT_GRAN);
+#if defined(SPROUT_GC_ALLOCTRACE)
+  sprout_at_tail(v, rest);
+#endif
   void* payload = tail + 8;
   /* The lineage anchor every other freelist push has (the sweep calls it just
    * before listing the slot).  Without it `just gc-trace` shows the next object
@@ -3542,6 +3702,9 @@ static inline int sprout_gc_free_dead_slot(char* slot, uint64_t h, SproutHeapKin
                                            unsigned long long aux, size_t ssize,
                                            int lineage_on, int hdrcheck_on) {
   void* payload = slot + 8;
+#if defined(SPROUT_GC_ALLOCTRACE)
+  sprout_at_free(payload);   /* both returns below free the object */
+#endif
   sprout_gc_invalidate_singleton(h, payload);
   if (hdrcheck_on && kind == SPROUT_HEAP_CSTR) {
     size_t actual_len = strlen((const char*)payload);
@@ -3605,6 +3768,11 @@ static inline int sprout_gc_sweep_large(SproutRegion* r, uint64_t clear, unsigne
     if (sprout_hdr_age(h) == 0) g_ap_freed_age0++;
   }
   SproutHeapKind kind = sprout_hdr_kind(h);
+#if defined(SPROUT_GC_ALLOCTRACE)
+  sprout_at_free(payload);
+  free(r->tr_ids);
+  r->tr_ids = NULL;
+#endif
   sprout_gc_invalidate_singleton(h, payload);
   if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
   sprout_release_payload_extras(payload, kind);
@@ -4101,6 +4269,9 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   long long swept_before = g_debug_gc_swept;
   long long walked_before = g_debug_gc_walked;
   g_gc_cycle_count++;
+#if defined(SPROUT_GC_ALLOCTRACE)
+  sprout_at_gc_start(g_gc_cycle_count);
+#endif
   SPROUT_PROF_COLD(g_prof_cycles++);
   SPROUT_PROF_COLD(g_prof_mark_slots += (unsigned long long)root_count);
   g_gc_marked_count = 0;
@@ -4136,6 +4307,9 @@ static void sprout_gc_collect_with_reason(const char* reason) {
     fflush(stderr);
     abort();
   }
+#if defined(SPROUT_GC_ALLOCTRACE)
+  sprout_at_gc_end(g_gc_cycle_count, !gen_on ? 0 : !minor ? 1 : young_only ? 2 : 3);
+#endif
   long long finished_us = sprout_now_micros();
   long long elapsed_us = 0;
   if (finished_us >= started_us) elapsed_us = finished_us - started_us;
@@ -10319,6 +10493,9 @@ long long vector_push(long long vec, long long value) {
       long long* moved = sprout_alloc_vector_data((size_t)new_cap, "vector_push: out of memory");
       if (v->len > 0) memcpy(moved, v->data, (size_t)v->len * sizeof(long long));
       v->data = moved;
+#if defined(SPROUT_GC_ALLOCTRACE)
+      sprout_at_vec_out(v);
+#endif
       /* Not zeroed, unlike vector_truncate's vacated slots, and the difference
        * is which object owns them.  Truncate's stay inside a LIVE vector as
        * spare capacity, where a future scanner sizing by ->cap would read them;
@@ -10329,7 +10506,13 @@ long long vector_push(long long vec, long long value) {
        * decline to buy. */
       sprout_vec_release_inline_tail(v);
     } else {
+#if defined(SPROUT_GC_ALLOCTRACE)
+      const int tr_first_buffer = v->data == NULL;
+#endif
       v->data = sprout_realloc_vector_data(v->data, (size_t)new_cap, "vector_push: out of memory");
+#if defined(SPROUT_GC_ALLOCTRACE)
+      if (tr_first_buffer) sprout_at_vec_out(v);
+#endif
     }
     v->cap = new_cap;
   }
