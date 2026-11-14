@@ -1,0 +1,9 @@
+module main
+
+# `borrow_field_holds_var.spr` with its error's hint applied.
+
+type linear Box a = (v: Maybe a, n: Int)
+
+fn steal(b: consuming Box a) -> Maybe a where linear a = b.v
+
+fn main() -> Unit !{IO} = print("done")

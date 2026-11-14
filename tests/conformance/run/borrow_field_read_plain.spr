@@ -1,0 +1,30 @@
+module main
+
+import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
+
+# A borrowed linear record still yields its plain fields: `Int`, `Maybe Int`,
+# `String`, and a field whose only linear-typed argument sits at a phantom
+# position (`Tag Res` stores just an Int). Only the field holding a linear
+# value (`v`) is off limits.
+
+type linear Res = | Res Int
+type Tag s = | Tag Int
+
+type linear Holder = (v: Maybe (LinVec Int), n: Int, m: Maybe Int, s: String, t: Tag Res)
+
+fn tag_value(t: Tag Res) -> Int = match t with | Tag n -> n
+
+fn peek(h: borrowing Holder) -> String =
+  to_string(h.n) ++ " " ++ to_string(h.m) ++ " " ++ h.s ++ " " ++ to_string(tag_value(h.t))
+
+fn release(h: consuming Holder) -> Unit =
+  match h.v with
+  | Just v -> linvec.drop(v)
+  | Nothing -> ()
+
+fn main() -> Unit !{IO} =
+  do
+    let h = Holder(v = Just(linvec.from_list([1, 2, 3])), n = 1, m = Just(2), s = "x", t = Tag(7))
+    print(peek(h))
+    release(h)

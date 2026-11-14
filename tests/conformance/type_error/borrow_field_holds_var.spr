@@ -1,0 +1,10 @@
+module main
+
+# Same as borrow_field_holds_maybe, with a field that holds a type variable
+# bound by `where linear`: `Maybe a` holds a linear value for every such `a`.
+
+type linear Box a = (v: Maybe a, n: Int)
+
+fn steal(b: borrowing Box a) -> Maybe a where linear a = b.v
+
+fn main() -> Unit !{IO} = print("done")

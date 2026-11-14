@@ -1,0 +1,12 @@
+module main
+
+import stdlib.task (Task)
+
+# Same as borrow_field_holds_maybe, with a field holding a `Task`: copying a
+# `Maybe (Task Int)` out of a borrow gives a second owner of the task.
+
+type linear Pending = (t: Maybe (Task Int), n: Int)
+
+fn steal(p: borrowing Pending) -> Maybe (Task Int) = p.t
+
+fn main() -> Unit !{IO} = print("done")
