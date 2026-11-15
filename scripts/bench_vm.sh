@@ -26,7 +26,7 @@ ARCHIVE_PATHS=(bootstrap/compile_driver.ll runtime stdlib scripts/check_clang_cp
 GC_ARCHIVE_PATHS=("${ARCHIVE_PATHS[@]}" scripts/link_whole_program.sh scripts/compile_native.sh testsupport
   tests/stdlib/test_ir_codegen_match.spr examples/nqueens.sprout examples/astar.sprout
   examples/digit_recognizer bench/gc_minor bench/gc_roots bench/http_log_middleware
-  bench/math_transcendental)
+  bench/math_transcendental bench/gc_trigger bench/gc_place)
 
 usage() {
   echo "usage: scripts/bench_vm.sh <base-ref> <head-ref>" >&2
