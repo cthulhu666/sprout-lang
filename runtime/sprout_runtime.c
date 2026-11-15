@@ -1728,6 +1728,24 @@ static size_t slot_bytes(SproutHeapKind kind, unsigned long long aux) {
   return round16(8 + payload);
 }
 
+/* SPROUT_GC_HOLES allocation (docs/gc-stage2-v0.md §5.7).  Two cursors walk the holes, the zero
+ * runs of `occ`, forward only: `g_hole_cur` for ordinary requests, `g_hole_ovf` for a request over
+ * 256 B that misses the current hole.  A cursor is (region index, granule).  It moves with its
+ * region when the table shifts, as the class cursors above do, and each collection resets both to
+ * region 0.  Each request reads `occ` afresh, so the two never hand out the same granules.
+ * `g_hole_tails[c]` heads the freed inline tails of exact class c (SPROUT_GC_HOLES only). */
+typedef struct { size_t ri; size_t gran; } SproutHoleCursor;
+static SproutHoleCursor g_hole_cur, g_hole_ovf;
+static void*            g_hole_tails[SPROUT_FREELIST_CLASSES];
+
+static inline void hole_cursor_insert(SproutHoleCursor* c, size_t lo) {
+  if (c->ri >= lo) c->ri++;
+}
+static inline void hole_cursor_remove(SproutHoleCursor* c, size_t i) {
+  if (c->ri > i) c->ri--;
+  else if (c->ri == i) c->gran = 0;   /* now on the next region, which it has not walked */
+}
+
 /* Insert a new region into the table, keeping it sorted by base address. */
 static void region_table_insert(SproutRegion r) {
   if (g_region_count >= g_region_cap) {
@@ -1751,6 +1769,10 @@ static void region_table_insert(SproutRegion r) {
   if (g_gen.region_lists)
     for (size_t c = 1; c < SPROUT_FREELIST_CLASSES; c++)
       if (g_fl_cursor[c] >= lo) g_fl_cursor[c]++;
+  if (g_gen.holes) {
+    hole_cursor_insert(&g_hole_cur, lo);
+    hole_cursor_insert(&g_hole_ovf, lo);
+  }
   /* Widen the global bounds to cover this region.  Single choke point: both the
    * normal and large-object paths reach the table through here. */
   if (r.base != NULL) {
@@ -1777,6 +1799,10 @@ static void region_table_remove(size_t i) {
       if (g_fl_cursor[c] > i) g_fl_cursor[c]--;
       else if (g_fl_cursor[c] == i) g_fl_cur[c] = fl_block_at(i);
     }
+  if (g_gen.holes) {
+    hole_cursor_remove(&g_hole_cur, i);
+    hole_cursor_remove(&g_hole_ovf, i);
+  }
 }
 
 #if defined(SPROUT_GC_ALLOCTRACE)
@@ -1946,6 +1972,115 @@ static inline SproutRegion* region_find(void* p) {
    * (every scalar in every root slot) and it used to run the full search. */
   if ((uintptr_t)p - g_heap_lo >= g_heap_span) return NULL;
   return region_find_slow((uintptr_t)p);
+}
+
+/* ── SPROUT_GC_HOLES allocation: finding holes ────────────────────────────────────────────────
+ * Holes are found a word at a time from the inverted map.  SPROUT_OCC_NONE is "no bit". */
+#define SPROUT_OCC_WORDS (SPROUT_SLOTMAP_BYTES / 8)
+#define SPROUT_OCC_NONE  SPROUT_SLOTS_PER_REGION
+
+/* The first clear bit of `m` at or after bit g. */
+static inline size_t occ_next_clear(const uint64_t* m, size_t g) {
+  size_t w = g / 64;
+  if (w >= SPROUT_OCC_WORDS) return SPROUT_OCC_NONE;
+  uint64_t v = ~m[w] & (~(uint64_t)0 << (g % 64));
+  while (v == 0) {
+    if (++w == SPROUT_OCC_WORDS) return SPROUT_OCC_NONE;
+    v = ~m[w];
+  }
+  return w * 64 + (size_t)__builtin_ctzll(v);
+}
+
+/* The first set bit of `m` at or after bit g; a run that reaches the region's end ends there. */
+static inline size_t occ_next_set(const uint64_t* m, size_t g) {
+  size_t w = g / 64;
+  if (w >= SPROUT_OCC_WORDS) return SPROUT_OCC_NONE;
+  uint64_t v = m[w] & (~(uint64_t)0 << (g % 64));
+  while (v == 0) {
+    if (++w == SPROUT_OCC_WORDS) return SPROUT_OCC_NONE;
+    v = m[w];
+  }
+  return w * 64 + (size_t)__builtin_ctzll(v);
+}
+
+/* Are the n bits from bit g clear, all in one word?  The common case: g is where the last request
+ * ended.  0 means "not known to be", and the caller scans. */
+static inline int occ_clear_in_word(const uint64_t* m, size_t g, size_t n) {
+  const size_t b = g % 64;
+  if (g >= SPROUT_OCC_NONE || b + n > 64) return 0;
+  return ((m[g / 64] >> b) & (n == 64 ? ~(uint64_t)0 : (((uint64_t)1 << n) - 1))) == 0;
+}
+
+/* The start of the first run of at least n clear bits at or after bit g, else SPROUT_OCC_NONE. */
+static size_t hole_find(const uint64_t* m, size_t g, size_t n) {
+  if (occ_clear_in_word(m, g, n)) return g;
+  while (g + n <= SPROUT_OCC_NONE) {
+    size_t p = occ_next_clear(m, g);
+    if (p + n > SPROUT_OCC_NONE) break;
+    size_t e = occ_next_set(m, p);
+    if (e - p >= n) return p;
+    g = e;
+  }
+  return SPROUT_OCC_NONE;
+}
+
+/* Does the hole at bit g hold n granules? */
+static inline int hole_fits_at(const uint64_t* m, size_t g, size_t n) {
+  if (occ_clear_in_word(m, g, n)) return 1;
+  if (g + n > SPROUT_OCC_NONE) return 0;
+  size_t p = occ_next_clear(m, g);
+  return p == g && occ_next_set(m, g) - g >= n;
+}
+
+/* The next hole of n granules for cursor c, opening a region past the last one.  A region opened
+ * for c takes c wherever the table put it, since arena chunks are reused last-in first-out and
+ * its index may sit below c's.  Returns the slot start; *out is its region. */
+static char* sprout_holes_take(SproutHoleCursor* c, size_t n, SproutRegion** out) {
+  for (;;) {
+    while (c->ri < g_region_count) {
+      SproutRegion* r = &g_regions[c->ri];
+      if (!r->is_large) {
+        size_t p = hole_find(r->occ, c->gran, n);
+        if (p != SPROUT_OCC_NONE) {
+          c->gran = p + n;
+          *out = r;
+          return r->base + p * SPROUT_SLOT_GRAN;
+        }
+      }
+      c->ri++;
+      c->gran = 0;
+    }
+    SproutRegion* nr = open_new_region();
+    c->ri = (size_t)(nr - g_regions);
+    c->gran = 0;
+  }
+}
+
+/* One slot of `slot` bytes (class cls) under SPROUT_GC_HOLES: a freed inline tail of exactly that
+ * class, else the main cursor's current hole, else the overflow cursor for a request over 256 B,
+ * else the main cursor's next hole.  Sets `occ` over the extent and raises `bump` to cover it. */
+static char* sprout_holes_slot(size_t slot, size_t cls, SproutRegion** out) {
+  char* s;
+  SproutRegion* r;
+  void* tail = g_hole_tails[cls];
+  if (tail != NULL) {
+    memcpy(&g_hole_tails[cls], tail, sizeof(void*));
+    s = (char*)tail;
+    r = region_find(s);
+  } else {
+    const size_t n = slot / SPROUT_SLOT_GRAN;
+    SproutHoleCursor* c = &g_hole_cur;
+    if (n > 16) {
+      const SproutRegion* cr = c->ri < g_region_count ? &g_regions[c->ri] : NULL;
+      if (cr == NULL || cr->is_large || !hole_fits_at(cr->occ, c->gran, n)) c = &g_hole_ovf;
+    }
+    s = sprout_holes_take(c, n, &r);
+  }
+  const size_t off = (size_t)(s - r->base);
+  bitmap_set_range(r->occ, off / SPROUT_SLOT_GRAN, slot / SPROUT_SLOT_GRAN);
+  if (off + slot > r->bump) r->bump = off + slot;
+  *out = r;
+  return s;
 }
 
 /* ── GC profiling instrumentation (opt-in, off by default) ────────────────
@@ -2199,32 +2334,37 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
     if (g_gc_stress == 1 || sprout_gc_lineage_on()) sprout_gc_trace_alloc(payload);
     return payload;
   }
-  /* Bump allocate: try the hinted open region, else scan, else open one. */
+  /* Bump allocate: try the hinted open region, else scan, else open one.  Under SPROUT_GC_HOLES
+     the slot comes from a freed tail or a hole instead, and sprout_holes_slot sets `occ`. */
   SproutRegion* r = NULL;
-  if (g_open_region_hint < g_region_count) {
-    SproutRegion* cand = &g_regions[g_open_region_hint];
-    if (!cand->is_large && cand->bump + needed_slot <= cand->cap) r = cand;
-  }
-  if (r == NULL) {
-    for (size_t i = g_region_count; i > 0; i--) {
-      SproutRegion* cand = &g_regions[i - 1];
-      if (!cand->is_large && cand->bump + needed_slot <= cand->cap) {
-        r = cand;
-        g_open_region_hint = i - 1;
-        break;
+  size_t off;
+  if (g_gen.holes) {
+    char* hs = sprout_holes_slot(needed_slot, cls, &r);
+    off = (size_t)(hs - r->base);
+  } else {
+    if (g_open_region_hint < g_region_count) {
+      SproutRegion* cand = &g_regions[g_open_region_hint];
+      if (!cand->is_large && cand->bump + needed_slot <= cand->cap) r = cand;
+    }
+    if (r == NULL) {
+      for (size_t i = g_region_count; i > 0; i--) {
+        SproutRegion* cand = &g_regions[i - 1];
+        if (!cand->is_large && cand->bump + needed_slot <= cand->cap) {
+          r = cand;
+          g_open_region_hint = i - 1;
+          break;
+        }
       }
     }
+    if (r == NULL) {
+      r = open_new_region();
+    }
+    off = r->bump;
+    r->bump += needed_slot;
   }
-  if (r == NULL) {
-    r = open_new_region();
-  }
-  size_t off = r->bump;
-  r->bump += needed_slot;
   char* slot_base = r->base + off;
   sprout_hdr_write(slot_base + 8, kind, aux);
   slotmap_set(r, off / SPROUT_SLOT_GRAN);
-  /* Stage 1 allocates only past the bump mark, so a hole is never reused. */
-  if (g_gen.holes) bitmap_set_range(r->occ, off / SPROUT_SLOT_GRAN, needed_slot / SPROUT_SLOT_GRAN);
   if (g_gen.on) {
     youngmap_set(r, off / SPROUT_SLOT_GRAN);
     r->young_count++;
@@ -2862,11 +3002,14 @@ static void sprout_vec_release_inline_tail(VectorVal* v) {
   size_t rest = old_slot - new_slot;             /* a multiple of 16, >= 16 */
   char* tail = hdr_addr + new_slot;
   if (g_gen.holes) {
-    /* The tail leaves the occupancy maps and gets no header or slotmap bit.  Stage 1 never
-       reuses it; the next sweep leaves it in the hole space. */
+    /* The tail gets no header or slotmap bit; it leaves `oldocc` and joins the list of its exact
+       class.  It stays in `occ` until the next sweep: a clear bit would let a cursor that has not
+       reached it hand it out a second time. */
     size_t tail_idx = (size_t)(tail - r->base) / SPROUT_SLOT_GRAN;
-    bitmap_clear_range(r->occ, tail_idx, rest / SPROUT_SLOT_GRAN);
     bitmap_clear_range(r->oldocc, tail_idx, rest / SPROUT_SLOT_GRAN);
+    const size_t tcls = rest / SPROUT_SLOT_GRAN;   /* 1..255: the slot was at most 4096 B */
+    memcpy(tail, &g_hole_tails[tcls], sizeof(void*));
+    g_hole_tails[tcls] = tail;
     return;
   }
   uint64_t free_hdr = (uint64_t)SPROUT_HEAP_FREE | ((uint64_t)rest << 14);
@@ -4412,7 +4555,9 @@ static void sprout_holes_sweep_region(SproutRegion* r, int major) {
 
 /* The free count, in slots: granules below the bump marks that `occ` does not cover, over the
  * mean live slot size in granules (occ's total over the live objects), so the footprint floor and
- * `just gc-trigger-check` keep a slot-sized unit.  Also the old count the next minor reads. */
+ * `just gc-trigger-check` keep a slot-sized unit.  Also the old count the next minor reads.
+ * The count is taken at the sweep and not updated by allocation: a hole behind a cursor, which
+ * nothing reaches before the next collection, is still counted free. */
 static void sprout_holes_recount(void) {
   long long bumped = 0, occupied = 0, live = 0, old = 0;
   for (size_t ri = 0; ri < g_region_count; ri++) {
@@ -4476,12 +4621,16 @@ static void sprout_holes_sweep(void) {
     if (emptied_any && kept_normal == 0) open_new_region();
   }
   sprout_holes_recount();
+  g_hole_cur = (SproutHoleCursor){ 0, 0 };
+  g_hole_ovf = (SproutHoleCursor){ 0, 0 };
 }
 
-/* Before the mark.  A major empties the remembered set and clears bit 13 through its entries
- * (nothing else carries it), so its own drain re-remembers each parent of a child that stays
- * young; it also clears `oldocc`, which its marker rebuilds. */
+/* Before the mark.  The freed-tail lists are dropped, so an unused tail is hole space once the
+ * sweep recomputes `occ`.  A major empties the remembered set and clears bit 13 through its
+ * entries (nothing else carries it), so its own drain re-remembers each parent of a child that
+ * stays young; it also clears `oldocc`, which its marker rebuilds. */
 static void sprout_holes_begin(int minor) {
+  memset(g_hole_tails, 0, sizeof(g_hole_tails));
   g_holes_major = !minor;
   if (minor) return;
   for (size_t i = 0; i < g_gen.remembered.len; i++) {
