@@ -365,13 +365,20 @@ fn main() -> Unit !{IO} =
     # that is not a regular file. Each case would hang or run away on an unfixed runtime.
 
     let fifo = text_dir ++ "/pipe"
-    let made = match process.proc_run(["mkfifo", fifo]) with
-      | Ok r -> process.proc_ok(r)
-      | Err _ -> false
-    assert_true(state, "mkfifo for the regular-file cases", made)
+    assert_true(state, "mkfifo for the regular-file cases",
+      result_with_default(false, result_map(process.proc_ok, process.proc_run(["mkfifo", fifo]))))
     assert_eq(state, "read_bytes of a FIFO is an io_error", outcome(fs.read_bytes(fifo)), "io_error")
     assert_true(state, "write_bytes to a FIFO with no reader is an Err",
       outcome(fs.write_bytes(fifo, bytes.from_string("x"))) != "ok")
+    # A bound Unix socket file: open(2) would fail on it, so it must be rejected by the stat.
+    let sock = text_dir ++ "/sock"
+    assert_true(state, "a socket file for the regular-file cases",
+      result_with_default(false, result_map(process.proc_ok, process.proc_run(
+        ["python3", "-c", "import socket,sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])", sock]))))
+    assert_true(state, "read_text of a socket says not a regular file",
+      string.contains(text_error(fs.read_text(sock)), "not a regular file"))
+    assert_true(state, "write_text to a socket says not a regular file",
+      string.contains(text_error(fs.write_text(sock, "x")), "not a regular file"))
     assert_true(state, "read_text of a FIFO names the path",
       string.contains(text_error(fs.read_text(fifo)), fifo))
     assert_eq(state, "read_bytes of /dev/zero is an io_error",

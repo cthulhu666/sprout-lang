@@ -4827,20 +4827,58 @@ long long fs_stat_path(long long path_i, long long follow) {
   return fs_ok(entry);
 }
 
-/* Clear O_NONBLOCK on an open descriptor. Opening with it keeps a FIFO open from blocking; once
- * fstat has shown a regular file it is dropped, so reads and writes behave as before. */
+/* Clear O_NONBLOCK on an open descriptor. fcntl only, so it is async-signal-safe. */
 static int fs_clear_nonblock(int fd) {
-  int fl = fcntl(fd, F_GETFL);
+  int fl = fcntl(fd, F_GETFL, 0);
   if (fl < 0) return -1;
   return fcntl(fd, F_SETFL, fl & ~O_NONBLOCK);
 }
 
+/* Open `path` for fs_read_bytes / fs_write_bytes: regular files only. Returns 0 with *fd_out set,
+ * else a Result Err in *err_out.
+ *
+ * stat first (following symlinks), so a FIFO, device or socket is rejected without being opened:
+ * opening one could block, or give its peer an EOF. A directory is not rejected here; it keeps its
+ * own answers (read: EISDIR; write: the open fails EISDIR). ENOENT is an error for a read and
+ * proceeds to create for a write. The open is O_NONBLOCK so a file swapped in for a FIFO after
+ * the stat cannot block it, and the fstat re-check of the descriptor catches that swap. */
+static int fs_open_regular(const char* path, int flags, int mode, int is_read,
+                           int* fd_out, long long* err_out) {
+  struct stat st;
+  if (stat(path, &st) == 0) {
+    if (S_ISDIR(st.st_mode)) {
+      if (is_read) { *err_out = fs_err(EISDIR, path); return -1; }
+    } else if (!S_ISREG(st.st_mode)) {
+      *err_out = fs_err_text(SPROUT_TAG(stdlib$fs$FsIoError), path, "not a regular file");
+      return -1;
+    }
+  } else if (errno != ENOENT || is_read) {
+    *err_out = fs_err(errno, path);
+    return -1;
+  }
+
+  int fd = cloexec_open(path, flags | O_NONBLOCK, mode);
+  /* A lease on a regular file makes an O_NONBLOCK open fail with EWOULDBLOCK on Linux. Retry
+   * without it: the blocking open waits for the lease to break, as it did before. */
+  if (fd < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) fd = cloexec_open(path, flags, mode);
+  if (fd < 0) { *err_out = fs_err(errno, path); return -1; }
+
+  struct stat fst;
+  if (fstat(fd, &fst) != 0) { int e = errno; close(fd); *err_out = fs_err(e, path); return -1; }
+  if (!S_ISREG(fst.st_mode)) {
+    close(fd);
+    *err_out = fs_err_text(SPROUT_TAG(stdlib$fs$FsIoError), path, "not a regular file");
+    return -1;
+  }
+  if (fs_clear_nonblock(fd) != 0) { int e = errno; close(fd); *err_out = fs_err(e, path); return -1; }
+  *fd_out = fd;
+  return 0;
+}
+
 /* Result FsError Bytes: the whole file, with NO UTF-8 validation.
  *
- * Regular files only. Opening a FIFO with no writer would block the scheduler thread, and a
- * device such as /dev/zero never reaches EOF. The open is O_NONBLOCK so a FIFO returns at once;
- * fstat (not stat-then-open, so no path swap can slip in) rejects anything else. stdin is
- * terminal.read_stdin_bytes.
+ * Regular files only (see fs_open_regular). A FIFO open with no writer would block the scheduler
+ * thread, and a device such as /dev/zero never reaches EOF. stdin is terminal.read_stdin_bytes.
  *
  * The directory case is checked explicitly rather than left to read(2), because
  * the platforms disagree about it — reading a directory fd fails with EISDIR on
@@ -4851,19 +4889,14 @@ long long fs_read_bytes(long long path_i) {
   long long rejected;
   if (fs_path_rejected(path, &rejected)) return rejected;
 
-  int fd = cloexec_open(path, O_RDONLY | O_NONBLOCK, 0);
-  if (fd < 0) return fs_err(errno, path);
+  int fd;
+  long long open_err;
+  if (fs_open_regular(path, O_RDONLY, 0, 1, &fd, &open_err) != 0) return open_err;
 
   struct stat st;
   if (fstat(fd, &st) != 0) { int e = errno; close(fd); return fs_err(e, path); }
-  if (S_ISDIR(st.st_mode)) { close(fd); return fs_err(EISDIR, path); }
-  if (!S_ISREG(st.st_mode)) {
-    close(fd);
-    return fs_err_text(SPROUT_TAG(stdlib$fs$FsIoError), path, "not a regular file");
-  }
-  if (fs_clear_nonblock(fd) != 0) { int e = errno; close(fd); return fs_err(e, path); }
 
-  size_t cap = (S_ISREG(st.st_mode) && st.st_size > 0) ? (size_t)st.st_size + 1 : 4096;
+  size_t cap = (st.st_size > 0) ? (size_t)st.st_size + 1 : 4096;
   size_t len = 0;
   unsigned char* buf = (unsigned char*)malloc(cap);
   if (buf == NULL) {
@@ -4902,8 +4935,8 @@ long long fs_read_bytes(long long path_i) {
  * §64), so no String can carry an arbitrary byte sequence; this is how one gets
  * into a file. fs.write_text is built on it.
  *
- * Regular files only, as in fs_read_bytes: a FIFO open would block, so the open is O_NONBLOCK
- * (a FIFO with no reader fails ENXIO) and fstat rejects any other non-regular file. */
+ * Regular files only, as in fs_read_bytes (see fs_open_regular): a FIFO is rejected before it is
+ * opened or truncated. */
 long long fs_write_bytes(long long path_i, long long bytes_h) {
   const char* path = (const char*)(uintptr_t)path_i;
   long long rejected;
@@ -4912,16 +4945,10 @@ long long fs_write_bytes(long long path_i, long long bytes_h) {
   BytesVal* payload = (BytesVal*)(uintptr_t)bytes_h;
   if (payload == NULL) sprout_fail("fs_write_bytes: null payload");
 
-  int fd = cloexec_open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NONBLOCK, 0666);
-  if (fd < 0) return fs_err(errno, path);
-
-  struct stat st;
-  if (fstat(fd, &st) != 0) { int e = errno; close(fd); return fs_err(e, path); }
-  if (!S_ISREG(st.st_mode)) {
-    close(fd);
-    return fs_err_text(SPROUT_TAG(stdlib$fs$FsIoError), path, "not a regular file");
-  }
-  if (fs_clear_nonblock(fd) != 0) { int e = errno; close(fd); return fs_err(e, path); }
+  int fd;
+  long long open_err;
+  if (fs_open_regular(path, O_WRONLY | O_CREAT | O_TRUNC, 0666, 0, &fd, &open_err) != 0)
+    return open_err;
 
   /* write(2) may transfer fewer bytes than asked for on any descriptor, so the
    * loop is required, not defensive. */
@@ -6478,8 +6505,7 @@ static int sprout_open_service_log(const char* path) {
     close(fd);
     return -1;
   }
-  int fl = fcntl(fd, F_GETFL, 0);
-  if (fl < 0 || fcntl(fd, F_SETFL, fl & ~O_NONBLOCK) != 0) {
+  if (fs_clear_nonblock(fd) != 0) {
     close(fd);
     return -1;
   }
