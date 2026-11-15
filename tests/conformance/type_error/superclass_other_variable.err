@@ -1,0 +1,1 @@
+the superclass `Eq u` of `Sh` must constrain the class variable `t`

@@ -1,0 +1,9 @@
+# The method-level `where` of an instance method applies its class to one type.
+class Sh t
+  fn sh(x: t, y: b) -> Bool where Eq b
+
+instance Sh Int
+#~^ ERROR
+  fn sh(x: Int, y: b) -> Bool where Eq b b = true
+
+fn main() -> Unit !{IO} = print("unreachable")

@@ -1214,9 +1214,8 @@ fn eta_from_evidence(method: String, t: types.Type, pos: source.SourcePos, ev: t
   | _ -> Nothing
 
 # A bare method whose Evidence eta_from_evidence cannot consume. resolve rejects the
-# unresolved case (resolve.reject_unresolved). Two shapes remain: a slot resolve and lowering
-# disagree on, and an instance context naming a variable absent from its head
-# (`instance C T where D b`), which resolve accepts and leaves no inner dict for.
+# unresolved case (resolve.reject_unresolved). What remains is a slot resolve and lowering
+# disagree on.
 fn eta_no_instance(method: String, class_name: String, pos: source.SourcePos) -> typed_ast.TypedExpr =
   let name = string.after_last_dot(method)
       cls = string.after_last_dot(class_name)

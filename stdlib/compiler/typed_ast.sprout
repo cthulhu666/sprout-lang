@@ -455,7 +455,7 @@ export fn method_body(m: TypedInstanceMethod) -> TypedExpr =
 
 # What lowering, resolve and ast_to_ir read off the ClassDecls, keyed by the class
 # name as declared: methods and direct superclasses in declaration order, and the
-# first type parameter. Witness-slot layout needs all three passes to agree.
+# type parameter (a class has exactly one). Witness-slot layout needs all three passes to agree.
 export type ClassTables (..) = (order: Dict (List String), supers: Dict (List String),
                                 params: Dict String)
 
@@ -825,9 +825,9 @@ export fn ambiguous_method_message(method: String, class_name: String) -> String
        ++ "or a typed top-level `let`, or constrain its type variable with `where " ++ cls
        ++ "` so the caller decides."
 
-# A class method used as a value whose instance resolve cannot name. A class with more
-# than one parameter is keyed on its first alone, so none is found.
+# A class method used as a value whose evidence names no instance. Declarations rule the
+# producers out, so this is an internal error.
 export fn unresolved_method_message(method: String, class_name: String) -> String =
   let cls = string.after_last_dot(class_name)
       name = string.after_last_dot(method)
-  in `no instance of \`${cls}\` could be determined for \`${name}\` used as a value: a class with more than one parameter is not supported`
+  in `internal error: no instance of \`${cls}\` was determined for \`${name}\` used as a value`

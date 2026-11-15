@@ -1,0 +1,13 @@
+# An instance context on an applied variable (`where ToString (f a)`) is not checked at a
+# use site where it stays non-concrete: no caller can forward that dictionary, and the
+# body cannot dispatch on it.
+type Wrap f a = Wrap(f a)
+
+instance ToString (Wrap f a) where ToString (f a)
+  fn to_string(w: Wrap f a) -> String =
+    match w with
+    | Wrap _ -> "wrap"
+
+fn show_it(w: Wrap g a) -> String = to_string(w)
+
+fn main() -> Unit !{IO} = print(show_it(Wrap (Just(1))))

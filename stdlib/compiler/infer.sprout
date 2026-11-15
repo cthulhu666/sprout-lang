@@ -8063,7 +8063,7 @@ fn validate_fn_constraint(c: ast.TypeConstraint, decl_name: String, classes: Set
   match c with
   | ast.TypeConstraint head args ->
       if set_member(string.after_last_dot(head), classes)
-      then check_constraint_tyvars_in_sig(head, args, decl_name, sig_tyvars)
+      then maybe_or_else(constraint_count_error(c), check_constraint_tyvars_in_sig(head, args, decl_name, sig_tyvars))
       else
         match first_known_class_arg(args, classes) with
         | Just cls -> Just(swapped_order_hint(head, decl_name, cls, sig_tyvars))
@@ -8094,9 +8094,9 @@ fn decl_constraint_error(classes: Set, decl: ast.Decl) -> Maybe String =
       let tvs = fn_sig_tyvars(params, ret)
       in maybe_or_else(bound_sig_error(bounds, name, tvs), validate_fn_constraints(constraints, name, classes, tvs))
   | ast.ExternFnDecl name params ret _ bounds _ _ -> bound_sig_error(bounds, name, fn_sig_tyvars(params, ret))
-  | ast.ClassDecl _ class_vars sigs _ _ -> find_map(sig_bound_error(class_vars, _), sigs)
+  | ast.ClassDecl name class_vars sigs supers _ -> class_decl_error(name, class_vars, sigs, supers, classes)
   | ast.TypeDecl _ _ _ _ _ _ _ -> Nothing
-  | ast.InstanceDecl constraint _ bounds _ _ -> head_bound_error(bounds, constraint)
+  | ast.InstanceDecl constraint ctx bounds methods _ -> instance_decl_error(constraint, ctx, bounds, methods)
   | ast.RecordDecl _ _ _ _ _ _ _ -> Nothing
   | ast.LetDecl _ _ _ _ -> Nothing
   | ast.AliasDecl _ _ _ _ -> Nothing
@@ -8111,12 +8111,11 @@ fn bound_not_in_sig_msg(v: String, decl_name: String) -> String =
     ++ string.after_last_dot(decl_name) ++ "`; a bound lets a type variable of the signature be linear"
 
 # An instance's bound names a variable of its head.
-fn head_bound_error(bounds: List String, constraint: ast.TypeConstraint) -> Maybe String =
-  let ast.TypeConstraint _ args = constraint
-      head_vars = collect_te_vars_list(args, Nil)
-  in map(\v -> "`where linear " ++ v ++ "` names `" ++ v ++ "`, which does not appear in the instance head `"
-                  ++ instance_owner(constraint) ++ "`; a bound lets a variable of the head be linear",
-         find(\v -> !list_member(v, head_vars), bounds))
+fn head_bound_error(bounds: List String, head_vars: List String,
+                    constraint: ast.TypeConstraint) -> Maybe String =
+  map(\v -> "`where linear " ++ v ++ "` names `" ++ v ++ "`, which does not appear in the instance head `"
+              ++ instance_owner(constraint) ++ "`; a bound lets a variable of the head be linear",
+      find(\v -> !list_member(v, head_vars), bounds))
 
 fn instance_owner(constraint: ast.TypeConstraint) -> String =
   let ast.TypeConstraint cls args = constraint
@@ -8132,6 +8131,98 @@ fn sig_bound_error(class_vars: List String, sig: ast.ClassMethodSig) -> Maybe St
 fn bound_on_class_var_msg(v: String, method: String) -> String =
   "`where linear " ++ v ++ "` on `" ++ string.after_last_dot(method)
     ++ "` names the class's own type variable, which takes no bound: an instance at a linear type is concrete code, checked as such"
+
+# A class declares one type parameter, each superclass constrains it, and each method's own
+# `where` applies its class to one type (spec-v0.md §8.5).
+fn class_decl_error(name: String, class_vars: List String, sigs: List ast.ClassMethodSig,
+                    supers: List ast.TypeConstraint, classes: Set) -> Maybe String =
+  let short = string.after_last_dot(name)
+  in match class_vars with
+     | [v] -> maybe_or_else(find_map(superclass_error(name, v, classes, _), supers),
+                            find_map(class_sig_error(class_vars, _), sigs))
+     | [] -> Just("class `" ++ short ++ "` declares no type parameter; a class takes exactly one")
+     | _ -> Just("class `" ++ short ++ "` declares " ++ int_to_string(list_length(class_vars))
+                   ++ " type parameters; a class takes exactly one")
+
+# A superclass is the class applied to the class's own variable, bare: `class Sh t where Eq t`.
+# A variable-first swap (`t Eq`) is told apart from a wrong argument, as a function's `where` does.
+fn superclass_error(class_name: String, class_var: String, classes: Set,
+                    c: ast.TypeConstraint) -> Maybe String =
+  let Nothing = constraint_count_error(c) else err -> err
+      ast.TypeConstraint cls type_args = c
+      named = "the superclass `" ++ instance_owner(c) ++ "` of `" ++ string.after_last_dot(class_name) ++ "` "
+  in
+    if is_bare_var(type_args, class_var) then Nothing
+    else
+      match swapped_class(cls, type_args, classes) with
+      | Just real ->
+        if cls == class_var
+        then Just(named ++ "names its class second; write the class first: `where " ++ real ++ " " ++ class_var ++ "`")
+        else Just(named ++ "names its class second and must constrain the class variable `" ++ class_var
+                    ++ "`: `where " ++ real ++ " " ++ class_var ++ "`")
+      | Nothing -> Just(named ++ "must constrain the class variable `" ++ class_var ++ "`")
+
+# The class a variable-first swap names, when the head is no class but an argument is.
+fn swapped_class(head: String, args: List ast.TypeExpr, classes: Set) -> Maybe String =
+  if set_member(string.after_last_dot(head), classes) then Nothing else first_known_class_arg(args, classes)
+
+fn is_bare_var(type_args: List ast.TypeExpr, v: String) -> Bool =
+  match type_args with
+  | [ast.TypeName n] -> n == v
+  | _ -> false
+
+fn class_sig_error(class_vars: List String, sig: ast.ClassMethodSig) -> Maybe String =
+  let ast.ClassMethodSig _ _ _ _ constraints _ = sig
+  in maybe_or_else(find_map(constraint_count_error, constraints), sig_bound_error(class_vars, sig))
+
+# An instance head and every constraint under it apply their class to one type, and the
+# context names only variables of the head (spec-v0.md §8.5).
+fn instance_decl_error(constraint: ast.TypeConstraint, ctx: List ast.TypeConstraint, bounds: List String,
+                       methods: List ast.InstanceMethodImpl) -> Maybe String =
+  let Nothing = instance_head_count_error(constraint) else err -> err
+      Nothing = find_map(constraint_count_error, ctx) else err -> err
+      Nothing = find_map(method_where_arity_error, methods) else err -> err
+      ast.TypeConstraint _ head_args = constraint
+      head_vars = collect_te_vars_list(head_args, Nil)
+      Nothing = find_map(context_var_error(constraint, head_vars, methods, _), ctx) else err -> err
+  in head_bound_error(bounds, head_vars, constraint)
+
+# A constraint applies its class to exactly one type (spec-v0.md §8.5). The diagnostic for
+# one that does not, at a `where` clause or an instance head.
+fn constraint_count_error(c: ast.TypeConstraint) -> Maybe String =
+  count_error("", "a constraint", c)
+
+fn instance_head_count_error(c: ast.TypeConstraint) -> Maybe String =
+  count_error("the instance head ", "an instance head", c)
+
+fn count_error(subject: String, rule: String, c: ast.TypeConstraint) -> Maybe String =
+  let ast.TypeConstraint cls type_args = c
+      [_] = type_args else
+        Just(subject ++ "`" ++ typed_ast.instance_display(cls, type_args) ++ "` applies `"
+               ++ string.after_last_dot(cls) ++ "` to " ++ int_to_string(list_length(type_args))
+               ++ " types; " ++ rule ++ " applies its class to exactly one type")
+  in Nothing
+
+fn method_where_arity_error(m: ast.InstanceMethodImpl) -> Maybe String =
+  let ast.InstanceMethodImpl _ _ _ _ constraints _ _ = m
+  in find_map(constraint_count_error, constraints)
+
+# A context constraint reaches only what the head binds. A variable a method's signature
+# writes is the method's own, which its method-level `where` constrains.
+fn context_var_error(head: ast.TypeConstraint, head_vars: List String,
+                     methods: List ast.InstanceMethodImpl, c: ast.TypeConstraint) -> Maybe String =
+  let ast.TypeConstraint _ args = c
+      Just v = find(\u -> !list_member(u, head_vars), collect_te_vars_list(args, Nil)) else Nothing
+      named = "the instance context `" ++ instance_owner(c) ++ "` names `" ++ v ++ "`, which "
+  in
+    if list_member(v, list_fold(method_sig_tyvars, Nil, methods))
+    then Just(named ++ "the instance head `" ++ instance_owner(head)
+                ++ "` does not bind; constrain a method's own variable with a method-level `where`")
+    else Just(named ++ "does not appear in the instance head `" ++ instance_owner(head) ++ "`")
+
+fn method_sig_tyvars(acc: List String, m: ast.InstanceMethodImpl) -> List String =
+  let ast.InstanceMethodImpl _ params ret _ _ _ _ = m
+  in list_append(fn_sig_tyvars(params, ret), acc)
 
 # ---------------------------------------------------------------------------
 # Executable entrypoint validation
@@ -8606,9 +8697,9 @@ fn merge_class_depths(cls: String, v: String, depths: List Int,
 
 # A superclass constrains the variable too: `class Wrapper t where Functor t` ties
 # `t` to whatever arity `Functor` uses. `@super:` records the pair and nothing about
-# the argument, because a superclass is always over the class variable —
-# register_superclass_markers discards the argument for that reason. Own classes
-# come from build_class_super_map; this is its env-path counterpart.
+# the argument, because a superclass is always over the class variable, bare
+# (class_decl_error) — register_superclass_markers discards the argument for that
+# reason. Own classes come from build_class_super_map; this is its env-path counterpart.
 fn env_class_supers(entries: List (String, types.Scheme),
                     acc: Dict (List String)) -> Dict (List String) =
   match entries with
@@ -9026,13 +9117,9 @@ fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe(s
 # declaration". Decl-scoped: the bundled prelude's classes/instances are in `decls`,
 # so this covers prelude and user instances alike.
 #
-# Assumes SINGLE-PARAMETER classes (the only kind Sprout has): the check keys on
-# one type head, matching an instance's superclass against `Sup:<head>` and taking
-# the instance's first type argument (`[head_te | _]`). A multi-parameter class
-# (`class Sub a b where Sup a`) would need per-superclass-variable mapping — a
-# superclass may constrain a SUBSET of the class variables, so the required instance
-# is `Sup A`, not `Sup A B`. Do NOT generalize this to "all type args": that would
-# encode the wrong assumption. When multi-parameter classes land, revisit here.
+# A class has one parameter and an instance head one type (decl_constraint_error), so
+# the check keys on that one head: an instance's superclass is matched against
+# `Sup:<head>`, with the instance's sole type argument (`[head_te | _]`).
 fn check_missing_superclass_instances(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
   ast.first_decl_error(missing_superclass_error(super_map, inst_set, _), decls)
 where
@@ -9185,12 +9272,12 @@ fn instance_head_label(type_args: List ast.TypeExpr) -> String =
 # may be more general than the class, as GHC's InstanceSigs allow, as long as each
 # method-level `where` slot still constrains what the class's does.
 #
-# Classes come from decls by exact name, as in check_missing_instance_methods. A
-# class with more than one parameter is skipped. seed_instance_method_types has
-# filled every bare slot of a method this check accepts, unless the written types
-# leave a class variable the slot needs unsettled, which is reported here. The
-# method's own effect, its ownership modes and the classes its `where` names have
-# their own checks.
+# Classes come from decls by exact name, as in check_missing_instance_methods. A class
+# with other than one parameter is skipped: decl_constraint_error rejects it.
+# seed_instance_method_types has filled every bare slot of a method this check
+# accepts, unless the written types leave a class variable the slot needs unsettled,
+# which is reported here. The method's own effect, its ownership modes and the classes
+# its `where` names have their own checks.
 fn check_instance_method_signatures(decls: List ast.Decl,
                                     class_sigs: Dict (String, List ast.ClassMethodSig),
                                     alias_env: Dict types.Type) -> Maybe(source.SourcePos, String) =

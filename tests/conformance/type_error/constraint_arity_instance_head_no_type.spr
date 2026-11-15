@@ -1,0 +1,8 @@
+# An instance head applies its class to exactly one type.
+class Sh t
+  fn sh(x: t) -> Bool
+
+instance Sh
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

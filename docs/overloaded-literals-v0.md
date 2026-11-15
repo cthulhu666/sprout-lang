@@ -96,10 +96,9 @@ arm-threading all go. The template→`string_concat_many` lowering stays; that i
 real work, not context.
 
 **Two classes, not one.** `FromList` ranges over `f : * -> *` and `FromTemplate`
-over `a : *`. Collapsing them needs kind polymorphism or a multi-param class;
-`ast.TypeConstraint String (List TypeExpr)` can *represent* multi-param, but the
-resolution paths sampled key on a single head type, so treat multi-param as
-unproven machinery. One class per literal form is the buildable shape.
+over `a : *`. Collapsing them needs kind polymorphism or a multi-param class; the
+language has neither (a class declares exactly one parameter, spec §8.5). One class
+per literal form is the buildable shape.
 
 **Alternative considered — table-driven desugar.** Collapse the two branches
 into one `(literal shape, expected type head, conversion fn)` table inside

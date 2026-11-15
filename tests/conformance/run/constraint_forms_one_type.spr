@@ -1,0 +1,49 @@
+module main
+
+# What the one-type rule leaves: a superclass over the class variable, an instance
+# context over head variables, a higher-kinded `where`, and a method-level `where`.
+
+type Box a = Box a
+
+class Named t
+  fn name_of(x: t) -> String
+
+class Shown t where Named t
+  fn shown(x: t) -> String
+
+class Pick t
+  fn pick(x: t, y: b) -> String where ToString b
+
+instance Named Int
+  fn name_of(x: Int) -> String = "int"
+
+instance Shown Int
+  fn shown(x: Int) -> String = name_of(x) ++ ":" ++ to_string(x)
+
+instance Pick Int
+  fn pick(x: Int, y: b) -> String where ToString b = to_string(x) ++ "/" ++ to_string(y)
+
+instance Named (Box a) where Named a
+  fn name_of(x: Box a) -> String =
+    match x with
+    | Box inner -> "box of " ++ name_of(inner)
+
+instance Functor Box
+  fn fmap(f: a -> b, xs: Box a) -> Box b =
+    match xs with
+    | Box a -> Box(f(a))
+
+fn describe(x: t) -> String where Shown t = shown(x) ++ "/" ++ name_of(x)
+
+fn bump(xs: f Int) -> f Int where Functor f = fmap(\n -> n + 1, xs)
+
+fn unbox(b: Box Int) -> Int =
+  match b with
+  | Box x -> x
+
+fn main() -> Unit !{IO} =
+  do
+    print(describe(5))
+    print(name_of(Box (Box(1))))
+    print(to_string(unbox(bump(Box(1)))))
+    print(pick(7, true))

@@ -258,13 +258,13 @@ fn build_theta(param_tes: List ast.TypeExpr, arg_types: List types.Type, theta: 
           | Just theta1 -> build_theta(prest, arest, theta1)
           | Nothing -> build_theta(prest, arest, theta)
 
-# The head source-var name of a constraint (`Ord k` -> Just "k"). A multi-param or
-# non-var-headed constraint head yields Nothing -> that constraint is skipped.
+# The head source-var name of a constraint (`Ord k` -> Just "k"). A non-var-headed
+# constraint head yields Nothing -> that constraint is skipped.
 fn constraint_var(c: ast.TypeConstraint) -> Maybe String =
   match c with
   | ast.TypeConstraint _ args ->
       match args with
-      | [ast.TypeName v | _] -> if starts_lower(v) then Just(v) else Nothing
+      | [ast.TypeName v] -> if starts_lower(v) then Just(v) else Nothing
       | _ -> Nothing
 
 fn constraint_class(c: ast.TypeConstraint) -> String =
@@ -452,8 +452,7 @@ fn build_fn_sigs(decls: List typed_ast.TypedDecl, acc: Dict CalleeSig) -> Dict C
 # method's canonical name, which is exactly how infer keys `@class:{method}` and how
 # the callee appears as `TVar {method}`.
 #
-# Multi-parameter classes are skipped: `constraint_var` only reads a single
-# var-headed constraint, so a two-parameter class would yield an unusable head.
+# A class takes one parameter, so `constraint_var` reads its one var-headed constraint.
 fn build_class_sigs(decls: List typed_ast.TypedDecl, acc: Dict CalleeSig) -> Dict CalleeSig =
   match decls with
   | Nil -> acc

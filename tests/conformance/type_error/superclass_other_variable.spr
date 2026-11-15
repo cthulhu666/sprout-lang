@@ -1,0 +1,6 @@
+# A superclass constrains the class's own variable, not another one.
+class Sh t where Eq u
+#~^ ERROR
+  fn sh(x: t) -> Bool
+
+fn main() -> Unit !{IO} = print("unreachable")

@@ -1,0 +1,5 @@
+# A constraint applies its class to exactly one type; none constrains nothing.
+fn same(x: a) -> Bool where Eq = true
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(to_string(same(1)))

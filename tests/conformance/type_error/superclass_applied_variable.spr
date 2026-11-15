@@ -1,0 +1,6 @@
+# A superclass applies its class to the bare class variable, not to a type built from it.
+class Sh t where Eq (List t)
+#~^ ERROR
+  fn sh(x: t) -> Bool
+
+fn main() -> Unit !{IO} = print("unreachable")

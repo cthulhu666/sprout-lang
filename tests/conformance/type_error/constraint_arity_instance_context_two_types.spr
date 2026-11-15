@@ -1,0 +1,8 @@
+# An instance context constraint applies its class to exactly one type.
+type Box a = Box a
+
+instance ToString (Box a) where Eq a a
+#~^ ERROR
+  fn to_string(x: Box a) -> String = "box"
+
+fn main() -> Unit !{IO} = print("unreachable")

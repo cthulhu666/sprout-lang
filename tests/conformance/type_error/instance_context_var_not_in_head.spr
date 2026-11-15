@@ -1,0 +1,15 @@
+# An instance context names only variables of the instance head. `k` is nowhere in
+# `Foo Bar`, so no caller could fill the `Baz k` slot.
+type Bar = Bar
+
+class Baz k
+  fn bazzy(x: k) -> String
+
+class Foo t
+  fn fooey(x: t) -> String
+
+instance Foo Bar where Baz k
+#~^ ERROR
+  fn fooey(x: Bar) -> String = "bar"
+
+fn main() -> Unit !{IO} = print(fooey(Bar))

@@ -1,0 +1,6 @@
+# `missing_context_constraint_unannotated_fn_return.spr` with its error's hint applied.
+fn g() -> a where Eq a =
+  let v = panic("never")
+  in if Just(v) == Just(v) then v else v
+
+fn main() -> Unit !{IO} = print(to_string(g() == 1))

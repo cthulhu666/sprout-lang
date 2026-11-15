@@ -163,14 +163,10 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 
 **Existentials / GADTs**
 
-- [ ] `P4` **Existentials — `validate_ctor_where` only checks the FIRST constraint arg.**
-  `where Convert a b` with `b` unbound by the `exists` prefix is accepted. Latent, since
-  multi-parameter classes are unsupported, but the validator's stated contract is not upheld. Fix:
-  validate every `TypeName` argument. Stages 0a and 0b are complete; analysis, staging and prior art
-  are in `docs/gadts-v0.md` (non-normative), spec §5.6.
-- [ ] `P4` **Existentials — extend constraint-head class validation to instance/class positions.**
-  A variable-first `where a ToString` is rejected on a `FnDecl`; the same swap on an `InstanceDecl`
-  context-constraint or a `ClassDecl` superclass silently drops the constraint.
+- [ ] `P4` **Existentials — extend constraint-head class validation to instance contexts.** A
+  variable-first `where a ToString` is rejected with a swap hint on a `FnDecl` and a superclass,
+  but an `InstanceDecl` context only fails at a call, as "No instance of a for ToString", and
+  passes unused. Fix: check the class name at the declaration.
 - [ ] `P4` **Existentials — ambiguous construction gives an opaque arity error.** `Bag([])` leaves
   the constraint's var free, so no witness is injected and it surfaces as
   `ctor application has wrong arity`. It fails loudly, but the message should be a located "cannot
@@ -3016,14 +3012,21 @@ acting.
   under-application of '__tc_Biggest_List_biggest' reached codegen (arity 3, got 1)". The eta
   lambda `lowering.eta_from_evidence` builds omits the method's own hidden `Ord` dictionary. Same
   on master. `TMethodRef`'s Evidence covers the class constraint only, not the method's own.
-- [ ] `P3` **An instance context on a variable the head does not bind panics lowering.**
-  `instance Mk Box where Eq b` passes check (`resolve.head_bound` drops the constraint). The
-  call `mk(Box(1))` compiles and runs; the bare method `ap(mk, Box(1))` stops in lowering with
-  "method `mk` of class `Mk` used as a value at L:C has evidence lowering cannot use (internal
-  error)", as on master. No caller can fill the slot, so the context is dead. Fix: reject it at
-  the instance declaration with a located message, and state the rule in spec §8.5 (*An
-  instance's context is needed too*), which says the context reaches only variables the head
-  binds but not that naming another is an error.
+- [ ] `P3` **An instance context larger than its head overflows the compiler's stack.**
+  `instance Foo (List a) where Foo (List (List a))` with a call `foo([1])` dies at `--phase
+  check` with "fatal: stack overflow - unbounded or too-deep recursion": `resolve`'s
+  `produce_instance_evidence` recurses through each context constraint with no size bound.
+  Spec §8.5's rules (one type, context variables in the head) all accept it. Fix: require each
+  context constraint to be smaller than the head, as GHC's Paterson condition 2 does, with a
+  located message; spec §8.5 rule.
+- [ ] `P3` **Two walks enumerate the places a constraint can appear.** infer's count check
+  (`class_decl_error`, `instance_decl_error`, `validate_fn_constraint`) and kind check
+  (`decl_arity_error`, `constraints_arity_error`, `impl_wheres_arity_error`) each list fn,
+  class-method and instance-method `where`, superclass, instance head and instance context on
+  their own. A position one walk misses accepts a bad constraint there, the bug class spec
+  §8.5's rules closed. Fix: one `constraint_sites(decl)` returning each constraint tagged with
+  its role, read by both checks in their current pipeline positions, so diagnostic order is
+  unchanged.
 - [ ] `P3` **A compound constraint with no instance for its head fails at codegen.** A caller
   that neither declares `where C (T a)` nor can build it (the class has no `T` instance) gets
   `under-application ... reached codegen` instead of a diagnostic: `infer.compound_head_tdict`
@@ -3112,16 +3115,6 @@ acting.
   `Int`, yet `resolve` asks for an annotation and a `where`. Each member's post-pass and
   placeholder naming read its own substitution (`infer.sprout`, per-member `s2`), not the
   group's. Declaring `b_fn` first compiles. Master compiled it to the poison thunk.
-- [ ] `P3` **§8.5's instance rules skip a class with more than one parameter, unstated.**
-  `own_class_sigs` keeps only one-parameter classes, so an instance of `class Show2 t u` is neither
-  seeded nor signature-checked. Its bare `b` in `instance Show2 (Box a) Int where ToString a` gets
-  the `fn` remedy ("write that type out … add a `where`"), and with `b: Box a` the call fails as
-  "No instance of Show2". The spec states neither limit. Fix: reject a multi-parameter class at its
-  declaration, or say in §8.5 what holds for one. A bare method of such a class is rejected at
-  check ("no instance of `Conv` could be determined for `conv` used as a value: a class with more
-  than one parameter is not supported"); the call `show_bool(conv(1))` with only `instance Conv
-  Int String` compiles and traps at run time ("dispatched through an unresolved typeclass
-  dictionary"). Under `where Mk t u` a bare method gets the ambiguity hint asking for that `where`.
 - [ ] `P3` **A `where` headed by a type alias is keyed by the alias.** `type alias M a = Maybe
   a` with `fn f(y: M a, z: M a) -> Bool where Eq (M a) = y == z` is rejected ("add `where Eq
   a`"): `resolve.add_eff_keys` keys it `Eq_M` from the written head while the use site looks up

@@ -1,0 +1,1 @@
+a constructor `where` constraint must apply a class to a single `exists`-bound variable

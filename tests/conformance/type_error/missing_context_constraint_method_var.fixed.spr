@@ -1,0 +1,13 @@
+# `missing_context_constraint_method_var.spr` with its error's hint applied: `b` is
+# constrained by a method-level `where`, on the class and the instance alike.
+type Box = Box
+
+class Mk t
+  fn mk(x: t, g: Int -> b) -> b where Eq b
+
+instance Mk Box
+  fn mk(x: Box, g: Int -> b) -> b where Eq b =
+    let r = g(1)
+    in if Just(r) == Just(r) then r else r
+
+fn main() -> Unit !{IO} = print(to_string(mk(Box, \n -> n + 1)))

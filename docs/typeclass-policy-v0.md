@@ -9,8 +9,8 @@ written-down freeze. Companion to `docs/haskell-lessons-learned.md` (traps #4, #
 
 ## 1. Problem statement
 
-Sprout's typeclasses sit at roughly the Haskell 98 position: one type parameter per class, instance
-heads keyed on the head *constructor*, overlap an unconditional error. That position is cheap to
+Sprout's typeclasses sit at roughly the Haskell 98 position: one type parameter per class (rejected
+at the declaration otherwise, `spec-v0.md` §8.5), instance heads keyed on the head *constructor*, overlap an unconditional error. That position is cheap to
 hold and expensive to leave. Nothing currently records that it *is* held, and three things are open
 at once:
 
@@ -68,7 +68,7 @@ restrictive.
 
 | Property | State | Evidence |
 |---|---|---|
-| Class arity | Single parameter only | `infer.sprout:8270-8274` — "When multi-parameter classes land, revisit here" |
+| Class arity | Single parameter only, enforced at the declaration | `infer.class_decl_error`; `spec-v0.md` §8.5 *A class takes one type parameter* |
 | Instance head | Constructor applied to distinct variables (Haskell 2010 §4.3.2) | `spec-v0.md:3028-3040` |
 | Instance key | Head **constructor** only, not full head | `BACKLOG.md` P2 `@inst:` widening |
 | Overlap | Unconditional error, no pragma escape | `infer.sprout:8242` `check_overlapping_instances`; `spec-v0.md:3016` |
@@ -275,9 +275,9 @@ Written into the spec as policy, each item with the ambiguity that admitting it 
 
 - **Multi-parameter classes.** A method that does not mention every class parameter leaves one
   unconstrained at the use site, which needs a covering condition to make instance selection unique.
-  Sprout already carries the latent shape of this: `validate_ctor_where` checks only the *first*
-  constraint argument, and the `BACKLOG.md` entry records that the bug is "latent, since
-  multi-parameter classes are unsupported." Landing MPTC activates it.
+  Sprout rejects a class with other than one parameter, and every constraint site applies its class
+  to exactly one type (`spec-v0.md` §8.5), so no site accepts a second argument and drops it.
+  Landing MPTC would reopen each of those checks.
 - **Functional dependencies.** Out even if the conditional door below is ever opened.
 - **Overlapping and incoherent instances.** Never. Overlap stays an unconditional error.
 - **Quantified constraints; undecidable superclasses.**
