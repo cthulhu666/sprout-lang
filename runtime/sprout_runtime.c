@@ -4834,22 +4834,32 @@ static int fs_clear_nonblock(int fd) {
   return fcntl(fd, F_SETFL, fl & ~O_NONBLOCK);
 }
 
-/* Open `path` for fs_read_bytes / fs_write_bytes: regular files only. Returns 0 with *fd_out set,
- * else a Result Err in *err_out.
+static long long fs_not_regular(const char* path) {
+  return fs_err_text(SPROUT_TAG(stdlib$fs$FsIoError), path, "not a regular file");
+}
+
+/* Open `path` for fs_read_bytes / fs_write_bytes: regular files only. Returns 0 with *fd_out set
+ * and *st_out filled from the descriptor's fstat, else a Result Err in *err_out.
  *
- * stat first (following symlinks), so a FIFO, device or socket is rejected without being opened:
- * opening one could block, or give its peer an EOF. A directory is not rejected here; it keeps its
- * own answers (read: EISDIR; write: the open fails EISDIR). ENOENT is an error for a read and
- * proceeds to create for a write. The open is O_NONBLOCK so a file swapped in for a FIFO after
- * the stat cannot block it, and the fstat re-check of the descriptor catches that swap. */
-static int fs_open_regular(const char* path, int flags, int mode, int is_read,
-                           int* fd_out, long long* err_out) {
+ * stat first (following symlinks), so a FIFO, device or socket is not opened at all: an open could
+ * block, or give a FIFO's peer an EOF. If the path is swapped between the stat and the open, the
+ * O_NONBLOCK open cannot block and the fstat re-check stops any read or write; a FIFO swapped in
+ * during that window can still be opened and closed.
+ *
+ * A directory is not rejected by the stat. A read answers EISDIR explicitly rather than leaving it
+ * to read(2), because the platforms disagree about it (reading a directory fd fails with EISDIR on
+ * Linux and can succeed elsewhere) and a caller matching on FsIsADirectory deserves the same answer
+ * everywhere; a write lets the open fail with EISDIR. ENOENT is an error for a read and proceeds
+ * to create for a write. */
+static int fs_open_regular(const char* path, int flags, int mode,
+                           int* fd_out, struct stat* st_out, long long* err_out) {
+  int is_read = (flags & O_ACCMODE) == O_RDONLY;
   struct stat st;
   if (stat(path, &st) == 0) {
     if (S_ISDIR(st.st_mode)) {
       if (is_read) { *err_out = fs_err(EISDIR, path); return -1; }
     } else if (!S_ISREG(st.st_mode)) {
-      *err_out = fs_err_text(SPROUT_TAG(stdlib$fs$FsIoError), path, "not a regular file");
+      *err_out = fs_not_regular(path);
       return -1;
     }
   } else if (errno != ENOENT || is_read) {
@@ -4863,11 +4873,10 @@ static int fs_open_regular(const char* path, int flags, int mode, int is_read,
   if (fd < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) fd = cloexec_open(path, flags, mode);
   if (fd < 0) { *err_out = fs_err(errno, path); return -1; }
 
-  struct stat fst;
-  if (fstat(fd, &fst) != 0) { int e = errno; close(fd); *err_out = fs_err(e, path); return -1; }
-  if (!S_ISREG(fst.st_mode)) {
+  if (fstat(fd, st_out) != 0) { int e = errno; close(fd); *err_out = fs_err(e, path); return -1; }
+  if (!S_ISREG(st_out->st_mode)) {
     close(fd);
-    *err_out = fs_err_text(SPROUT_TAG(stdlib$fs$FsIoError), path, "not a regular file");
+    *err_out = fs_not_regular(path);
     return -1;
   }
   if (fs_clear_nonblock(fd) != 0) { int e = errno; close(fd); *err_out = fs_err(e, path); return -1; }
@@ -4878,23 +4887,16 @@ static int fs_open_regular(const char* path, int flags, int mode, int is_read,
 /* Result FsError Bytes: the whole file, with NO UTF-8 validation.
  *
  * Regular files only (see fs_open_regular). A FIFO open with no writer would block the scheduler
- * thread, and a device such as /dev/zero never reaches EOF. stdin is terminal.read_stdin_bytes.
- *
- * The directory case is checked explicitly rather than left to read(2), because
- * the platforms disagree about it — reading a directory fd fails with EISDIR on
- * Linux and can succeed on some systems — and a caller matching on
- * FsIsADirectory deserves the same answer everywhere. */
+ * thread, and a device such as /dev/zero never reaches EOF. stdin is terminal.read_stdin_bytes. */
 long long fs_read_bytes(long long path_i) {
   const char* path = (const char*)(uintptr_t)path_i;
   long long rejected;
   if (fs_path_rejected(path, &rejected)) return rejected;
 
   int fd;
-  long long open_err;
-  if (fs_open_regular(path, O_RDONLY, 0, 1, &fd, &open_err) != 0) return open_err;
-
   struct stat st;
-  if (fstat(fd, &st) != 0) { int e = errno; close(fd); return fs_err(e, path); }
+  long long open_err;
+  if (fs_open_regular(path, O_RDONLY, 0, &fd, &st, &open_err) != 0) return open_err;
 
   size_t cap = (st.st_size > 0) ? (size_t)st.st_size + 1 : 4096;
   size_t len = 0;
@@ -4946,8 +4948,9 @@ long long fs_write_bytes(long long path_i, long long bytes_h) {
   if (payload == NULL) sprout_fail("fs_write_bytes: null payload");
 
   int fd;
+  struct stat st;
   long long open_err;
-  if (fs_open_regular(path, O_WRONLY | O_CREAT | O_TRUNC, 0666, 0, &fd, &open_err) != 0)
+  if (fs_open_regular(path, O_WRONLY | O_CREAT | O_TRUNC, 0666, &fd, &st, &open_err) != 0)
     return open_err;
 
   /* write(2) may transfer fewer bytes than asked for on any descriptor, so the

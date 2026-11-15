@@ -178,8 +178,10 @@ performance-motivated (rule 6).
 FIFO, device or socket is answered `FsIoError "<path>: not a regular file"` without being opened
 (an open could block, or give a FIFO's peer an EOF; a read of a device may never end). A directory
 keeps its own answer (`EISDIR`). The open is then `O_NONBLOCK` and the descriptor is `fstat`ed
-again, which guards against the path being swapped between the two; `O_NONBLOCK` is retried off
-when a lease makes it fail with `EWOULDBLOCK`. Stdin is `terminal.read_stdin_bytes`.
+again. If the path is swapped between the stat and the open, the open cannot block and the re-check
+stops any read or write; a FIFO swapped in during that window can still be opened and closed.
+`O_NONBLOCK` is retried off when a lease makes it fail with `EWOULDBLOCK`. Stdin is
+`terminal.read_stdin_bytes`.
 
 The approved plan named six; `fs_write_bytes` is a seventh, added on explicit sign-off after the
 tests exposed why the sixth cannot ship alone. Sprout can already send arbitrary bytes over a
