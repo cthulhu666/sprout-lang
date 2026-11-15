@@ -1,0 +1,6 @@
+# A swapped superclass whose written head is not the class variable hints the class variable.
+class Sh t where u Eq
+#~^ ERROR
+  fn sh(x: t) -> Bool
+
+fn main() -> Unit !{IO} = print("unreachable")

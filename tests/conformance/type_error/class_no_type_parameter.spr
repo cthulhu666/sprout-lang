@@ -1,0 +1,5 @@
+# A class declares exactly one type parameter; none leaves nothing to dispatch on.
+class Foo
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

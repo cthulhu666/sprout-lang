@@ -402,7 +402,8 @@ export fn typecheck_typed_with_census(modules: List (List ast.Decl), extra: List
     (result, pieces)
 
 # Both report phases check one program the same way; each reads its report off
-# `state` afterwards.
+# `state` afterwards. `extra` must not carry an `@inst:` marker for an instance the program
+# lacks: resolve would find no bundled instance for it (resolve.reject_unresolved).
 fn typecheck_unenforced(state: unifier.InferState, modules: List (List ast.Decl),
                         extra: List (String, types.Scheme)) -> typed_ast.TypedResult !{IO} =
   infer.typecheck_decls(state, desugar_modules(modules), dict_from_list(builtin_entries() ++ extra), dict_empty(), dict_empty())

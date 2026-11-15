@@ -1,0 +1,40 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.string as string
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.resolve as resolve
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+
+# resolve.reject_unresolved: a bare class method whose evidence names no instance. The
+# declaration rules (one class parameter, one type per constraint) leave one producer,
+# an `@inst:` marker in `extra` for an instance the program lacks, and the result is an
+# internal error, not advice to the author. Every pipeline caller passes no `extra`, so
+# the same program is an ordinary missing instance there.
+
+let src: String =
+  "class Conv t\n  fn conv(x: Int) -> t\n\nfn apply(f: Int -> String, n: Int) -> String = f(n)\n\nfn use() -> String = apply(conv, 1)\n"
+
+fn resolve_message(extra: List (String, types.Scheme)) -> String !{IO} =
+  let Ok toks = lexer.tokenize(src) else Err _ -> "lex error"
+      Ok prog = parser.parse_program(toks) else Err _ -> "parse error"
+  in do
+       tc <- checker.typecheck_typed(prog, extra)
+       match tc with
+       | typed_ast.TypedErr _ msg -> msg
+       | typed_ast.TypedOk typed env ->
+           match resolve.resolve_program(typed, env) with
+           | resolve.ResolveErr _ msg -> msg
+           | resolve.ResolveOk _ -> "accepted"
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    with_marker <- resolve_message([(types.inst_marker_key("Conv", "String"), types.presence_marker)])
+    assert_true(state, "a marker with no instance is an internal error",
+                string.contains(with_marker, "internal error: no instance of `Conv` was determined for `conv`"))
+    without <- resolve_message(Nil)
+    assert_true(state, "no marker is an ordinary missing instance",
+                string.contains(without, "No instance of Conv for String"))
+    summary(state)

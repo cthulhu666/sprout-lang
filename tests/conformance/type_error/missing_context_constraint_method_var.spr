@@ -7,6 +7,7 @@ class Mk t
   fn mk(x: t, g: Int -> b) -> b
 
 instance Mk Box where Eq b
+#~^ ERROR
   fn mk(x: Box, g: Int -> b) -> b =
     let r = g(1)
     in if Just(r) == Just(r) then r else r

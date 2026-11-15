@@ -59,8 +59,9 @@ unsuccessfully papering over.
 
 - Kind polymorphism, kind variables, kind signatures, or any kind but `*` and
   arrows over `*`.
-- Multi-parameter type classes — Sprout has none, and the check keys on one class
-  parameter exactly as `check_missing_superclass_instances` already does.
+- Multi-parameter type classes — Sprout has none: a class declares exactly one
+  parameter (spec §8.5), and the check keys on it as
+  `check_missing_superclass_instances` does.
 - Kind checking of type expressions generally (`fn f(x: Int Bool)`).
 - ~~Type-alias instance heads. They do not dispatch today (an instance is registered
   under the alias name, `register_instance_marker`), so their arity is moot until
@@ -350,8 +351,7 @@ without complaint, and the `run` ones are stated per fixture.
   Tagged`); `class_var_arity_disagreement` and
   `class_superclass_var_arity_disagreement`, which separate the two ways a class can
   contradict itself — between its own methods, and against a superclass.
-- Conformance `run`: `instance_context_var_absent_from_head`, rejected today and the
-  regression this branch must undo; `class_superclass_var_arity_agrees` and
+- Conformance `run`: `class_superclass_var_arity_agrees` and
   `instance_head_c_runtime_arity` (heads over `Ref` and `Vector`, whose arity has no
   decl and no marker), both passing today and guarding against a check that rejects
   what it should accept.
@@ -406,8 +406,8 @@ head, an existential and a devirtualized concrete call.
 
 ## 11. Deferred
 
-- Multi-parameter type classes: `classvar_arity` becomes per-parameter and the
-  head check runs per argument.
+- Multi-parameter type classes, which a class declaration now rejects (spec §8.5):
+  `classvar_arity` would become per-parameter and the head check run per argument.
 - Kind checking of arbitrary type expressions, which would catch `fn f(x: Int Bool)`.
 - ~~Type-alias instance heads, once they dispatch.~~ Done — they dispatch, and the
   check reads the expansion (`docs/alias-instance-heads-v0.md`).

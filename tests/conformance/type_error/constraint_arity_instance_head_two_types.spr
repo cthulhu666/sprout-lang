@@ -1,0 +1,10 @@
+# An instance head applies its class to exactly one type. `Sh` is a user class, so
+# the overlap check has nothing to say about it.
+class Sh t
+  fn sh(x: t) -> Bool
+
+instance Sh Int Bool
+#~^ ERROR
+  fn sh(x: Int) -> Bool = true
+
+fn main() -> Unit !{IO} = print("unreachable")

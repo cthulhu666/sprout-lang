@@ -1,0 +1,1 @@
+the superclass `u Eq` of `Sh` names its class second and must constrain the class variable `t`: `where Eq t`

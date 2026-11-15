@@ -1,0 +1,4 @@
+# sprout-ignore-all lint/unparsed: parse-error fixture — this file must not parse
+# A constructor `where` constraint applies its class to exactly one type; a second
+# argument is not dropped.
+type Foo = | exists a b. Bar a b where ToString a b

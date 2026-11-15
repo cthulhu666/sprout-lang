@@ -1,0 +1,1 @@
+the superclass `t Eq` of `Sh` names its class second; write the class first: `where Eq t`

@@ -1,0 +1,7 @@
+# A superclass applies its class to the class variable alone. `Eq t t` used to mean
+# `Eq t`, the second argument dropped.
+class Sh t where Eq t t
+#~^ ERROR
+  fn sh(x: t) -> Bool
+
+fn main() -> Unit !{IO} = print("unreachable")

@@ -1,0 +1,6 @@
+# The arity rule runs before the overlap check: this is not "overlapping instances".
+instance Eq Int Int
+#~^ ERROR
+  fn eq(x: Int, y: Int) -> Bool = true
+
+fn main() -> Unit !{IO} = print("unreachable")

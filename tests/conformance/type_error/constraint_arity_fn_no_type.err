@@ -1,0 +1,1 @@
+`Eq` applies `Eq` to 0 types; a constraint applies its class to exactly one type

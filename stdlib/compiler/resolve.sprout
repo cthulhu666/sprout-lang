@@ -503,12 +503,10 @@ fn te_app_depth(te: ast.TypeExpr) -> Int =
   | ast.TypeApply base _ -> 1 + te_app_depth(base)
   | _ -> 0
 
-# A context variable the head match leaves unbound used to be rejected here, on the
-# reasoning that the head and the dispatch type must then disagree about the class
-# variable's arity. They need not: `instance Foo Bar where Baz k` binds no `k` and
-# has no arity story at all. The arity disagreement is now caught at the
-# declaration (infer.check_instance_head_kinds), so an unbound variable reaching
-# here is exempt — see check_context_constraint.
+# Each context constraint of the instance, at the dispatch type. A context names only
+# variables of the head (infer.instance_decl_error), so every one is bound by `subs`.
+# A context on an applied variable (`where C (f a)`) is checked only where it is concrete:
+# `where` on one is not supported, so no caller can forward it, and the body cannot use it.
 fn check_context_subs(
   outer_class: String,
   outer_head: ast.TypeExpr,
@@ -526,10 +524,8 @@ fn check_context_subs(
       | Nothing -> check_context_subs(outer_class, outer_head, rest, subs, pos, cover, tables)
 
 # One context constraint at the dispatch type. A concrete head is checked like any
-# constraint. A variable head is a variable of the enclosing declaration, and must
-# be one it forwards — unless the instance head never bound it (`instance Foo Bar
-# where Baz k`): no caller can name that slot, and it stays unfilled
-# (tests/conformance/run/instance_context_var_absent_from_head.spr).
+# constraint. A bare variable head is a variable of the enclosing declaration, and must
+# be one it forwards. A head written applied that stays non-concrete is skipped.
 fn check_context_constraint(
   outer_class: String,
   outer_head: ast.TypeExpr,
@@ -541,16 +537,16 @@ fn check_context_constraint(
 ) -> Maybe(source.SourcePos, String) =
   let ast.TypeConstraint class_name type_args = substitute_constraint(ic, subs)
       [head_arg | _] = type_args else Nothing
+      ast.TypeConstraint _ written_args = ic
   in
     if head_is_concrete(head_arg) then check_constraint(ast.TypeConstraint(class_name, type_args), pos, cover, tables)
-    else if context_head_bound(ic, subs) then
-      unsupplied_context_var(outer_class, outer_head, class_name, type_args, pos, cover)
-    else Nothing
+    else if is_applied_arg(written_args) then Nothing
+    else unsupplied_context_var(outer_class, outer_head, class_name, type_args, pos, cover)
 
-fn context_head_bound(ic: ast.TypeConstraint, subs: Dict ast.TypeExpr) -> Bool =
-  let ast.TypeConstraint _ type_args = ic
-      [ast.TypeName v | _] = type_args else false
-  in dict_member(v, subs)
+fn is_applied_arg(type_args: List ast.TypeExpr) -> Bool =
+  match type_args with
+  | [ast.TypeApply _ _ | _] -> true
+  | _ -> false
 
 # Only a variable the declaration's signature names is checked: one the program
 # wrote, or an unannotated parameter's placeholder (`_unann@<fn>/<param>`, named by
@@ -661,10 +657,12 @@ fn unann_slot(owner_and_param: String) -> String =
 #                                  that lowering null-fills on the ctx_fwd miss)
 #   * concrete head, bundled    → EvInstance key children  (children = one Evidence
 #                                  per substituted instance context constraint)
-#   * concrete head, env-marker → EvUnresolved    (a multi-parameter class: its marker
-#                                  names the first parameter only; lowering emits
-#                                  __unresolved_ sentinels)
+#   * concrete head, env-marker → EvUnresolved    (an `@inst:` marker with no bundled
+#                                  instance; no caller supplies one, so a guard)
 #   * concrete head, no instance→ EvMissing       (unreachable once check passes)
+#
+# A constraint applies its class to one type (infer.decl_constraint_error), so the empty
+# argument list below is a guard too.
 #
 # fwd_keys is the set of constraint_keys the enclosing function forwards (its
 # where-clause constraints, super-expanded) — built exactly as lowering's
@@ -788,18 +786,6 @@ fn te_vars(te: ast.TypeExpr, acc: List String) -> List String =
   | ast.TypeThunk r _ -> te_vars(r, acc)
   | ast.TypeEffect inner _ -> te_vars(inner, acc)
 
-# An instance context constraint on a variable the head does not bind (`instance Mk Box
-# where Eq b`) is accepted, but no caller can fill its slot, so it supplies nothing.
-fn head_bound(inst_constraints: List ast.TypeConstraint, bound: List String) -> List ast.TypeConstraint =
-  list_filter(\c -> head_binds_all(c, bound), inst_constraints)
-
-fn head_binds_all(c: ast.TypeConstraint, bound: List String) -> Bool =
-  all(\v -> list_member(v, bound), te_vars_list(constraint_args(c), []))
-
-fn constraint_args(c: ast.TypeConstraint) -> List ast.TypeExpr =
-  match c with
-  | ast.TypeConstraint _ type_args -> type_args
-
 # Transitive-superclass DFS order now comes from the single shared source
 # types.class_with_transitive_supers (the same one ast_to_ir's existential
 # witness-slot count and lowering's unpack use), so resolve's PACK order and that
@@ -889,12 +875,11 @@ fn resolve_decl(d: typed_ast.TypedDecl, tables: Tables) -> Result(source.SourceP
   | typed_ast.TInstanceDecl constraint inst_constraints methods ->
       let bound = head_vars(constraint)
           kind = InInstanceMethod(bound)
-          ctx = head_bound(inst_constraints, bound)
           ast.TypeConstraint cls type_args = constraint
           head = typed_ast.type_expr_head_name(head_pattern(type_args))
           inst_tables = with_bounded(bound_vars(types.inst_bound_key(cls, head), typed_ast.instance_display(cls, type_args), tables),
                                      tables)
-          ms = try resolve_all(resolve_method(_, kind, ctx, (cls, head), inst_tables), methods)
+          ms = try resolve_all(resolve_method(_, kind, inst_constraints, (cls, head), inst_tables), methods)
       in Ok(typed_ast.TInstanceDecl(constraint, inst_constraints, ms))
   | typed_ast.TExternFnDecl _ _ _ _ -> Ok(d)
   | typed_ast.TPassThrough _ -> Ok(d)

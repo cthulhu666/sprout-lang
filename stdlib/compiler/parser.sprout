@@ -1845,7 +1845,7 @@ fn validate_ctor_bounds(exist_vars: List String, bounds: List String, tokens: Ve
 
 fn constraint_var_name(c: ast.TypeConstraint) -> Maybe String =
   match c with
-  | ast.TypeConstraint _ [ast.TypeName v | _] -> Just(v)
+  | ast.TypeConstraint _ [ast.TypeName v] -> Just(v)
   | ast.TypeConstraint _ _ -> Nothing
 
 # Collect constructor fields, recognizing the `any C` sugar (docs/gadts-v0.md §6)

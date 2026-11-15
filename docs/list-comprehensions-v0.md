@@ -396,10 +396,8 @@ Three alternatives for the *dispatch* (as opposed to its timing) were rejected:
   is kind `* -> *` while `IntRange` is `IntRange Int Int Int`
   (`prelude.sprout:79`) — monomorphic in `Int`, so it can never have an
   instance. A two-parameter `class Generator src elem` cannot dispatch either:
-  instance keying is single-parameter throughout, of which
-  `add_class_param` (`resolve.sprout:343-346`, keeping only the head parameter
-  via `| [p | _] -> dict_set(class_name, p, acc)`) is one visible symptom rather
-  than the whole proof.
+  a class takes exactly one parameter (spec §8.5), and instance keying is
+  single-parameter throughout; `typed_ast.first_param_at` is one place it shows.
 - **A syntactic special-case** on the `IntRangeExpr` node (`ast.sprout:118`).
   Cheap, but it works only in the literal shape: `let r = 1..n in [i * i for i
   in r]` and `[i * i for i in bounds()]` would both fail with an error

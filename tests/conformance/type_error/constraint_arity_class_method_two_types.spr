@@ -1,0 +1,6 @@
+# The method-level `where` of a class signature applies its class to one type.
+class Sh t
+#~^ ERROR
+  fn sh(x: t, y: b) -> Bool where Eq b b
+
+fn main() -> Unit !{IO} = print("unreachable")

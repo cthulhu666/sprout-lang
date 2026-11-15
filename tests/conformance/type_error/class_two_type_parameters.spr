@@ -1,0 +1,6 @@
+# A class declares exactly one type parameter; a second has no dispatch.
+class Conv a b
+#~^ ERROR
+  fn conv(x: a) -> b
+
+fn main() -> Unit !{IO} = print("unreachable")

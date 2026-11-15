@@ -1,0 +1,13 @@
+# An applied instance context that is concrete at the use site (`ToString (Opaque Int)`)
+# is checked like any constraint, so a missing instance is reported here, not at run time.
+type Wrap f a = Wrap(f a)
+
+type Opaque a = Opaque(a)
+
+instance ToString (Wrap f a) where ToString (f a)
+  fn to_string(w: Wrap f a) -> String =
+    match w with
+    | Wrap _ -> "wrap"
+
+fn main() -> Unit !{IO} = print(to_string(Wrap (Opaque(1))))
+#~^ ERROR

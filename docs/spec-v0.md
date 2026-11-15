@@ -1334,9 +1334,10 @@ The prefix scopes over **all** the constructor's fields, so it additionally
 expresses a hidden variable spanning several fields (shared hidden state) and a
 constrained variable that appears only nested inside a compound field. The `where`
 keyword matches every other constraint site in the language; `=>` is not used. A
-`where` clause is valid only on an existential: each constraint must apply a class
-to a variable bound by the `exists` prefix, or be `linear` on one (§5.8) — otherwise
-it is a parse error (it must not constrain a head parameter).
+`where` clause is valid only on an existential: each constraint applies its class to
+one variable bound by the `exists` prefix (a constraint applies its class to exactly
+one type, §8.5), or is `linear` on one (§5.8) — otherwise it is a parse error (it must
+not constrain a head parameter).
 
 The packed dictionaries belong to the constructor pattern, so a field may be matched
 by any pattern: a variable, `_`, a tuple or a nested constructor
@@ -3412,19 +3413,60 @@ rejected, naming the class and the position.  Rationale
 and the hidden-argument layout: `docs/method-level-constraints-v0.md`.
 
 **Constraint syntax.**  A `where` clause names the **class first, then the
-constrained type variable(s)**: `where ToString a`, `where Applicative f`,
-`where Eq a, Ord b`.  Two well-formedness rules are enforced at check time, both
+constrained type**: `where ToString a`, `where Applicative f`, `where Eq a, Ord b`
+(*A class takes one type parameter*, below, says what the type may be).  Two
+well-formedness rules are enforced at check time, both
 preventing a silently-dropped constraint from lowering to an undefined class-method
 call that would otherwise only fail at link time:
 
 - A variable-first ordering (`where a ToString`) is rejected — the head token is
   read as the class name, so `a` is diagnosed as "not a class", with a hint
-  suggesting the corrected order.
+  suggesting the corrected order.  A superclass written so gets the same hint.
 - The constrained type variable must **appear in the function's signature**
   (a parameter annotation or the return type).  A constraint on a variable that
   does not — e.g. `where ToString x` where `x` is an *unannotated value
   parameter*, or `where Eq b` where only `a` is annotated — is rejected as
   ambiguous, since no call site could ever determine the type to dispatch on.
+
+**A class takes one type parameter, and a constraint applies its class to one
+type.**  An instance is selected by one dispatch type and a dictionary is keyed on
+it alone, so Sprout has no multi-parameter classes.  Three rules are checked at the
+declaration, before any use:
+
+1. A class declares exactly one type parameter.
+2. Every constraint applies its class to exactly one type, wherever it is written: a
+   function's `where`, a class method's `where`, an instance method's `where`, an
+   instance head, an instance's context, and a constructor's `where` (§5.6).  A
+   superclass is held to more: its one type must be the class's own variable, bare.
+3. An instance's context names only variables of its head.  A variable a method's
+   signature writes that the head does not is the method's own, which a method-level
+   `where` constrains.
+
+| declaration | rejected because |
+|---|---|
+| `class Foo` | it declares no type parameter |
+| `class Conv a b` | it declares two |
+| `fn f(x: a, y: b) -> Bool where Eq a b` | `Eq` is applied to two types |
+| `fn f(x: a) -> Bool where Eq` | `Eq` is applied to none |
+| `instance Sh Int Bool`, `instance Sh` | the head applies `Sh` to two types, or none |
+| `instance ToString (Box a) where Eq a a` | the context applies `Eq` to two types |
+| `class Sh t where Eq u`, `where Eq Int`, `where Eq (List t)` | a superclass is not the class variable, bare |
+| `class Sh t where Eq t t` | the superclass applies `Eq` to two types |
+| `class Sh t where t Eq` | the superclass names its class second |
+| `class Sh t where u Eq` | the superclass names its class second and constrains another variable |
+| `instance Foo Bar where Baz k` | `k` is not in the head `Foo Bar` |
+| `instance Mk Box where Eq b`, `b` a method's own variable | the context does not reach it |
+
+```
+class `Conv` declares 2 type parameters; a class takes exactly one
+`Eq a b` applies `Eq` to 2 types; a constraint applies its class to exactly one type
+the instance head `Sh Int Bool` applies `Sh` to 2 types; an instance head applies its class to exactly one type
+the superclass `Eq u` of `Sh` must constrain the class variable `t`
+the superclass `t Eq` of `Sh` names its class second; write the class first: `where Eq t`
+the superclass `u Eq` of `Sh` names its class second and must constrain the class variable `t`: `where Eq t`
+the instance context `Baz k` names `k`, which does not appear in the instance head `Foo Bar`
+the instance context `Eq b` names `b`, which the instance head `Mk Box` does not bind; constrain a method's own variable with a method-level `where`
+```
 
 **Ambiguous class-method dispatch.**  The two rules above are about a *declared*
 `where` clause.  An expression can also be ambiguous with no `where` clause
@@ -3806,7 +3848,8 @@ Int)`) it stands for a type constructor, so its heads must leave that many argum
 off.  Every method of the class, and each of its superclasses, must agree on the
 count; a class whose own methods disagree is rejected at the *class* declaration,
 because no head could satisfy it.  Sprout has no kind syntax and no kind variables,
-so with one class parameter this single count is the whole of the kind.
+so with one class parameter (enforced: *A class takes one type parameter*, above) this
+single count is the whole of the kind.
 
 | declaration | rejected because |
 |---|---|
