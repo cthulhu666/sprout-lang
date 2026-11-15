@@ -38,7 +38,7 @@ cd "$REPO"
 # repo, and wrk is time-bound (the request count, hence the allocation count, varies run to run
 # and arm to arm), so cycles could not be held equal. bench/results-2026-09-30-gc-floor.md §3
 # measured a wrk-driven server at +-30% rps spread, too wide to resolve a GC difference.
-ALL_WORKLOADS="selfcompile compiler_test digit_recognizer gc_roots http_log_middleware nqueens astar math_transcendental mutvec_int load_spike galaxy_client"
+ALL_WORKLOADS="selfcompile compiler_test digit_recognizer gc_roots http_log_middleware nqueens astar math_transcendental mutvec_int load_spike rotate_classes mutvec_push galaxy_client"
 UNSUNS="${UNSUNS:-$HOME/GameDev/uncharted-suns}"
 CATALOG="${CATALOG:-$HOME/GameDev/universegen/catalog}"
 COMPILER="$REPO/build/compile_driver_bin_stage1"
@@ -163,6 +163,10 @@ wl_def() {
     load_spike)
       W_SRC=bench/gc_minor/load_spike.sprout; W_CMD=("$BIN/load_spike")
       W_THR=283000 ;;     # 252 cycles, peak live 174k
+    rotate_classes)       # slot classes take turns: exact-fit placement retains
+      W_SRC=bench/gc_trigger/rotate_classes.sprout; W_CMD=("$BIN/rotate_classes") ;;
+    mutvec_push)          # each push releases an inline tail
+      W_SRC=bench/gc_place/mutvec_push.sprout; W_CMD=("$BIN/mutvec_push") ;;
     galaxy_client)
       # What a player runs (§13.6): game/app.sprout on the catalog, auto-closing after 1200 frames.
       # --system pins the start system: the default is a random home seeded by the clock, which
