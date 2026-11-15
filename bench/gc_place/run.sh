@@ -12,8 +12,6 @@
 # region counts are comparable with the `base` policy. The runtime is built with
 # -DSPROUT_GC_ALLOCTRACE and linked per workload with a plain clang -O2 link (not the
 # whole-program link of `just compile-native`: placement does not depend on inlining).
-# Each run also sets SPROUT_DEBUG_GC=1: the same run's cycle lines give today's walked= slots per
-# collection kind, saved as <dir>/<workload>.walked.txt and handed to the replay.
 # <dir>/<workload>.txt holds the check line, the program's stdout, the tables (calibration line
 # first) and the replay's time and peak RSS.
 # Exit status 1 when a replay fails or `base` does not replay the trace exactly (regions, large
@@ -84,27 +82,6 @@ wl_def() {
   esac
 }
 
-# walked_by_kind <stderr of a SPROUT_DEBUG_GC=1 run>: "<k> <name> n=<cycles> mean=<walked> max=<walked>" per
-# collection kind (0 minors off, 1 major, 2 young-only minor, 3 full-sweep minor), from the cycle lines.
-walked_by_kind() {
-  awk '
-    /^\[sprout gc\] cycle=/ {
-      k = 0
-      if ($0 ~ / kind=major/) k = 1
-      else if ($0 ~ / kind=minor sweep=young/) k = 2
-      else if ($0 ~ / kind=minor sweep=full/) k = 3
-      if (match($0, /walked=[0-9]+/)) {
-        w = substr($0, RSTART + 7, RLENGTH - 7) + 0
-        n[k]++; sum[k] += w
-        if (w > mx[k]) mx[k] = w
-      }
-    }
-    END {
-      split("off major minor_young minor_full", nm, " ")
-      for (k = 0; k < 4; k++) if (n[k] > 0) printf "%d %s n=%d mean=%.2f max=%.0f\n", k, nm[k + 1], n[k], sum[k] / n[k], mx[k]
-    }' "$1"
-}
-
 # "real max_rss_mib" from a `/usr/bin/time` report, BSD `-l` (bytes) or GNU `-v` (KiB), told by format.
 time_fields() {
   awk '
@@ -160,7 +137,7 @@ for w in $WORKLOADS; do
   echo "==> recording $w" >&2
   rc=0
   # The alarm survives perl's exec, so a livelock ends the run instead of hanging.
-  (cd "$W_DIR" && exec env "${W_ENV[@]}" SPROUT_GC_ALLOCTRACE="$trace" SPROUT_GC_REGION_LISTS=1 SPROUT_DEBUG_GC=1 \
+  (cd "$W_DIR" && exec env "${W_ENV[@]}" SPROUT_GC_ALLOCTRACE="$trace" SPROUT_GC_REGION_LISTS=1 \
     perl -e 'alarm shift; exec @ARGV' "$RUN_TIMEOUT" "${W_CMD[@]}") > "$OUT/$w.out" 2> "$OUT/$w.err" || rc=$?
   if [[ $rc != 0 ]]; then
     echo "ERROR: $w exited $rc (see $OUT/$w.err)" >&2
@@ -168,7 +145,6 @@ for w in $WORKLOADS; do
     rm -f "$trace"
     continue
   fi
-  walked_by_kind "$OUT/$w.err" > "$OUT/$w.walked.txt"
   {
     echo "# $w: trace $(wc -c < "$trace" | tr -d ' ') bytes; stdout: $(head -c 200 "$OUT/$w.out" | head -1)"
     if ! "$REPLAY" --check "$trace"; then echo "# --check FAILED"; fi
@@ -181,7 +157,7 @@ for w in $WORKLOADS; do
   fi
   echo "==> replaying $w" >&2
   rc=0
-  /usr/bin/time "$TIME_FLAG" -o "$OUT/$w.time" "$REPLAY" --policies all --walked "$OUT/$w.walked.txt" "$trace" >> "$txt" 2>> "$txt" || rc=$?
+  /usr/bin/time "$TIME_FLAG" -o "$OUT/$w.time" "$REPLAY" --policies all "$trace" >> "$txt" 2>> "$txt" || rc=$?
   read -r real rss < <(time_fields "$OUT/$w.time")
   echo "# replay: ${real}s wall, peak RSS ${rss} MiB" >> "$txt"
   [[ $rc == 0 ]] || { echo "ERROR: replay of $w failed" >&2; FAILED=1; }

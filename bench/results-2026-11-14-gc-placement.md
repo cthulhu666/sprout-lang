@@ -2,7 +2,7 @@
 
 `docs/gc-stage2-v0.md` §5.7 options C (holes) and E (single-class regions), compared offline.
 `bash bench/gc_place/run.sh <dir>` records each workload with `-DSPROUT_GC_ALLOCTRACE`,
-`SPROUT_GC_REGION_LISTS=1` and `SPROUT_DEBUG_GC=1` at default GC settings, then replays the trace
+`SPROUT_GC_REGION_LISTS=1` at default GC settings, then replays the trace
 (`bench/gc_place/replay.c`) under each policy. Which objects a collection frees does not depend on
 placement, so every policy replays the same allocations and frees at the same collections.
 

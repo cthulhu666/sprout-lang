@@ -4496,7 +4496,7 @@ gc-alloctrace-check: bootstrap-from-seed
   }
   failed=0
   build_one tests/gc_gen/inline_tail_reuse.spr inline_tail_reuse || exit 1
-  for case in "default|A=1" "minor0|SPROUT_GC_MINOR=0" "stress|SPROUT_GC_STRESS=1" \
+  for case in "default|" "minor0|SPROUT_GC_MINOR=0" "stress|SPROUT_GC_STRESS=1" \
               "stress_rl|SPROUT_GC_STRESS=1 SPROUT_GC_REGION_LISTS=1"; do
     # shellcheck disable=SC2086
     run_case inline_tail_reuse "${case%%|*}" ${case#*|} || { failed=1; continue; }
@@ -4510,7 +4510,7 @@ gc-alloctrace-check: bootstrap-from-seed
   run_case region_empty_minor stress SPROUT_GC_STRESS=1 || failed=1
   # Minors and majors without STRESS, and objects past the large-slot threshold.
   build_one tests/stdlib/test_gc_large_object_arena.spr test_gc_large_object_arena || exit 1
-  for case in "default|A=1" "minor0|SPROUT_GC_MINOR=0" "stress|SPROUT_GC_STRESS=1"; do
+  for case in "default|" "minor0|SPROUT_GC_MINOR=0" "stress|SPROUT_GC_STRESS=1"; do
     # shellcheck disable=SC2086
     run_case test_gc_large_object_arena "${case%%|*}" ${case#*|} || { failed=1; continue; }
     (( $(field large) > 0 )) \
