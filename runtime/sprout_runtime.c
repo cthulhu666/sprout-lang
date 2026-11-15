@@ -698,11 +698,10 @@ static void sprout_gc_log_cycle(
   long long sweep_us
 ) {
   if (!g_debug_gc_enabled) return;
-  /* walked= and free= go last: bench/gc_pause/pause_stats.py reads swept= and
-     elapsed_us= as adjacent fields.  kind= follows them, and only with
-     the mode on (the default), so SPROUT_GC_MINOR=0 leaves the line unchanged.
-     A minor adds sweep=young or sweep=full: which sweep it ran.  sweep_us= ends the
-     line: the sweep's share of elapsed_us; the rest is mostly marking. */
+  /* Field order: swept= and elapsed_us= stay adjacent, which bench/gc_pause/pause_stats.py
+     reads.  walked= and free= follow, then kind= (only with minors on; a minor adds
+     sweep=young or sweep=full: which sweep it ran).  sweep_us= always ends the line,
+     minors on or off: the sweep's share of elapsed_us; the rest is mostly marking. */
   fprintf(
     stderr,
     "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld live=%lld roots=%lld marked=%lld alloc_since_gc=%lld swept=%lld elapsed_us=%lld arena_regions=%lld overflow_regions=%lld walked=%lld free=%lld%s sweep_us=%lld\n",
@@ -1968,12 +1967,16 @@ static void sprout_at_emit(char tag, const uint64_t* v, int n) {
   }
 }
 
-static uint64_t* sprout_at_slot_id(void* payload) {
-  SproutRegion* r = region_find(payload);
-  if (r == NULL) sprout_fail("alloctrace: object is not in a region");
+static uint64_t* sprout_at_slot_id_in(SproutRegion* r, void* payload) {
   if (r->is_large) return &r->tr_large_id;
   if (r->tr_ids == NULL) sprout_fail("alloctrace: object is not in a traced region");
   return &r->tr_ids[(size_t)((char*)payload - 8 - r->base) / SPROUT_SLOT_GRAN];
+}
+
+static uint64_t* sprout_at_slot_id(void* payload) {
+  SproutRegion* r = region_find(payload);
+  if (r == NULL) sprout_fail("alloctrace: object is not in a region");
+  return sprout_at_slot_id_in(r, payload);
 }
 
 static uint64_t sprout_at_alloc(SproutHeapKind kind, size_t slot_bytes) {
@@ -1982,9 +1985,10 @@ static uint64_t sprout_at_alloc(SproutHeapKind kind, size_t slot_bytes) {
   return g_at_next_id++;
 }
 
-static void sprout_at_free(void* payload) {
+/* `r` is the region holding payload; both sweeps have it in hand. */
+static void sprout_at_free(SproutRegion* r, void* payload) {
   if (!sprout_at_on()) return;
-  uint64_t id = *sprout_at_slot_id(payload);
+  uint64_t id = *sprout_at_slot_id_in(r, payload);
   sprout_at_emit('F', &id, 1);
 }
 
@@ -3707,12 +3711,15 @@ static inline void sprout_gc_census_sub(SproutHeapKind kind, unsigned long long 
  * lineage an OBJ is poisoned and kept, not listed; any other slot releases its extras and gets
  * a FREE header.  Returns 1 when the slot is FREE and the caller lists it, 0 when it is
  * poisoned and the caller counts it. */
-static inline int sprout_gc_free_dead_slot(char* slot, uint64_t h, SproutHeapKind kind,
+static inline int sprout_gc_free_dead_slot(SproutRegion* r, char* slot, uint64_t h,
+                                           SproutHeapKind kind,
                                            unsigned long long aux, size_t ssize,
                                            int lineage_on, int hdrcheck_on) {
   void* payload = slot + 8;
 #if defined(SPROUT_GC_ALLOCTRACE)
-  sprout_at_free(payload);   /* both returns below free the object */
+  sprout_at_free(r, payload);   /* both returns below free the object */
+#else
+  (void)r;
 #endif
   sprout_gc_invalidate_singleton(h, payload);
   if (hdrcheck_on && kind == SPROUT_HEAP_CSTR) {
@@ -3778,7 +3785,7 @@ static inline int sprout_gc_sweep_large(SproutRegion* r, uint64_t clear, unsigne
   }
   SproutHeapKind kind = sprout_hdr_kind(h);
 #if defined(SPROUT_GC_ALLOCTRACE)
-  sprout_at_free(payload);
+  sprout_at_free(r, payload);
 #endif
   sprout_gc_invalidate_singleton(h, payload);
   if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
@@ -3899,7 +3906,7 @@ static void sprout_gc_sweep(int keep_color) {
           g_ap_freed_total++;
           if (sprout_hdr_age(h) == 0) g_ap_freed_age0++;
         }
-        if (sprout_gc_free_dead_slot(r->base + off, h, kind, aux, ssize, lineage_on, hdrcheck_on)) {
+        if (sprout_gc_free_dead_slot(r, r->base + off, h, kind, aux, ssize, lineage_on, hdrcheck_on)) {
           if (rl) fl_rpush(r, ssize / SPROUT_SLOT_GRAN, payload);
           else    fl_push_staged(ssize / SPROUT_SLOT_GRAN, payload);
         } else {
@@ -4095,7 +4102,7 @@ static void sprout_gc_sweep_young(void) {
           memcpy(r->base + off, &h, 8);
         } else {
           if (g_debug_gc_enabled && sprout_hdr_age(h) >= 1) sprout_gc_census_sub(kind, aux);
-          if (sprout_gc_free_dead_slot(r->base + off, h, kind, aux, ssize, lineage_on, hdrcheck_on)) {
+          if (sprout_gc_free_dead_slot(r, r->base + off, h, kind, aux, ssize, lineage_on, hdrcheck_on)) {
             if (rl) fl_rpush_at(r, ri, ssize / SPROUT_SLOT_GRAN, payload);
             else    fl_push_live(ssize / SPROUT_SLOT_GRAN, payload);
           } else {
@@ -4319,9 +4326,7 @@ static void sprout_gc_collect_with_reason(const char* reason) {
 #if defined(SPROUT_GC_ALLOCTRACE)
   sprout_at_gc_end(g_gc_cycle_count, kind, g_debug_gc_walked - walked_before);
 #endif
-  long long finished_us = time_now_micros();
-  long long elapsed_us = 0;
-  if (finished_us >= started_us) elapsed_us = finished_us - started_us;
+  long long elapsed_us = time_now_micros() - started_us;
   SPROUT_PROF_COLD(g_prof_gc_us += (unsigned long long)elapsed_us);
   /* O(regions); only pay for it when the line is actually printed. */
   if (g_debug_gc_enabled) arena_recount_regions();
@@ -10514,12 +10519,10 @@ long long vector_push(long long vec, long long value) {
       sprout_vec_release_inline_tail(v);
     } else {
 #if defined(SPROUT_GC_ALLOCTRACE)
-      const int tr_first_buffer = v->data == NULL;
+      /* The realloc cannot collect and the hook reads only v's slot id, so the order is free. */
+      if (v->data == NULL) sprout_at_vec_out(v);
 #endif
       v->data = sprout_realloc_vector_data(v->data, (size_t)new_cap, "vector_push: out of memory");
-#if defined(SPROUT_GC_ALLOCTRACE)
-      if (tr_first_buffer) sprout_at_vec_out(v);
-#endif
     }
     v->cap = new_cap;
   }
