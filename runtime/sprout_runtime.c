@@ -673,6 +673,11 @@ long long wall_time_micros(void) {
   return sprout_now_micros();
 }
 
+/* What a collection was: the trace's E kind field and the index of the log's kind= suffix.
+ * bench/gc_place/replay.c repeats these values in its GC_KIND_* enum. */
+enum { SPROUT_GC_KIND_OFF = 0, SPROUT_GC_KIND_MAJOR = 1, SPROUT_GC_KIND_MINOR_YOUNG = 2, SPROUT_GC_KIND_MINOR_FULL = 3 };
+static const char* const g_gc_kind_suffix[] = { "", " kind=major", " kind=minor sweep=young", " kind=minor sweep=full" };
+
 /* Arena occupancy, refreshed by arena_recount_regions() before each logged cycle.
  * Defined here rather than beside the rest of the arena state because the cycle
  * logger below is the consumer and is declared earlier in the file. */
@@ -1215,7 +1220,8 @@ typedef struct {
   long long old_count;    /* live objects that kept their colour bit through the last sweep */
   long long marked_young; /* objects this collection's mark newly reached; in a minor all young */
 #if defined(SPROUT_GC_ALLOCTRACE)
-  uint64_t* tr_ids;       /* trace id per slot granule, indexed like slotmap; one entry if large */
+  uint64_t* tr_ids;       /* trace id per slot granule, indexed like slotmap (NULL if large) */
+  uint64_t  tr_large_id;  /* trace id of a large region's one object */
 #endif
 } SproutRegion;
 
@@ -1704,9 +1710,12 @@ static SproutRegion* open_new_region(void) {
   SproutRegionFl* fl = g_gen.region_lists ? (SproutRegionFl*)calloc(1, sizeof(SproutRegionFl)) : NULL;
 #if defined(SPROUT_GC_ALLOCTRACE)
   uint64_t* tr_ids = sprout_at_on() ? (uint64_t*)calloc(SPROUT_SLOTS_PER_REGION, sizeof(uint64_t)) : NULL;
+  const int tr_failed = sprout_at_on() && tr_ids == NULL;
+#else
+  const int tr_failed = 0;
 #endif
   /* base may be an arena chunk, which must NOT be passed to free(). */
-  if (slotmap == NULL || youngmap == NULL || (g_gen.region_lists && fl == NULL)) {
+  if (slotmap == NULL || youngmap == NULL || (g_gen.region_lists && fl == NULL) || tr_failed) {
     if (arena_contains(base)) arena_chunk_release(base); else free(base);
     free(slotmap);
     free(youngmap);
@@ -1901,8 +1910,9 @@ __attribute__((destructor)) static void sprout_gc_profile_dump(void) {
  * Records every managed allocation and every object a collection frees, for offline replay of
  * other placement policies (docs/gc-stage2-v0.md §5.7).  The format is described at the top of
  * bench/gc_place/replay.c; `just gc-alloctrace-check` validates it.  An object's id is the count
- * of A records before its own; SproutRegion.tr_ids maps a slot to it.  Without the compile flag
- * none of this exists; with it and no env var each hook returns at sprout_at_on(). */
+ * of A records before its own; SproutRegion.tr_ids (tr_large_id for a large region) maps a slot
+ * to it.  Without the compile flag none of this exists; with it and no env var each hook returns
+ * at sprout_at_on(). */
 #if defined(SPROUT_GC_ALLOCTRACE)
 #define SPROUT_AT_BUF (1u << 20)
 static FILE* g_at_file;
@@ -1960,8 +1970,10 @@ static void sprout_at_emit(char tag, const uint64_t* v, int n) {
 
 static uint64_t* sprout_at_slot_id(void* payload) {
   SproutRegion* r = region_find(payload);
-  if (r == NULL || r->tr_ids == NULL) sprout_fail("alloctrace: object is not in a traced region");
-  return r->is_large ? &r->tr_ids[0] : &r->tr_ids[(size_t)((char*)payload - 8 - r->base) / SPROUT_SLOT_GRAN];
+  if (r == NULL) sprout_fail("alloctrace: object is not in a region");
+  if (r->is_large) return &r->tr_large_id;
+  if (r->tr_ids == NULL) sprout_fail("alloctrace: object is not in a traced region");
+  return &r->tr_ids[(size_t)((char*)payload - 8 - r->base) / SPROUT_SLOT_GRAN];
 }
 
 static uint64_t sprout_at_alloc(SproutHeapKind kind, size_t slot_bytes) {
@@ -1994,14 +2006,15 @@ static void sprout_at_gc_start(long long cycle) {
   sprout_at_emit('G', &c, 1);
 }
 
-/* kind: 0 minors off, 1 major, 2 minor with the young-only sweep, 3 minor with the full sweep. */
-static void sprout_at_gc_end(long long cycle, int kind) {
+/* kind: a SPROUT_GC_KIND_* value; walked: the slots this collection's sweep stepped over. */
+static void sprout_at_gc_end(long long cycle, int kind, long long walked) {
   if (!sprout_at_on()) return;
   uint64_t large = 0;
   for (size_t i = 0; i < g_region_count; i++) large += (uint64_t)g_regions[i].is_large;
-  uint64_t v[6] = { (uint64_t)cycle, (uint64_t)kind, (uint64_t)g_managed_heap_count,
-                    (uint64_t)g_gc_freelist_len, (uint64_t)g_region_count - large, large };
-  sprout_at_emit('E', v, 6);
+  uint64_t v[7] = { (uint64_t)cycle, (uint64_t)kind, (uint64_t)g_managed_heap_count,
+                    (uint64_t)g_gc_freelist_len, (uint64_t)g_region_count - large, large,
+                    (uint64_t)walked };
+  sprout_at_emit('E', v, 7);
 }
 #endif
 
@@ -2039,11 +2052,7 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
     r.marked_young = 0;
 #if defined(SPROUT_GC_ALLOCTRACE)
     r.tr_ids = NULL;
-    if (tr_on) {
-      r.tr_ids = (uint64_t*)malloc(sizeof(uint64_t));
-      if (r.tr_ids == NULL) sprout_fail(ctx);
-      r.tr_ids[0] = tr_id;
-    }
+    r.tr_large_id = tr_id;
 #endif
     region_table_insert(r);
     g_managed_heap_count++;
@@ -3770,8 +3779,6 @@ static inline int sprout_gc_sweep_large(SproutRegion* r, uint64_t clear, unsigne
   SproutHeapKind kind = sprout_hdr_kind(h);
 #if defined(SPROUT_GC_ALLOCTRACE)
   sprout_at_free(payload);
-  free(r->tr_ids);
-  r->tr_ids = NULL;
 #endif
   sprout_gc_invalidate_singleton(h, payload);
   if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
@@ -4262,7 +4269,7 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   if (g_gc_disabled) return;
   if (g_gc_active) return;
   g_gc_active = 1;
-  long long started_us = sprout_now_micros();
+  long long started_us = time_now_micros();
   long long heap_before = g_managed_heap_count;
   long long root_count = sprout_gc_root_count();
   long long alloc_since_gc = g_managed_alloc_since_gc;
@@ -4307,19 +4314,19 @@ static void sprout_gc_collect_with_reason(const char* reason) {
     fflush(stderr);
     abort();
   }
+  const int kind = !gen_on ? SPROUT_GC_KIND_OFF : !minor ? SPROUT_GC_KIND_MAJOR
+                 : young_only ? SPROUT_GC_KIND_MINOR_YOUNG : SPROUT_GC_KIND_MINOR_FULL;
 #if defined(SPROUT_GC_ALLOCTRACE)
-  sprout_at_gc_end(g_gc_cycle_count, !gen_on ? 0 : !minor ? 1 : young_only ? 2 : 3);
+  sprout_at_gc_end(g_gc_cycle_count, kind, g_debug_gc_walked - walked_before);
 #endif
-  long long finished_us = sprout_now_micros();
+  long long finished_us = time_now_micros();
   long long elapsed_us = 0;
   if (finished_us >= started_us) elapsed_us = finished_us - started_us;
   SPROUT_PROF_COLD(g_prof_gc_us += (unsigned long long)elapsed_us);
   /* O(regions); only pay for it when the line is actually printed. */
   if (g_debug_gc_enabled) arena_recount_regions();
   sprout_gc_log_cycle(reason, heap_before, g_managed_heap_count, root_count, g_gc_marked_count, alloc_since_gc, g_debug_gc_swept - swept_before, elapsed_us, g_debug_gc_walked - walked_before,
-                    !gen_on ? "" : !minor ? " kind=major"
-                                         : young_only ? " kind=minor sweep=young" : " kind=minor sweep=full",
-                    sweep_us);
+                    g_gc_kind_suffix[kind], sweep_us);
   /* Adaptive threshold: re-base on the LIVE set after each collection so the heap
      (hence RSS) stays proportional to live data instead of ratcheting upward
      without bound.  The previous policy only ever GREW the threshold (x
