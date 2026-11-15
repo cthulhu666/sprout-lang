@@ -4779,6 +4779,10 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   long long swept_before = g_debug_gc_swept;
   long long walked_before = g_debug_gc_walked;
   g_gc_cycle_count++;
+  /* Prototype only: ordinary regions held when this collection starts, for the cycle line. */
+  long long start_regions = 0;
+  if (g_gen.holes && g_debug_gc_enabled)
+    for (size_t ri = 0; ri < g_region_count; ri++) start_regions += !g_regions[ri].is_large;
 #if defined(SPROUT_GC_ALLOCTRACE)
   sprout_at_gc_start(g_gc_cycle_count);
 #endif
@@ -4831,8 +4835,14 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   SPROUT_PROF_COLD(g_prof_gc_us += (unsigned long long)elapsed_us);
   /* O(regions); only pay for it when the line is actually printed. */
   if (g_debug_gc_enabled) arena_recount_regions();
+  const char* kind_suffix = g_gc_kind_suffix[kind];
+  char holes_suffix[96];
+  if (g_gen.holes && g_debug_gc_enabled) {
+    snprintf(holes_suffix, sizeof holes_suffix, "%s start_regions=%lld", kind_suffix, start_regions);
+    kind_suffix = holes_suffix;
+  }
   sprout_gc_log_cycle(reason, heap_before, g_managed_heap_count, root_count, g_gc_marked_count, alloc_since_gc, g_debug_gc_swept - swept_before, elapsed_us, g_debug_gc_walked - walked_before,
-                    g_gc_kind_suffix[kind], sweep_us);
+                    kind_suffix, sweep_us);
   /* Adaptive threshold: re-base on the LIVE set after each collection so the heap
      (hence RSS) stays proportional to live data instead of ratcheting upward
      without bound.  The previous policy only ever GREW the threshold (x

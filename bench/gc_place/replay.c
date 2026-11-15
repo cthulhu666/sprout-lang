@@ -393,6 +393,7 @@ struct Policy {
   /* an ordinary object enters (+1) or leaves (-1) the young set; in_free: a free during a collection */
   void (*young_adj)(Policy*, const Obj*, int delta, int in_free);
   uint64_t g_n, g_peak, peak_regions, pk_regs;   /* pk_regs: regions at the peak G */
+  uint64_t g_regs_max;   /* most ordinary regions at any G */
   double g_sum, e_sum;
   uint64_t e_n;
   uint64_t gk_peak, peak_chunks;   /* chunked memory, when chunks != NULL */
@@ -513,8 +514,13 @@ static Obj* pool_new(Sim* s, uint32_t* idx) {
   return &s->pool[i];
 }
 
+static FILE* g_perg;   /* REPLAY_PERG=<path>: one "policy cycle regions" line per G */
+
 static void measure(Sim* s, Policy* p, int at_g) {
   uint64_t regs = p->regions(p), held = regs * p->region_bytes + s->large_live;
+  if (at_g && regs > p->g_regs_max) p->g_regs_max = regs;
+  if (g_perg != NULL)   /* a G line is "policy cycle regions", an E line "E policy cycle regions" */
+    fprintf(g_perg, at_g ? "%s %llu %llu\n" : "E %s %llu %llu\n", p->name, (unsigned long long)(at_g ? p->g_n : p->e_n) + 1, (unsigned long long)regs);
   if (regs > p->peak_regions) p->peak_regions = regs;
   uint64_t cks = p->chunks ? p->chunks(p) : 0, heldk = cks * REGION_BYTES + s->large_live;
   if (cks > p->peak_chunks) p->peak_chunks = cks;
@@ -887,8 +893,7 @@ typedef struct {
   size_t nh, hcap, mainc, ovfc;
   size_t last_ex[2];   /* hole each cursor last examined (main, overflow); SIZE_MAX = none yet */
   uint64_t waste_interval, waste_total, waste_peak, skipped, passed, entered;
-  uint64_t free_g;     /* free granules in the holes at the last E */
-  Stat holes_all, holes_young, live_young;   /* per E: holes found, informational only */
+  uint64_t free_g;     /* free granules in the holes at the last E */  Stat holes_all, holes_young, live_young;   /* per E: holes found, informational only */
 } Holes;
 
 static void bm_range(uint64_t* bm, uint32_t s, uint32_t len, int set) {
@@ -1320,8 +1325,7 @@ static Policy* policy_new(const char* name) {
              strcmp(name, "holes-ovf-tails") == 0) {
     Holes* h = xcalloc(1, sizeof *h);
     h->tails = strcmp(name, "holes-ovf-tails") == 0;
-    h->ovf = h->tails || strcmp(name, "holes-ovf") == 0;
-    h->last_ex[0] = h->last_ex[1] = SIZE_MAX;
+    h->ovf = h->tails || strcmp(name, "holes-ovf") == 0;    h->last_ex[0] = h->last_ex[1] = SIZE_MAX;
     h->p = (Policy){ .name = h->tails ? "holes-ovf-tails" : h->ovf ? "holes-ovf" : "holes", .type = PK_HOLES, .region_bytes = REGION_BYTES, .alloc = holes_alloc,
                      .free_ = holes_free, .tail = holes_tail, .gc_end = holes_gc_end, .regions = holes_regions,
                      .free_units = holes_free_units, .nbitmaps = HOLES_BITMAPS, .young_adj = holes_young_adj };
@@ -1507,12 +1511,12 @@ static void report(const Sim* s, const char* path) {
            U(s->cal_maxdiff), U(s->cal_large_miss), U(s->cal_free_miss), U(s->cal_free_n), U(s->cal_free_maxdiff),
            calibration_ok(s) ? "CALIBRATION OK" : "CALIBRATION MISS");
   }
-  printf("\n%-11s %10s %10s %8s %9s %11s\n", "policy", "peak_held", "mean_held", "vs_base", "peak_reg", "mean_held@E");
+  printf("\n%-11s %10s %10s %8s %9s %11s %11s\n", "policy", "peak_held", "mean_held", "vs_base", "peak_reg", "mean_held@E", "peak_reg@G");
   for (int i = 0; i < s->npol; i++) {
     const Policy* p = s->pols[i];
     printf("%-11s %9.1fM %9.1fM ", p->name, mib((double)p->g_peak), mib(p->g_n ? p->g_sum / (double)p->g_n : 0));
     if (base != NULL && base->g_peak) printf("%7.2fx ", (double)p->g_peak / (double)base->g_peak); else printf("%8s ", "-");
-    printf("%9llu %10.1fM\n", U(p->peak_regions), mib(p->e_n ? p->e_sum / (double)p->e_n : 0));
+    printf("%9llu %10.1fM %11llu\n", U(p->peak_regions), mib(p->e_n ? p->e_sum / (double)p->e_n : 0), U(p->g_regs_max));
   }
   int any = 0;
   for (int i = 0; i < s->npol; i++) any |= s->pols[i]->chunks != NULL;
@@ -2034,11 +2038,14 @@ int main(int argc, char** argv) {
   if (sim) {
     Sim* s = xcalloc(1, sizeof *s);
     if (sim_init(s, argv[2])) return 2;
+    const char* perg = getenv("REPLAY_PERG");
+    if (perg != NULL && perg[0] != '\0' && (g_perg = fopen(perg, "w")) == NULL) { perror(perg); return 2; }
     if (decode(rd, &sim_handlers, s)) {
       fprintf(stderr, "replay: %s: %s\n", path, g_err);
       return 1;
     }
     report(s, path);
+    if (g_perg != NULL) fclose(g_perg);
     return 0;
   }
   Check c;

@@ -7,7 +7,11 @@
 #   KEEP=1           keep the traces (they can be GBs); default deletes each after its replay
 #   REUSE=1          reuse binaries already in <dir>/bin
 #   RUN_TIMEOUT=s    seconds per recorded run (1800)
+#   EXTRA_ENV="A=1 B=2"  extra environment for each recorded run, e.g. SPROUT_GC_THRESHOLD=<n>
+#   REPLAY_PERG=<path>   the replay writes each policy's ordinary regions per collection: a line
+#                        "policy cycle regions" at a start, "E policy cycle regions" at an end
 #
+
 # Each workload runs at the default GC settings with SPROUT_GC_REGION_LISTS=1, so the trace's
 # region counts are comparable with the `base` policy. The runtime is built with
 # -DSPROUT_GC_ALLOCTRACE and linked per workload with a plain clang -O2 link (not the
@@ -36,6 +40,8 @@ WORKLOADS="${WORKLOADS:-$ALL_WORKLOADS}"
 KEEP="${KEEP:-0}"
 REUSE="${REUSE:-0}"
 RUN_TIMEOUT="${RUN_TIMEOUT:-1800}"
+EXTRA=()
+read -ra EXTRA <<< "${EXTRA_ENV:-}"
 COMPILER="$REPO/build/compile_driver_bin_stage1"
 REPLAY="$OUT/replay"
 
@@ -137,7 +143,7 @@ for w in $WORKLOADS; do
   echo "==> recording $w" >&2
   rc=0
   # The alarm survives perl's exec, so a livelock ends the run instead of hanging.
-  (cd "$W_DIR" && exec env "${W_ENV[@]}" SPROUT_GC_ALLOCTRACE="$trace" SPROUT_GC_REGION_LISTS=1 \
+  (cd "$W_DIR" && exec env "${W_ENV[@]}" ${EXTRA[@]+"${EXTRA[@]}"} SPROUT_GC_ALLOCTRACE="$trace" SPROUT_GC_REGION_LISTS=1 \
     perl -e 'alarm shift; exec @ARGV' "$RUN_TIMEOUT" "${W_CMD[@]}") > "$OUT/$w.out" 2> "$OUT/$w.err" || rc=$?
   if [[ $rc != 0 ]]; then
     echo "ERROR: $w exited $rc (see $OUT/$w.err)" >&2
