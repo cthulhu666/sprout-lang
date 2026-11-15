@@ -35,3 +35,76 @@ objects, fall 9–37%.
 **Collection count.** The free count's new unit shifts the trigger: rotate_classes collects 1.93×
 as often, mutvec_int 1.33× and digit_recognizer 1.14×. Each collection is cheap enough that CPU
 still falls on all three. The replay check (peak regions under a pinned trigger) is separate.
+
+## Replay check
+
+`docs/gc-stage2-v0.md` §5.7: peak ordinary regions at a collection's start under a pinned trigger,
+prototype against the placement replay's `holes-ovf-tails`, within 10% or explained.
+
+**Pinning.** `SPROUT_GC_THRESHOLD` sets `g_gc_threshold_pinned`: the footprint floor and the
+nursery rule are off, so the next threshold is `max(3 x heap, T)`, with heap the live object count
+after the sweep. The free count, whose unit changes under HOLES, is read only by the floor. The
+minor/major choice (`sprout_gc_gen_choose_minor`, `sprout_gc_gen_record`) reads marked and live
+object counts and the minor count, nothing placement-dependent. Checked on every run: cycle
+count, per-cycle `heap_after`, `marked`, `threshold` and major/minor are identical in the
+default-mode run (trace's configuration), the trace's `E` records and the HOLES run. Only the
+sweep label differs: HOLES reports every minor `sweep=young`, the default run `sweep=full` for
+the minor before a major. No other env was needed. Unpinned the counts diverge (the cycles
+column of the first table).
+
+Trace: `bench/gc_place/run.sh` with `EXTRA_ENV=SPROUT_GC_THRESHOLD=T`, default GC,
+`SPROUT_GC_REGION_LISTS=1`. Prototype: same binary, `SPROUT_GC_HOLES=1 SPROUT_DEBUG_GC=1`; the
+cycle line's `start_regions=` (HOLES only) counts ordinary regions before the mark. Replay figure:
+`peak_reg@G` of `holes-ovf-tails`.
+
+| workload | T | cycles trace / HOLES | peak regions at start: replay | prototype | proto / replay | within 10% | replay `base` |
+|---|---|---|---|---|---|---|---|
+| selfcompile | 2,200,000 | 26 / 26 | 222 | 222 | 1.00 | yes | 249 |
+| rotate_classes | 4,096 | 8,796 / 8,796 | 2 | 2 | 1.00 | yes | 5 |
+| rotate_classes_mixed | 4,096 | 8,800 / 8,800 | 2 | 2 | 1.00 | yes | 2 |
+| rotate_classes_cap | 4,096 | 16,176 / 16,176 | 1 | 1 | 1.00 | yes | 1 |
+| mutvec_push | 4,096 | 84 / 84 | 2 | 2 | 1.00 | yes | 14 |
+| load_spike | 283,000 | 99 / 99 | 16 | 16 | 1.00 | yes | 16 |
+| nqueens | 4,120 | 8,249 / 8,249 | 1 | 1 | 1.00 | yes | 2 |
+| digit_recognizer | 48,500 | 8 / 8 | 3 | 3 | 1.00 | yes | 4 |
+| rotate_classes | 300,000 | 209 / 209 | 23 | 23 | 1.00 | yes | 33 |
+| rotate_classes_mixed | 300,000 | 209 / 209 | 17 | 17 | 1.00 | yes | 17 |
+| rotate_classes_cap | 300,000 | 209 / 209 | 23 | 23 | 1.00 | yes | 27 |
+| mutvec_push | 300,000 | 2 / 2 | 16 | 16 | 1.00 | yes | 16 |
+| nqueens | 300,000 | 112 / 112 | 33 | 33 | 1.00 | yes | 35 |
+| digit_recognizer | 150,000 | 3 / 3 | 6 | 6 | 1.00 | yes | 6 |
+
+The first eight use `ab.sh`'s `W_THR` where it has one, else 4,096 (the floor-off value
+`rotate_classes.sprout` names). Their peaks are 1-3 regions on five workloads, too coarse to
+test a 10% bound, so the last six repeat those at a larger T. Every peak matches exactly. Over
+the 42,982 collection starts in the 14 runs, prototype and replay agree at every start except
+two:
+
+| workload, T | cycle | prototype | replay | diff |
+|---|---|---|---|---|
+| selfcompile, 2.2M | 3 (minor) | 65 | 62 | 5% |
+| mutvec_push, 300,000 | 2 (atexit major) | 16 | 15 | 7% |
+
+**selfcompile cycle 3.** At the end of cycle 2 the prototype holds 65 regions (`arena_regions`
+unchanged, none released); the replay's `E` line is 62. The prototype's survivors leave three
+regions with 9, 7 and 2 live objects (a temporary per-region dump), which the replay's placement
+does not produce. Ruled out by measurement: the overflow cursor (6 requests in the interval,
+none behind the main cursor); region order (a throwaway replay variant with LIFO arena-chunk
+reuse and address-order walk: the same single differing cycle, 62). Remaining difference: the prototype's region table is
+address-sorted and a cursor continues from a region opened in the middle of it, so it re-walks
+regions above it. In the interval before cycle 2, 4 regions open mid-table and 7,659 allocations
+land in regions above them (later intervals: at most 399); the replay never goes back to an
+earlier hole. This fits the one divergent cycle, but no controlled test isolates it.
+
+**mutvec_push cycle 2.** The prototype takes freed tails last-in first-out (`g_hole_tails`),
+the replay lowest region first. Replay with LIFO tails: 0 differing cycles at T = 300,000
+(2 of 2) and at 4,096 (84 of 84). Not committed: the replay's min-heap order is the one the
+earlier placement results used.
+
+Replay's calibration: `base` matches the trace's ordinary and large region counts at every `E` in
+every run. `digit_recognizer` (T = 48,500) and `selfcompile` report CALIBRATION MISS and
+`run.sh` exits 1: `base`'s free-slot count is off by 1 at 2 of 8 and 1 of 26 `E`s. The free count
+is not used here.
+
+**Outcome.** Peak ordinary regions at a collection's start equal the replay's on all 14 runs;
+the per-collection gap is at most 7%. The gate holds.
