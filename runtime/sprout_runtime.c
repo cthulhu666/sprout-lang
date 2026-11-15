@@ -331,6 +331,8 @@ static long long g_gc_live_obj = 0, g_gc_live_closure = 0, g_gc_live_vec = 0;
 static long long g_gc_live_map = 0, g_gc_live_bytes = 0, g_gc_live_builder = 0;
 static long long g_gc_live_tuple = 0, g_gc_live_ref = 0;
 static long long g_gc_live_cstr = 0, g_gc_live_cstr_bytes = 0;
+/* Set under SPROUT_GC_HOLES, whose sweep counts nothing by type: the census line is left out. */
+static int g_gc_census_off = 0;
 /* Adaptive-threshold enable switch.  NOT a ratio any more: since the policy became
    `threshold = live * factor` (see sprout_gc_collect_with_reason) the swept fraction
    is never consulted, so the only thing this value's magnitude does is compare > 0.
@@ -723,13 +725,14 @@ static void sprout_gc_log_cycle(
     kind_suffix,
     sweep_us
   );
-  fprintf(
-    stderr,
-    "[sprout gc]   types: obj=%lld closure=%lld vec=%lld map=%lld ref=%lld cstr=%lld(%.1fKB) bytes=%lld builder=%lld tuple=%lld\n",
-    g_gc_live_obj, g_gc_live_closure, g_gc_live_vec, g_gc_live_map,
-    g_gc_live_ref, g_gc_live_cstr, (double)g_gc_live_cstr_bytes / 1024.0,
-    g_gc_live_bytes, g_gc_live_builder, g_gc_live_tuple
-  );
+  if (!g_gc_census_off)
+    fprintf(
+      stderr,
+      "[sprout gc]   types: obj=%lld closure=%lld vec=%lld map=%lld ref=%lld cstr=%lld(%.1fKB) bytes=%lld builder=%lld tuple=%lld\n",
+      g_gc_live_obj, g_gc_live_closure, g_gc_live_vec, g_gc_live_map,
+      g_gc_live_ref, g_gc_live_cstr, (double)g_gc_live_cstr_bytes / 1024.0,
+      g_gc_live_bytes, g_gc_live_builder, g_gc_live_tuple
+    );
   /* Separate line, and labelled: this memory is NOT in the census above, so a
      reader must not add it to the live set. Growing across cycles is the tell
      that a program is interning keys it computes. */
@@ -977,6 +980,7 @@ typedef struct {
   double    nursery_survive;     /* c: the nursery outlasts c x the last minor's marked set */
   long long last_minor_marked;   /* marked count of the last MINOR (m); a major leaves it alone */
   int       region_lists;        /* SPROUT_GC_REGION_LISTS: 1 = per-region free lists (step 2c) */
+  int       holes;               /* SPROUT_GC_HOLES: 1 = occupancy maps (docs/gc-stage2-v0.md §5.7) */
 } SproutGenState;
 static SproutGenState g_gen = { .major_every = 19, .colorless = 1, .promote_age = 3,
                                 .nursery_share = 1.0, .nursery_survive = 2.0 };
@@ -994,7 +998,27 @@ static void sprout_gc_retired_switch(const char* name, const char* message) {
  * mode on, so a bad value is ignored while it is off.  SPROUT_GC_MAJOR_EVERY=0 makes every
  * collection a major.  The retired switches fail with the mode on or off.
  * SPROUT_GC_REGION_LISTS (0 or 1; 1 selects per-region free lists, docs/gc-stage2-v0.md §5.6)
- * is read in both modes, so an A/B compares them under one allocator. */
+ * is read in both modes, so an A/B compares them under one allocator.
+ * SPROUT_GC_HOLES (0 or 1; 1 selects the occupancy-map collector, §5.7) is read in both modes. */
+static void sprout_gc_holes_refuse(const char* name) {
+  fprintf(stderr, "[sprout] SPROUT_GC_HOLES=1 cannot be combined with %s\n", name);
+  exit(2);
+}
+
+/* The maps replace the free lists and the per-slot sweep, so every mode that reads either is out. */
+static void sprout_gc_holes_check_modes(void) {
+  static const char* const modes[] = { "SPROUT_GC_REGION_LISTS", "SPROUT_FL_VERIFY",
+    "SPROUT_GC_GENCHECK", "SPROUT_GC_HDRCHECK", "SPROUT_GC_LINEAGE", "SPROUT_GC_AGEPROF" };
+  for (size_t i = 0; i < sizeof(modes) / sizeof(modes[0]); i++) {
+    const char* v = getenv(modes[i]);
+    if (v != NULL && v[0] == '1') sprout_gc_holes_refuse(modes[i]);
+  }
+#if defined(SPROUT_GC_ALLOCTRACE)
+  const char* trace = getenv("SPROUT_GC_ALLOCTRACE");
+  if (trace != NULL && trace[0] != '\0') sprout_gc_holes_refuse("SPROUT_GC_ALLOCTRACE");
+#endif
+}
+
 static void sprout_gc_gen_init(void) {
   sprout_gc_retired_switch("SPROUT_GC_PROMOTE_AGE",
     "SPROUT_GC_PROMOTE_AGE was removed: promotion age is fixed at 3");
@@ -1012,6 +1036,16 @@ static void sprout_gc_gen_init(void) {
     if ((rl[0] != '0' && rl[0] != '1') || rl[1] != '\0')
       sprout_fail("SPROUT_GC_REGION_LISTS: expected 0 or 1");
     g_gen.region_lists = rl[0] - '0';
+  }
+  const char* hl = getenv("SPROUT_GC_HOLES");
+  if (hl != NULL && hl[0] != '\0') {
+    if ((hl[0] != '0' && hl[0] != '1') || hl[1] != '\0')
+      sprout_fail("SPROUT_GC_HOLES: expected 0 or 1");
+    g_gen.holes = hl[0] - '0';
+  }
+  if (g_gen.holes) {
+    sprout_gc_holes_check_modes();
+    g_gc_census_off = 1;
   }
   if (!g_gen.on) return;
   const char* c = getenv("SPROUT_GC_GENCHECK");
@@ -1218,6 +1252,18 @@ typedef struct {
   long long young_count;  /* set bits */
   long long old_count;    /* live objects that kept their colour bit through the last sweep */
   long long marked_young; /* objects this collection's mark newly reached; in a minor all young */
+  /* SPROUT_GC_HOLES=1 (docs/gc-stage2-v0.md §5.7); NULL or zero otherwise and for a large region.
+   * Maps hold a bit per 16-byte granule, SPROUT_SLOTMAP_BYTES bytes each: `occ` the granules in
+   * use between collections, `markocc` the extents this collection marked (zero between
+   * collections), `oldocc` the old objects' extents.  The buffer lists hold the payloads that
+   * own malloc'd data, young and old apart.  A large region's mark is `large_marked`. */
+  uint64_t* occ;
+  uint64_t* markocc;
+  uint64_t* oldocc;
+  long long occ_gran;       /* set bits of occ as of the last sweep */
+  SproutWorklist buf_young;
+  SproutWorklist buf_old;
+  int       large_marked;
 #if defined(SPROUT_GC_ALLOCTRACE)
   uint64_t* tr_ids;       /* trace id per slot granule, indexed like slotmap (NULL if large) */
   uint64_t  tr_large_id;  /* trace id of a large region's one object */
@@ -1238,6 +1284,46 @@ static inline void youngmap_set(SproutRegion* r, size_t slot_idx) {
 }
 static inline int youngmap_test(const SproutRegion* r, size_t slot_idx) {
   return (int)((r->youngmap[slot_idx / 64] >> (slot_idx % 64)) & 1);
+}
+
+/* Word-wise views for SPROUT_GC_HOLES: slotmap is bytes, the other maps are words, and bit i is
+ * bit i % 64 of word i / 64 in both only on a little-endian host. */
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error "SPROUT_GC_HOLES reads slotmap as 64-bit words and assumes a little-endian host"
+#endif
+static inline uint64_t slotmap_word(const SproutRegion* r, size_t w) {
+  uint64_t v;
+  memcpy(&v, r->slotmap + w * 8, 8);
+  return v;
+}
+static inline void slotmap_set_word(SproutRegion* r, size_t w, uint64_t v) {
+  memcpy(r->slotmap + w * 8, &v, 8);
+}
+static inline int bitmap_test(const uint64_t* m, size_t i) {
+  return (int)((m[i / 64] >> (i % 64)) & 1);
+}
+/* Set or clear `n` bits from bit `start`; an object's extent is at most 256 granules. */
+static inline void bitmap_set_range(uint64_t* m, size_t start, size_t n) {
+  size_t w = start / 64, b = start % 64;
+  if (b + n <= 64) {
+    m[w] |= (n == 64 ? ~(uint64_t)0 : (((uint64_t)1 << n) - 1)) << b;
+    return;
+  }
+  m[w++] |= ~(uint64_t)0 << b;
+  n -= 64 - b;
+  for (; n >= 64; n -= 64) m[w++] = ~(uint64_t)0;
+  if (n > 0) m[w] |= ((uint64_t)1 << n) - 1;
+}
+static inline void bitmap_clear_range(uint64_t* m, size_t start, size_t n) {
+  size_t w = start / 64, b = start % 64;
+  if (b + n <= 64) {
+    m[w] &= ~((n == 64 ? ~(uint64_t)0 : (((uint64_t)1 << n) - 1)) << b);
+    return;
+  }
+  m[w++] &= ~(~(uint64_t)0 << b);
+  n -= 64 - b;
+  for (; n >= 64; n -= 64) m[w++] = 0;
+  if (n > 0) m[w] &= ~(((uint64_t)1 << n) - 1);
 }
 
 static SproutRegion* g_regions = NULL;  /* sorted by base address */
@@ -1707,6 +1793,9 @@ static SproutRegion* open_new_region(void) {
   uint8_t* slotmap = (uint8_t*)calloc(SPROUT_SLOTMAP_BYTES, 1);
   uint64_t* youngmap = (uint64_t*)calloc(SPROUT_SLOTMAP_BYTES, 1);
   SproutRegionFl* fl = g_gen.region_lists ? (SproutRegionFl*)calloc(1, sizeof(SproutRegionFl)) : NULL;
+  uint64_t* occ = g_gen.holes ? (uint64_t*)calloc(SPROUT_SLOTMAP_BYTES, 1) : NULL;
+  uint64_t* markocc = g_gen.holes ? (uint64_t*)calloc(SPROUT_SLOTMAP_BYTES, 1) : NULL;
+  uint64_t* oldocc = g_gen.holes ? (uint64_t*)calloc(SPROUT_SLOTMAP_BYTES, 1) : NULL;
 #if defined(SPROUT_GC_ALLOCTRACE)
   uint64_t* tr_ids = sprout_at_on() ? (uint64_t*)calloc(SPROUT_SLOTS_PER_REGION, sizeof(uint64_t)) : NULL;
   const int tr_failed = sprout_at_on() && tr_ids == NULL;
@@ -1714,11 +1803,15 @@ static SproutRegion* open_new_region(void) {
   const int tr_failed = 0;
 #endif
   /* base may be an arena chunk, which must NOT be passed to free(). */
-  if (slotmap == NULL || youngmap == NULL || (g_gen.region_lists && fl == NULL) || tr_failed) {
+  if (slotmap == NULL || youngmap == NULL || (g_gen.region_lists && fl == NULL) || tr_failed ||
+      (g_gen.holes && (occ == NULL || markocc == NULL || oldocc == NULL))) {
     if (arena_contains(base)) arena_chunk_release(base); else free(base);
     free(slotmap);
     free(youngmap);
     free(fl);
+    free(occ);
+    free(markocc);
+    free(oldocc);
 #if defined(SPROUT_GC_ALLOCTRACE)
     free(tr_ids);
 #endif
@@ -1738,6 +1831,13 @@ static SproutRegion* open_new_region(void) {
   r.young_count = 0;
   r.old_count = 0;
   r.marked_young = 0;
+  r.occ = occ;
+  r.markocc = markocc;
+  r.oldocc = oldocc;
+  r.occ_gran = 0;
+  memset(&r.buf_young, 0, sizeof(r.buf_young));
+  memset(&r.buf_old, 0, sizeof(r.buf_old));
+  r.large_marked = 0;
 #if defined(SPROUT_GC_ALLOCTRACE)
   r.tr_ids = tr_ids;
 #endif
@@ -1777,6 +1877,11 @@ static void region_release_ordinary(size_t ri) {
   free(r->slotmap);
   free(r->youngmap);
   free(r->fl);
+  free(r->occ);
+  free(r->markocc);
+  free(r->oldocc);
+  sprout_wl_free(&r->buf_young);
+  sprout_wl_free(&r->buf_old);
 #if defined(SPROUT_GC_ALLOCTRACE)
   free(r->tr_ids);
 #endif
@@ -2054,6 +2159,11 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
     r.young_count = g_gen.on ? 1 : 0;
     r.old_count = 0;
     r.marked_young = 0;
+    r.occ = r.markocc = r.oldocc = NULL;
+    r.occ_gran = 0;
+    memset(&r.buf_young, 0, sizeof(r.buf_young));
+    memset(&r.buf_old, 0, sizeof(r.buf_old));
+    r.large_marked = 0;
 #if defined(SPROUT_GC_ALLOCTRACE)
     r.tr_ids = NULL;
     r.tr_large_id = tr_id;
@@ -2113,6 +2223,8 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
   char* slot_base = r->base + off;
   sprout_hdr_write(slot_base + 8, kind, aux);
   slotmap_set(r, off / SPROUT_SLOT_GRAN);
+  /* Stage 1 allocates only past the bump mark, so a hole is never reused. */
+  if (g_gen.holes) bitmap_set_range(r->occ, off / SPROUT_SLOT_GRAN, needed_slot / SPROUT_SLOT_GRAN);
   if (g_gen.on) {
     youngmap_set(r, off / SPROUT_SLOT_GRAN);
     r->young_count++;
@@ -2124,6 +2236,18 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
   g_managed_alloc_since_gc++;
   if (g_gc_stress == 1 || sprout_gc_lineage_on()) sprout_gc_trace_alloc(slot_base + 8);
   return slot_base + 8;   /* payload pointer */
+}
+
+/* SPROUT_GC_HOLES: record `payload`, which has just got malloc'd data, on its region's young or
+ * old buffer list (old when its colour is set).  The sweep frees the data of an entry the mark did
+ * not reach, since it never visits a dead slot.  Called once per object, where the buffer is
+ * acquired. */
+static void sprout_holes_note_buffer(void* payload) {
+  if (!g_gen.holes) return;
+  SproutRegion* r = region_find(payload);
+  uint64_t h; memcpy(&h, (char*)payload - 8, 8);
+  sprout_wl_push((h & SPROUT_GC_COLOR_BIT) ? &r->buf_old : &r->buf_young, payload,
+                 "GC: out of memory for the buffer list");
 }
 
 /* Allocate a GC-managed CSTR block with an inline 8-byte header at (payload-8).
@@ -2658,6 +2782,7 @@ static VectorVal* sprout_alloc_vector_sized(size_t count, const char* ctx) {
   else if (inline_count == count) out->data = vec_inline_data(out);
   else {
     out->data = sprout_alloc_vector_data(count, ctx);
+    sprout_holes_note_buffer(out);
 #if defined(SPROUT_GC_ALLOCTRACE)
     sprout_at_vec_out(out);
 #endif
@@ -2736,6 +2861,14 @@ static void sprout_vec_release_inline_tail(VectorVal* v) {
   memcpy(hdr_addr, &h, 8);
   size_t rest = old_slot - new_slot;             /* a multiple of 16, >= 16 */
   char* tail = hdr_addr + new_slot;
+  if (g_gen.holes) {
+    /* The tail leaves the occupancy maps and gets no header or slotmap bit.  Stage 1 never
+       reuses it; the next sweep leaves it in the hole space. */
+    size_t tail_idx = (size_t)(tail - r->base) / SPROUT_SLOT_GRAN;
+    bitmap_clear_range(r->occ, tail_idx, rest / SPROUT_SLOT_GRAN);
+    bitmap_clear_range(r->oldocc, tail_idx, rest / SPROUT_SLOT_GRAN);
+    return;
+  }
   uint64_t free_hdr = (uint64_t)SPROUT_HEAP_FREE | ((uint64_t)rest << 14);
   memcpy(tail, &free_hdr, 8);
   slotmap_set(r, (size_t)(tail - r->base) / SPROUT_SLOT_GRAN);
@@ -2809,6 +2942,7 @@ static BytesVal* sprout_alloc_bytes_val(const char* ctx) {
   sprout_gc_maybe_collect_threshold();
   BytesVal* out = (BytesVal*)sprout_gc_alloc_block(SPROUT_HEAP_BYTES, 0, sizeof(BytesVal), ctx);
   if (g_debug_alloc_enabled) g_debug_alloc_bytes++;
+  sprout_holes_note_buffer(out);   /* its data is set later; free(NULL) is harmless */
   return out;
 }
 
@@ -2820,6 +2954,7 @@ static BuilderVal* sprout_alloc_builder_val(const char* ctx) {
   sprout_gc_maybe_collect_threshold();
   BuilderVal* out = (BuilderVal*)sprout_gc_alloc_block(SPROUT_HEAP_BUILDER, 0, sizeof(BuilderVal), ctx);
   if (g_debug_alloc_enabled) g_debug_alloc_builder++;
+  sprout_holes_note_buffer(out);
   return out;
 }
 
@@ -2940,9 +3075,43 @@ static inline void gc_mark_wl_push(void* payload) {
   sprout_wl_push(&g_gc_mark_wl, payload, "GC mark: out of memory for worklist");
 }
 
+/* SPROUT_GC_HOLES=1: the mark is the start granule's bit in `markocc` (a large region's flag),
+ * and the header colour means old only.  A minor stops at a coloured object; a major (and any
+ * collection with minors off) ignores colour, since it rebuilds `oldocc`.  With minors on, the
+ * marker also bumps the age, and an object whose age reaches the promotion age gets the colour
+ * and its extent in `oldocc`, so the sweep writes no header. */
+static int g_holes_major;
+
+static void gc_mark_enqueue_holes(void* payload, SproutRegion* r) {
+  void* hdr_ptr = (char*)payload - 8;
+  uint64_t h; memcpy(&h, hdr_ptr, 8);
+  if (!g_holes_major && (h & SPROUT_GC_COLOR_BIT)) return;   /* old */
+  size_t idx = 0, granules = 0;
+  if (r->is_large) {
+    if (r->large_marked) return;
+    r->large_marked = 1;
+  } else {
+    idx = (size_t)((char*)hdr_ptr - r->base) / SPROUT_SLOT_GRAN;
+    if (bitmap_test(r->markocc, idx)) return;
+    granules = slot_bytes(sprout_hdr_kind(h), sprout_hdr_aux(h)) / SPROUT_SLOT_GRAN;
+    bitmap_set_range(r->markocc, idx, granules);
+  }
+  if (g_gen.on) {
+    h = sprout_hdr_age_bump(h);
+    if (sprout_hdr_age(h) >= g_gen.promote_age) {
+      h |= SPROUT_GC_COLOR_BIT;
+      if (!r->is_large) bitmap_set_range(r->oldocc, idx, granules);
+    }
+    memcpy(hdr_ptr, &h, 8);
+  }
+  g_gc_marked_count++;
+  gc_mark_wl_push(payload);
+}
+
 /* `r` is the region `payload` is in, which both callers have from their lookup. */
 static void gc_mark_enqueue(void* payload, SproutRegion* r) {
   if (payload == NULL) return;
+  if (g_gen.holes) { gc_mark_enqueue_holes(payload, r); return; }
   /* Color bit in header (bit 8): marked this cycle or, with minor collections on, old. */
   void* hdr_ptr = (char*)payload - 8;
   uint64_t h; memcpy(&h, hdr_ptr, 8);
@@ -2989,10 +3158,13 @@ static int sprout_prof_edge_bucket(void* payload, size_t i) {
  * With g_gen.promote_age = K > 1 it also applies the remembered rule (docs/gc-stage2-v0.md
  * §5.1): a parent that is old or will be old after this sweep (age + 1 >= K, true of both) and
  * has a child that stays young (age + 1 < K) is remembered, since the sweep leaves an old
- * parent pointing at a young child.  K = 1 never fires: no survivor stays young. */
+ * parent pointing at a young child.  K = 1 never fires: no survivor stays young.
+ * Under SPROUT_GC_HOLES the marker has already bumped each age it reads here, so the same tests
+ * take K as the bound: `age + 1 >= K` before the bump is `age >= K` after it. */
 static void sprout_gc_drain_marks(void) {
   SPROUT_PROF_HOT(g_gc_tracing = 1);
-  const unsigned young_below = g_gen.promote_age - 1;
+  const unsigned young_below = !g_gen.holes ? g_gen.promote_age - 1
+                                            : g_gen.on ? g_gen.promote_age : 0;
   while (g_gc_mark_wl.len > 0) {
     void* payload = g_gc_mark_wl.items[--g_gc_mark_wl.len];
     size_t child_count = sprout_heap_child_count_payload(payload);
@@ -3762,12 +3934,30 @@ static inline int sprout_gc_free_dead_slot(SproutRegion* r, char* slot, uint64_t
  * colour and stays young.  Unmarked: it is freed and r->base set NULL, for the caller's removal
  * pass.  Returns SWEEP_LARGE_FREED, _OLD or _YOUNG.  The caller sets the generational counts. */
 enum { SWEEP_LARGE_FREED = 0, SWEEP_LARGE_OLD = 1, SWEEP_LARGE_YOUNG = 2 };
+
+/* Free the one object of an unmarked large region, header `h`; r->base is set NULL for the
+ * caller's removal pass. */
+static inline void sprout_gc_free_large(SproutRegion* r, uint64_t h, int lineage_on) {
+  void* payload = r->base + 8;
+  SproutHeapKind kind = sprout_hdr_kind(h);
+#if defined(SPROUT_GC_ALLOCTRACE)
+  sprout_at_free(r, payload);
+#endif
+  sprout_gc_invalidate_singleton(h, payload);
+  if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
+  sprout_release_payload_extras(payload, kind);
+  free(r->base);
+  r->base = NULL;
+  g_managed_heap_count--;
+  g_debug_gc_swept++;
+  r->live_count = 0;
+}
+
 static inline int sprout_gc_sweep_large(SproutRegion* r, uint64_t clear, unsigned young_below,
                                         int ageprof_on, int lineage_on) {
   g_debug_gc_walked++;
   /* OBJ (the only poisoned kind) is never large — max OBJ slot is 96 bytes
    * — so large entries need no poison handling. */
-  void* payload = r->base + 8;
   uint64_t h; memcpy(&h, r->base, 8);
   if (h & SPROUT_GC_COLOR_BIT) {
     int young = sprout_gc_stays_young(h, young_below);
@@ -3783,18 +3973,7 @@ static inline int sprout_gc_sweep_large(SproutRegion* r, uint64_t clear, unsigne
     g_ap_freed_total++;
     if (sprout_hdr_age(h) == 0) g_ap_freed_age0++;
   }
-  SproutHeapKind kind = sprout_hdr_kind(h);
-#if defined(SPROUT_GC_ALLOCTRACE)
-  sprout_at_free(r, payload);
-#endif
-  sprout_gc_invalidate_singleton(h, payload);
-  if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
-  sprout_release_payload_extras(payload, kind);
-  free(r->base);
-  r->base = NULL;
-  g_managed_heap_count--;
-  g_debug_gc_swept++;
-  r->live_count = 0;
+  sprout_gc_free_large(r, h, lineage_on);
   return SWEEP_LARGE_FREED;
 }
 
@@ -4148,6 +4327,174 @@ static void sprout_gc_sweep_young(void) {
   sprout_fl_verify_against_full_walk();
 }
 
+/* ── SPROUT_GC_HOLES=1: marking into occupancy maps (docs/gc-stage2-v0.md §5.7) ──────────────
+ *
+ * Between collections `occ` covers every live object's extent, `oldocc` every old object's and
+ * `markocc` is zero.  The marker fills `markocc` and `oldocc` (gc_mark_enqueue_holes).  The
+ * sweep then works a word at a time: with live = oldocc | markocc, a dead object's start leaves
+ * slotmap, a promoted or dead one's leaves youngmap, and live becomes the new `occ`.  No dead
+ * slot is visited and no FREE header is written.  A minor sweeps the regions holding a young
+ * object (young_count > 0, which includes any allocated into since the last collection); a
+ * major sweeps all.  A region whose slotmap empties is released.
+ *
+ * Counts: heap and swept come from slotmap popcounts; walked is the bitmap words visited. */
+
+/* A singleton is dead when its start granule is in neither map.  Runs before the maps change. */
+static void sprout_holes_sweep_singletons(void) {
+  for (long long i = 0; i < g_ctor_meta_len; i++) {
+    void* s = g_ctor_meta[i].singleton;
+    if (s == NULL) continue;
+    SproutRegion* r = region_find(s);
+    if (r == NULL || r->is_large) continue;
+    size_t idx = (size_t)((char*)s - 8 - r->base) / SPROUT_SLOT_GRAN;
+    if (!bitmap_test(r->markocc, idx) && !bitmap_test(r->oldocc, idx)) g_ctor_meta[i].singleton = NULL;
+  }
+}
+
+/* Free the malloc'd data of each listed owner the mark did not reach, and move a promoted young
+ * entry to the old list.  A minor walks the young list; a major walks the old list too. */
+static void sprout_holes_sweep_buffers(SproutRegion* r, int major) {
+  size_t kept = 0;
+  if (major) {
+    for (size_t i = 0; i < r->buf_old.len; i++) {
+      void* p = r->buf_old.items[i];
+      size_t idx = (size_t)((char*)p - 8 - r->base) / SPROUT_SLOT_GRAN;
+      if (bitmap_test(r->markocc, idx)) r->buf_old.items[kept++] = p;
+      else sprout_release_payload_extras(p, sprout_hdr_kind(sprout_hdr_of(p)));
+    }
+    r->buf_old.len = kept;
+    kept = 0;
+  }
+  for (size_t i = 0; i < r->buf_young.len; i++) {
+    void* p = r->buf_young.items[i];
+    size_t idx = (size_t)((char*)p - 8 - r->base) / SPROUT_SLOT_GRAN;
+    if (!bitmap_test(r->markocc, idx)) sprout_release_payload_extras(p, sprout_hdr_kind(sprout_hdr_of(p)));
+    else if (bitmap_test(r->oldocc, idx)) sprout_wl_push(&r->buf_old, p, "GC: out of memory for the buffer list");
+    else r->buf_young.items[kept++] = p;
+  }
+  r->buf_young.len = kept;
+}
+
+/* Sweep one ordinary region and set its counts; the caller releases it if live_count is 0. */
+static void sprout_holes_sweep_region(SproutRegion* r, int major) {
+  sprout_holes_sweep_buffers(r, major);
+  const size_t nwords = (r->bump / SPROUT_SLOT_GRAN + 63) / 64;
+  const int trace = g_gc_stress == 1;
+  long long before = 0, live_n = 0, young_n = 0, occ_n = 0;
+  for (size_t w = 0; w < nwords; w++) {
+    uint64_t mk = r->markocc[w], od = r->oldocc[w];
+    uint64_t live = mk | od;
+    uint64_t sm0 = slotmap_word(r, w), sm = sm0 & live;
+    if (trace)   /* the `just gc-trace` anchor: the starts about to clear */
+      for (uint64_t dead = sm0 & ~sm; dead != 0; dead &= dead - 1)
+        sprout_gc_trace_free(r->base + (w * 64 + (size_t)__builtin_ctzll(dead)) * SPROUT_SLOT_GRAN + 8);
+    slotmap_set_word(r, w, sm);
+    uint64_t ym = r->youngmap[w] & mk & ~od;
+    r->youngmap[w] = ym;
+    r->markocc[w] = live;   /* this buffer becomes `occ` below */
+    before += __builtin_popcountll(sm0);
+    live_n += __builtin_popcountll(sm);
+    young_n += __builtin_popcountll(ym);
+    occ_n += __builtin_popcountll(live);
+  }
+  uint64_t* old_occ = r->occ;
+  r->occ = r->markocc;
+  r->markocc = old_occ;
+  memset(r->markocc, 0, nwords * sizeof(uint64_t));
+  r->live_count = live_n;
+  r->young_count = young_n;
+  r->old_count = g_gen.on ? live_n - young_n : 0;
+  r->occ_gran = occ_n;
+  g_managed_heap_count -= before - live_n;
+  g_debug_gc_swept += before - live_n;
+  g_debug_gc_walked += (long long)nwords;
+}
+
+/* The free count, in slots: granules below the bump marks that `occ` does not cover, over the
+ * mean live slot size in granules (occ's total over the live objects), so the footprint floor and
+ * `just gc-trigger-check` keep a slot-sized unit.  Also the old count the next minor reads. */
+static void sprout_holes_recount(void) {
+  long long bumped = 0, occupied = 0, live = 0, old = 0;
+  for (size_t ri = 0; ri < g_region_count; ri++) {
+    const SproutRegion* r = &g_regions[ri];
+    old += r->old_count;
+    if (r->is_large) continue;
+    bumped += (long long)(r->bump / SPROUT_SLOT_GRAN);
+    occupied += r->occ_gran;
+    live += r->live_count;
+  }
+  g_gen.old_count = old;
+  double mean = live > 0 ? (double)occupied / (double)live : 1.0;
+  if (mean < 1.0) mean = 1.0;
+  long long free_granules = bumped > occupied ? bumped - occupied : 0;
+  g_gc_freelist_len = (long long)((double)free_granules / mean);
+}
+
+static void sprout_holes_sweep(void) {
+  const int major = g_holes_major;
+  sprout_holes_sweep_singletons();
+  int freed_large = 0, emptied_any = 0;
+  for (size_t ri = 0; ri < g_region_count; ri++) {
+    SproutRegion* r = &g_regions[ri];
+    if (!major && r->young_count == 0) continue;
+    if (r->is_large) {
+      uint64_t h; memcpy(&h, r->base, 8);
+      g_debug_gc_walked++;
+      if (r->large_marked) {
+        int old = g_gen.on && (h & SPROUT_GC_COLOR_BIT) != 0;
+        r->large_marked = 0;
+        r->live_count = 1;
+        r->old_count = old;
+        r->young_count = g_gen.on && !old;
+      } else {
+        sprout_gc_free_large(r, h, 0);
+        r->old_count = r->young_count = 0;
+        freed_large = 1;
+      }
+      continue;
+    }
+    sprout_holes_sweep_region(r, major);
+    if (r->live_count == 0) {
+      r->emptied = 1;
+      emptied_any = 1;
+    }
+  }
+  if (freed_large || emptied_any) {
+    int kept_normal = 0;
+    size_t ri = g_region_count;
+    while (ri > 0) {
+      ri--;
+      SproutRegion* r = &g_regions[ri];
+      if (r->is_large) {
+        if (r->base == NULL) region_table_remove(ri);
+      } else if (r->emptied) {
+        region_release_ordinary(ri);
+      } else {
+        kept_normal++;
+      }
+    }
+    if (emptied_any && kept_normal == 0) open_new_region();
+  }
+  sprout_holes_recount();
+}
+
+/* Before the mark.  A major empties the remembered set and clears bit 13 through its entries
+ * (nothing else carries it), so its own drain re-remembers each parent of a child that stays
+ * young; it also clears `oldocc`, which its marker rebuilds. */
+static void sprout_holes_begin(int minor) {
+  g_holes_major = !minor;
+  if (minor) return;
+  for (size_t i = 0; i < g_gen.remembered.len; i++) {
+    void* payload = g_gen.remembered.items[i];
+    uint64_t h = sprout_hdr_of(payload);
+    h &= ~SPROUT_GC_REMEMBERED_BIT;
+    memcpy((char*)payload - 8, &h, 8);
+  }
+  g_gen.remembered.len = 0;
+  for (size_t ri = 0; ri < g_region_count; ri++)
+    if (!g_regions[ri].is_large) memset(g_regions[ri].oldocc, 0, SPROUT_SLOTMAP_BYTES);
+}
+
 __attribute__((noreturn, cold, noinline))
 static void sprout_gc_check_count_fail(const char* what, const SproutRegion* r, long long got, long long want) {
   fprintf(stderr, "[sprout] GENCHECK: %s (region=%p recorded=%lld walked=%lld)\n",
@@ -4296,8 +4643,11 @@ static void sprout_gc_collect_with_reason(const char* reason) {
      Mode off: none of this runs, and the sweep clears the color bit as it always did. */
   int gen_on = g_gen.on;
   int minor = gen_on && sprout_gc_gen_choose_minor(reason);
-  if (gen_on && !minor && !g_gen.colorless) sprout_gc_clear_marks();
-  if (gen_on)
+  const int holes = g_gen.holes;
+  /* Under HOLES `colorless` only says that this collection is a major: no sweep clears colour. */
+  if (holes) sprout_holes_begin(minor);
+  else if (gen_on && !minor && !g_gen.colorless) sprout_gc_clear_marks();
+  if (gen_on && !holes)
     for (size_t ri = 0; ri < g_region_count; ri++) g_regions[ri].marked_young = 0;
   sprout_gc_mark_roots(sprout_gc_mark_ptr);
   if (minor) sprout_gc_mark_remembered();
@@ -4309,10 +4659,12 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   /* A minor followed by a minor sweeps only the young slots, unless that would keep a region the
      full sweep releases.  A minor before a major walks everything to clear the colour bits, and
      AGEPROF's age histogram needs every live slot. */
-  int young_only = minor && !next_major && !sprout_gc_ageprof_on() && sprout_gc_young_sweep_ok();
+  int young_only = holes ? minor
+                         : minor && !next_major && !sprout_gc_ageprof_on() && sprout_gc_young_sweep_ok();
   long long sweep_started_us = time_now_micros();
-  if (young_only) sprout_gc_sweep_young();
-  else            sprout_gc_sweep(gen_on && !next_major);
+  if (holes)           sprout_holes_sweep();
+  else if (young_only) sprout_gc_sweep_young();
+  else                 sprout_gc_sweep(gen_on && !next_major);
   long long sweep_us = time_now_micros() - sweep_started_us;
   if (gen_on && g_gen.check) sprout_gc_check_sweep(!next_major, young_only);
   if (gen_on && g_gen.check && g_gen.last_live != g_managed_heap_count) {
@@ -10563,6 +10915,7 @@ long long vector_push(long long vec, long long value) {
       long long* moved = sprout_alloc_vector_data((size_t)new_cap, "vector_push: out of memory");
       if (v->len > 0) memcpy(moved, v->data, (size_t)v->len * sizeof(long long));
       v->data = moved;
+      sprout_holes_note_buffer(v);
 #if defined(SPROUT_GC_ALLOCTRACE)
       sprout_at_vec_out(v);
 #endif
@@ -10580,7 +10933,9 @@ long long vector_push(long long vec, long long value) {
       /* The realloc cannot collect and the hook reads only v's slot id, so the order is free. */
       if (v->data == NULL) sprout_at_vec_out(v);
 #endif
+      const int first_buffer = v->data == NULL;
       v->data = sprout_realloc_vector_data(v->data, (size_t)new_cap, "vector_push: out of memory");
+      if (first_buffer) sprout_holes_note_buffer(v);
     }
     v->cap = new_cap;
   }
