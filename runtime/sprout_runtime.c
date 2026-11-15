@@ -1935,7 +1935,7 @@ static int sprout_at_on(void) {
     const char* path = getenv("SPROUT_GC_ALLOCTRACE");
     g_at_state = -1;
     if (path != NULL && path[0] != '\0') {
-      g_at_file = fopen(path, "wb");
+      g_at_file = cloexec_fopen(path, "wb");
       g_at_buf = (unsigned char*)malloc(SPROUT_AT_BUF);
       if (g_at_file == NULL || g_at_buf == NULL) sprout_fail("SPROUT_GC_ALLOCTRACE: cannot open the trace file");
       sprout_at_register_flush();
