@@ -359,6 +359,30 @@ fn main() -> Unit !{IO} =
     assert_true(state, "write_text into a missing directory is an Err naming the path",
       string.contains(text_error(fs.write_text(no_parent, "x")), no_parent))
 
+    # --- regular files only ---------------------------------------------------
+    #
+    # A FIFO open or a device read would block or never end, so both functions refuse anything
+    # that is not a regular file. Each case would hang or run away on an unfixed runtime.
+
+    let fifo = text_dir ++ "/pipe"
+    let made = match process.proc_run(["mkfifo", fifo]) with
+      | Ok r -> process.proc_ok(r)
+      | Err _ -> false
+    assert_true(state, "mkfifo for the regular-file cases", made)
+    assert_eq(state, "read_bytes of a FIFO is an io_error", outcome(fs.read_bytes(fifo)), "io_error")
+    assert_true(state, "write_bytes to a FIFO with no reader is an Err",
+      outcome(fs.write_bytes(fifo, bytes.from_string("x"))) != "ok")
+    assert_true(state, "read_text of a FIFO names the path",
+      string.contains(text_error(fs.read_text(fifo)), fifo))
+    assert_eq(state, "read_bytes of /dev/zero is an io_error",
+      outcome(fs.read_bytes("/dev/zero")), "io_error")
+    assert_true(state, "read_text of /dev/zero says not a regular file",
+      string.contains(text_error(fs.read_text("/dev/zero")), "not a regular file"))
+    assert_eq(state, "write_bytes to /dev/null is an io_error",
+      outcome(fs.write_bytes("/dev/null", bytes.from_string("x"))), "io_error")
+    assert_true(state, "write_text to /dev/null says not a regular file",
+      string.contains(text_error(fs.write_text("/dev/null", "x")), "not a regular file"))
+
     assert_eq(state, "remove_dir_all clears the text-pair dir", outcome(fs.remove_dir_all(text_dir)), "ok")
 
     summary(state)

@@ -161,6 +161,11 @@ Which variant each function uses is a decision per call site, not a global defau
 
 ### 4.1 Seven builtins, and why each is one
 
+`fs_read_bytes` and `fs_write_bytes` handle regular files only. Both open with `O_NONBLOCK` (so a
+FIFO open returns at once), `fstat` the descriptor, and answer `FsIoError "<path>: not a regular
+file"` for anything else (a FIFO with no reader fails the write open with `ENXIO`). A FIFO or
+device open/read would block or never end. Stdin is `terminal.read_stdin_bytes`.
+
 Per "Builtin vs Stdlib" rule 4, each is a syscall with no Sprout expression. None is
 performance-motivated (rule 6).
 
@@ -168,8 +173,8 @@ performance-motivated (rule 6).
 |---|---|---|
 | `fs_list_dir(path) -> Result FsError (List String)` | `opendir`/`readdir`/`closedir` | no directory-stream primitive exists |
 | `fs_stat_path(path, follow) -> Result FsError Entry` | `stat` / `lstat` | no inode metadata primitive exists |
-| `fs_read_bytes(path) -> Result FsError Bytes` | `open`/`read`/`close` | a `String` return would have to be valid UTF-8; `read_text` is built on this one |
-| `fs_write_bytes(path, Bytes) -> Result FsError Unit` | `open`/`write`/`close` | a `String` is always valid UTF-8 with no NUL; `write_text` is built on this one |
+| `fs_read_bytes(path) -> Result FsError Bytes` | `open`/`fstat`/`read`/`close` | a `String` return would have to be valid UTF-8; `read_text` is built on this one |
+| `fs_write_bytes(path, Bytes) -> Result FsError Unit` | `open`/`fstat`/`write`/`close` | a `String` is always valid UTF-8 with no NUL; `write_text` is built on this one |
 | `fs_make_dir(path, mode) -> Result FsError Unit` | `mkdir` | `mode` is the create mode, set at creation; there is no `chmod` |
 | `fs_remove(path) -> Result FsError Unit` | `remove(3)` (`unlink`/`rmdir`) | — |
 | `fs_rename(from, to) -> Result FsError Unit` | `rename` | — |
