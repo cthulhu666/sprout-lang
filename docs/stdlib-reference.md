@@ -264,6 +264,11 @@ decode reason), except for an empty path, whose `Err` is `"empty path"`. It must
 not be pattern-matched on. No path is special: `"-"` names a file called
 `-`; to read stdin use `terminal.read_stdin_text`.
 
+Reads and writes accept **regular files only**. A FIFO, device or socket gives
+`Err (FsIoError "<path>: not a regular file")` (a write to a FIFO with no reader
+fails with the open error), since opening or reading one could block or never end.
+Stdin is `terminal.read_stdin_bytes` / `read_stdin_text`.
+
 The rest of the module is the **classified** surface, whose error is a matchable
 `FsError` rather than a String. Both halves coexist; the pair above is not
 deprecated.

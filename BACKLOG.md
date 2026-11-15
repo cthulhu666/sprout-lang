@@ -3168,3 +3168,11 @@ acting.
   substitution silently works for ADTs and breaks for records. Three sites hit this; the invariant
   is "resolve constraint/dispatch argument types via `apply_subst(s3, …)`, not `typed_expr_type`
   alone", and a written rule stops the next one at review time.
+- [ ] `P3` **fs file I/O runs on the scheduler thread.** `fs_read_bytes` / `fs_write_bytes` block it
+  for the whole syscall, so a slow regular-file read (a network filesystem, say) stalls every other
+  task. Other runtimes move file I/O off the scheduler thread; Sprout needs a worker-thread path
+  for these calls. Where: `runtime/sprout_runtime.c`, `runtime/sprout_scheduler.c`.
+- [ ] `P3` **Whole-file reads have no size limit.** `fs.read_bytes` / `read_text` read the entire
+  file into memory. Zig's `readFileAlloc` takes `max_bytes`; consider a capped variant, e.g.
+  `read_bytes_max(path, limit)`, that returns an error past the limit. Where: `stdlib/fs.sprout`,
+  `fs_read_bytes`.

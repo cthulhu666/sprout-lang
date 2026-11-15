@@ -4827,7 +4827,20 @@ long long fs_stat_path(long long path_i, long long follow) {
   return fs_ok(entry);
 }
 
+/* Clear O_NONBLOCK on an open descriptor. Opening with it keeps a FIFO open from blocking; once
+ * fstat has shown a regular file it is dropped, so reads and writes behave as before. */
+static int fs_clear_nonblock(int fd) {
+  int fl = fcntl(fd, F_GETFL);
+  if (fl < 0) return -1;
+  return fcntl(fd, F_SETFL, fl & ~O_NONBLOCK);
+}
+
 /* Result FsError Bytes: the whole file, with NO UTF-8 validation.
+ *
+ * Regular files only. Opening a FIFO with no writer would block the scheduler thread, and a
+ * device such as /dev/zero never reaches EOF. The open is O_NONBLOCK so a FIFO returns at once;
+ * fstat (not stat-then-open, so no path swap can slip in) rejects anything else. stdin is
+ * terminal.read_stdin_bytes.
  *
  * The directory case is checked explicitly rather than left to read(2), because
  * the platforms disagree about it — reading a directory fd fails with EISDIR on
@@ -4838,12 +4851,17 @@ long long fs_read_bytes(long long path_i) {
   long long rejected;
   if (fs_path_rejected(path, &rejected)) return rejected;
 
-  int fd = cloexec_open(path, O_RDONLY, 0);
+  int fd = cloexec_open(path, O_RDONLY | O_NONBLOCK, 0);
   if (fd < 0) return fs_err(errno, path);
 
   struct stat st;
   if (fstat(fd, &st) != 0) { int e = errno; close(fd); return fs_err(e, path); }
   if (S_ISDIR(st.st_mode)) { close(fd); return fs_err(EISDIR, path); }
+  if (!S_ISREG(st.st_mode)) {
+    close(fd);
+    return fs_err_text(SPROUT_TAG(stdlib$fs$FsIoError), path, "not a regular file");
+  }
+  if (fs_clear_nonblock(fd) != 0) { int e = errno; close(fd); return fs_err(e, path); }
 
   size_t cap = (S_ISREG(st.st_mode) && st.st_size > 0) ? (size_t)st.st_size + 1 : 4096;
   size_t len = 0;
@@ -4882,7 +4900,10 @@ long long fs_read_bytes(long long path_i) {
 
 /* Result FsError Unit. A String is always valid UTF-8 with no NUL (spec-v0.md
  * §64), so no String can carry an arbitrary byte sequence; this is how one gets
- * into a file. fs.write_text is built on it. */
+ * into a file. fs.write_text is built on it.
+ *
+ * Regular files only, as in fs_read_bytes: a FIFO open would block, so the open is O_NONBLOCK
+ * (a FIFO with no reader fails ENXIO) and fstat rejects any other non-regular file. */
 long long fs_write_bytes(long long path_i, long long bytes_h) {
   const char* path = (const char*)(uintptr_t)path_i;
   long long rejected;
@@ -4891,8 +4912,16 @@ long long fs_write_bytes(long long path_i, long long bytes_h) {
   BytesVal* payload = (BytesVal*)(uintptr_t)bytes_h;
   if (payload == NULL) sprout_fail("fs_write_bytes: null payload");
 
-  int fd = cloexec_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+  int fd = cloexec_open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NONBLOCK, 0666);
   if (fd < 0) return fs_err(errno, path);
+
+  struct stat st;
+  if (fstat(fd, &st) != 0) { int e = errno; close(fd); return fs_err(e, path); }
+  if (!S_ISREG(st.st_mode)) {
+    close(fd);
+    return fs_err_text(SPROUT_TAG(stdlib$fs$FsIoError), path, "not a regular file");
+  }
+  if (fs_clear_nonblock(fd) != 0) { int e = errno; close(fd); return fs_err(e, path); }
 
   /* write(2) may transfer fewer bytes than asked for on any descriptor, so the
    * loop is required, not defensive. */
