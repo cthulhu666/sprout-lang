@@ -600,24 +600,26 @@ for sel in walked_young free_count no_double_list region_release large_young lin
   test "$(cat "$TMP_DIR/ys_$sel.out")" = "young-sweep-$sel"
 done
 
-echo "==> c runtime: GENCHECK under SPROUT_GC_HOLES=1 passes on a real heap, walks holes by slotmap, and aborts on each corrupted map, count and buffer list"
+echo "==> c runtime: GENCHECK, SPROUT_FL_VERIFY and HDRCHECK under SPROUT_GC_HOLES=1 pass on a real heap, walk holes by slotmap, and abort on each corrupted map, count, buffer list, cursor, tail list and header"
 # holes_check.c includes sprout_runtime.c (like young_sweep.c). Each corrupting case must abort
-# with its own GENCHECK message: a check that tests nothing fails here.
+# with its own message: a check that tests nothing fails here.
 HC="$TMP_DIR/holes_check"
 clang "$ROOT/tests/c_runtime/holes_check.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
   "${CLANG_EXTRA[@]}" -O0 -g ${SAN[@]+"${SAN[@]}"} -o "$HC"
-holes_abort() {  # holes_abort <case> <message>
-  local sel="$1" want="$2"
+holes_abort() {  # holes_abort <case> <message> [<prefix regex>, default "GENCHECK: "]
+  local sel="$1" want="$2" pre="${3:-GENCHECK: }"
   if ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$HC" "$sel" > "$TMP_DIR/hc_$sel.out" 2> "$TMP_DIR/hc_$sel.err"; then
     echo "  holes_check '$sel' did not abort" >&2
     exit 1
   fi
-  grep -q "GENCHECK: $want" "$TMP_DIR/hc_$sel.err" || {
-    echo "  holes_check '$sel' failed without the message 'GENCHECK: $want':" >&2
+  grep -q "$pre$want" "$TMP_DIR/hc_$sel.err" || {
+    echo "  holes_check '$sel' failed without the message '$pre$want':" >&2
     cat "$TMP_DIR/hc_$sel.out" "$TMP_DIR/hc_$sel.err" >&2
     exit 1
   }
 }
+FLV="FL_VERIFY cycle=[0-9]* holes: "
+HDR="HDRCHECK: holes walk: "
 holes_abort bad_slotmap_outside_occ "slotmap bit outside occ"
 holes_abort bad_youngmap_outside_occ "youngmap bit outside occ"
 holes_abort bad_extent_outside_occ "live extent outside occ"
@@ -629,7 +631,18 @@ holes_abort bad_color_old "colour clear on an object in oldocc"
 holes_abort bad_buf_missing "buffer owner missing from its list"
 holes_abort bad_buf_twice "buffer owner listed twice"
 holes_abort bad_buf_young_on_old "young buffer owner on the old list"
-for sel in positive scribble tail_retained; do
+holes_abort bad_fl_cursor_backward "cursor moved backward" "$FLV"
+holes_abort bad_fl_tail_twice "tail listed twice" "$FLV"
+holes_abort bad_fl_tail_not_in_occ "listed tail is not in occ" "$FLV"
+holes_abort bad_fl_tail_slotmap "listed tail has a slotmap bit" "$FLV"
+holes_abort bad_fl_tail_oldocc "listed tail has an oldocc bit" "$FLV"
+holes_abort bad_fl_tail_take_unlisted "tail taken but not listed" "$FLV"
+holes_abort bad_fl_alloc_in_occ "allocation over granules already in occ" "$FLV"
+holes_abort bad_fl_tails_at_sweep "tail list not empty when the sweep starts" "$FLV"
+holes_abort bad_fl_cursor_not_reset "cursor not reset after a collection" "$FLV"
+holes_abort bad_hdr_too_long "header too long" "$HDR"
+holes_abort bad_hdr_too_short "header too short" "$HDR"
+for sel in positive positive_verify scribble scribble_verify scribble_hdrcheck tail_retained; do
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$HC" "$sel" > "$TMP_DIR/hc_$sel.out" 2> "$TMP_DIR/hc_$sel.err" || {
     echo "  holes_check '$sel' failed:" >&2
     cat "$TMP_DIR/hc_$sel.out" "$TMP_DIR/hc_$sel.err" >&2

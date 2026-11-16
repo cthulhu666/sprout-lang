@@ -3170,6 +3170,8 @@ task-io-smoke: bootstrap-from-seed
   run_once "tcp-nul-payload" "nul-bytes-intact"
   run_once "tcp-nul-payload/decode" "nul-decode-refused"
   SPROUT_GC_HDRCHECK=1 run_once "tcp-nul-payload/hdrcheck" "nul-bytes-intact"
+  # HDRCHECK under occupancy maps: the post-sweep walk by runs of `occ`, not the per-slot walk.
+  SPROUT_GC_HOLES=1 SPROUT_GC_HDRCHECK=1 run_once "tcp-nul-payload/holes-hdrcheck" "nul-bytes-intact"
   # (30) The HTTP CLIENT must PARK, not block the OS thread. `http_request` ran on a blocking socket
   # bounded by SO_RCVTIMEO/SO_SNDTIMEO, so every call froze the pump for its whole duration: no
   # sibling task advanced and no timer fired. Measured on the unfixed runtime, a 2000 ms request
@@ -4036,7 +4038,8 @@ test-stress: bootstrap-from-seed
   fi
   echo "==> test-stress ✓"
 
-# Freelist oracle at the DEFAULT threshold (SPROUT_FL_VERIFY=1, no GC stress).
+# Freelist oracle at the DEFAULT threshold (SPROUT_FL_VERIFY=1, no GC stress), and each file again
+# with SPROUT_GC_HOLES=1, where the switch checks the allocation cursors and the freed-tail lists.
 #
 # `test-stress` already runs the oracle, but only under SPROUT_GC_STRESS=1, which
 # forces small heaps — and a small heap barely makes Pass 2 release any region,
@@ -4075,17 +4078,22 @@ test-freelist-verify: bootstrap-from-seed
     if ! clang "$TMPD/$name.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$name.bin" 2>"$TMPD/$name.err"; then
       echo "test-freelist-verify: link failed: $f" >&2; cat "$TMPD/$name.err" >&2; failed=$((failed + 1)); continue
     fi
-    if out=$(SPROUT_FL_VERIFY=1 SPROUT_STDLIB_ROOT="{{stdlib_root}}" "$TMPD/$name.bin" 2>&1); then
-      if ! suite_verdict <<<"$out"; then
-        echo "test-freelist-verify: $f FAILED (or printed no verdict)" >&2; echo "$out" >&2; failed=$((failed + 1))
+    # The default allocator, then occupancy maps, whose FL_VERIFY form checks the cursors, the
+    # tail lists and each allocation's extent (docs/gc-stage2-v0.md §6 premise 12).
+    for mode in "" "SPROUT_GC_HOLES=1"; do
+      # shellcheck disable=SC2086
+      if out=$(env SPROUT_FL_VERIFY=1 $mode SPROUT_STDLIB_ROOT="{{stdlib_root}}" "$TMPD/$name.bin" 2>&1); then
+        if ! suite_verdict <<<"$out"; then
+          echo "test-freelist-verify: $f FAILED (or printed no verdict) under SPROUT_FL_VERIFY=1 $mode" >&2; echo "$out" >&2; failed=$((failed + 1))
+        else
+          echo "  PASS (fl-verify${mode:+, $mode}): $f"
+        fi
       else
-        echo "  PASS (fl-verify): $f"
+        echo "test-freelist-verify: $f aborted under SPROUT_FL_VERIFY=1 $mode" >&2
+        echo "$out" | grep FL_VERIFY >&2 || echo "$out" | tail -5 >&2
+        failed=$((failed + 1))
       fi
-    else
-      echo "test-freelist-verify: $f aborted under SPROUT_FL_VERIFY=1" >&2
-      echo "$out" | grep FL_VERIFY >&2 || echo "$out" | tail -5 >&2
-      failed=$((failed + 1))
-    fi
+    done
   done
   if (( failed > 0 )); then
     echo "test-freelist-verify: $failed file(s) failed" >&2; exit 1
@@ -4317,7 +4325,7 @@ gc-adapt-check: bootstrap-from-seed
 # collections. The default arm is the shipped default (K=3, s=1, c=2) under GENCHECK. Also run
 # with SPROUT_FL_VERIFY=1 and with SPROUT_GC_LINEAGE=1 (same flags, same output), and with the
 # mode off, where the output must be the same, and with SPROUT_GC_HOLES=1 (occupancy maps, minors
-# on under GENCHECK and off; docs/gc-stage2-v0.md §5.7). The nursery share is not varied here: under STRESS
+# on under GENCHECK, SPROUT_FL_VERIFY=1 and HDRCHECK, and off; docs/gc-stage2-v0.md §5.7). The nursery share is not varied here: under STRESS
 # every allocation collects, and without it these programs run no minor at either share.
 # The two analysis helpers are static and need a live analysis service to reach from Sprout, so a C case covers
 # them (tests/c_runtime/analysis_strings.c).
@@ -4399,13 +4407,15 @@ gc-gen-check: bootstrap-from-seed
         || { echo "gc-gen-check: $name: $bad full-walk minors not followed by a major under $mode (cycle numbers)" >&2; failed=1; }
     fi
     # Occupancy maps (docs/gc-stage2-v0.md §5.7): GENCHECK walks every region by slotmap and checks
-    # the maps, counts and buffer lists. Same stdout, same minor-count floor.
-    SPROUT_GC_HOLES=1 SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 SPROUT_DEBUG_GC=1 \
+    # the maps, counts and buffer lists; FL_VERIFY checks the cursors, the tail lists and each
+    # allocation's extent (premise 12); HDRCHECK walks each run of `occ` by headers. Same stdout,
+    # same minor-count floor.
+    SPROUT_GC_HOLES=1 SPROUT_FL_VERIFY=1 SPROUT_GC_HDRCHECK=1 SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 SPROUT_DEBUG_GC=1 \
       "$TMPD/$name.bin" > "$TMPD/$name.mode.out" 2>"$TMPD/$name.holes.gc"
     rc=$?
     if [ "$rc" != 0 ] || ! cmp -s "$want_file" "$TMPD/$name.mode.out"; then
-      report_mismatch "$name" "failed under SPROUT_GC_HOLES=1 MINOR=1 GENCHECK=1 STRESS=1 (rc=$rc)" "$TMPD/$name.mode.out"
-      grep -A4 'GENCHECK' "$TMPD/$name.holes.gc" | head -8 >&2
+      report_mismatch "$name" "failed under SPROUT_GC_HOLES=1 FL_VERIFY=1 HDRCHECK=1 MINOR=1 GENCHECK=1 STRESS=1 (rc=$rc)" "$TMPD/$name.mode.out"
+      grep -A4 'GENCHECK\|FL_VERIFY\|HDRCHECK' "$TMPD/$name.holes.gc" | head -8 >&2
       failed=1
     else
       hminors=$(grep -c 'kind=minor' "$TMPD/$name.holes.gc")
@@ -4427,7 +4437,8 @@ gc-gen-check: bootstrap-from-seed
   # `*_nostress` programs build too large a live heap to collect on every allocation. They reach
   # what STRESS cannot: a push below a class cursor (premise 9, checked by FL_VERIFY at every
   # allocation) needs a cursor that advanced past a region, which a collection per allocation
-  # resets. Stdout is compared; no minor-count floor.
+  # resets. Under HOLES the same holds for premise 12's cursors. Stdout is compared; no
+  # minor-count floor.
   for f in tests/gc_gen/*_nostress.spr; do
     name=$(basename "$f" .spr)
     want_file="tests/gc_gen/$name.out"
@@ -4435,7 +4446,7 @@ gc-gen-check: bootstrap-from-seed
     build_one "$f" "$name" || { failed=1; continue; }
     ok=1
     for mode in "SPROUT_GC_MINOR=1" \
-                "SPROUT_GC_HOLES=1 SPROUT_GC_MINOR=1" \
+                "SPROUT_GC_HOLES=1 SPROUT_GC_MINOR=1 SPROUT_FL_VERIFY=1" \
                 "SPROUT_GC_MINOR=1 SPROUT_GC_REGION_LISTS=1 SPROUT_FL_VERIFY=1" \
                 "SPROUT_GC_MINOR=0 SPROUT_GC_REGION_LISTS=1 SPROUT_FL_VERIFY=1"; do
       # shellcheck disable=SC2086

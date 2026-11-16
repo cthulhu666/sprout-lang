@@ -10,10 +10,16 @@
  *                    allocated into; no walk steps over a hole by header (premise 14).
  *   tail_retained  — an old vector in a region with no young object releases its inline tail;
  *                    the next minor must drop the tail from `occ`.
+ *   *_verify, *_hdrcheck — the positive and scribble cases again with SPROUT_FL_VERIFY=1 or
+ *                    SPROUT_GC_HDRCHECK=1: the verify and HDRCHECK walks hold on a real heap.
  *   bad_*          — each corrupts one map, count or list after a clean collection and runs the
  *                    check, which must abort with its own message (the caller checks it).
+ *   bad_fl_*       — the same under SPROUT_FL_VERIFY=1 (premise 12): the cursors, the tail lists
+ *                    and each allocation's extent.  bad_hdr_* — under SPROUT_GC_HDRCHECK=1: a
+ *                    header whose step does not land on a `slotmap` start or the run's end.
  *
- * `k_cases` lists every case; main sets the environment before sprout_set_argv. */
+ * `k_cases` lists every case and the switch it sets; main sets the environment before
+ * sprout_set_argv. */
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -291,26 +297,162 @@ static int bad_buf_young_on_old(void) {
   return bad_end("bad_buf_young_on_old");
 }
 
+/* ---- SPROUT_FL_VERIFY under HOLES (premise 12) ---- */
+
+/* Release a real inline tail: an inline vector of 100 elements grows past its slot.  Returns the
+ * tail's address, and its region and class. */
+static char* release_tail(SproutRegion** rp, size_t* cls) {
+  register_roots();
+  g_o[0] = P(vec_make_filled(100, 0));
+  SproutRegion* r = region_find(g_o[0]);
+  const size_t hdr = (size_t)((char*)g_o[0] - 8 - r->base);
+  const size_t old_slot = slot_bytes(SPROUT_HEAP_VECTOR, 100);
+  const size_t new_slot = slot_bytes(SPROUT_HEAP_VECTOR, 0);
+  vector_push(W(g_o[0]), 1);
+  *rp = r;
+  *cls = (old_slot - new_slot) / SPROUT_SLOT_GRAN;
+  return r->base + hdr + new_slot;
+}
+
+static int bad_fl_cursor_backward(void) {
+  scene();
+  void* a = P(make_str(1));             /* one granule, from the main cursor */
+  SproutRegion* r = region_find(a);
+  const size_t ga = granule_of(a), g0 = occ_next_set(r->occ, 0);
+  check(g0 < ga, "a live granule lies below the allocation");
+  r->occ[g0 / 64] &= ~((uint64_t)1 << (g0 % 64));   /* a hole the cursor already passed */
+  g_hole_cur.ri = (size_t)(r - g_regions);
+  g_hole_cur.gran = g0;
+  make_str(1);
+  fprintf(stderr, "bad_fl_cursor_backward: no abort\n");
+  return 1;
+}
+
+static int bad_fl_tail_twice(void) {
+  SproutRegion* r; size_t cls;
+  char* tail = release_tail(&r, &cls);
+  sprout_holes_push_tail(r, tail, cls);
+  fprintf(stderr, "bad_fl_tail_twice: no abort\n");
+  return 1;
+}
+
+static int bad_fl_tail_not_in_occ(void) {
+  scene();
+  SproutRegion* r = region_find(g_o[3]);
+  sprout_holes_push_tail(r, r->base + (r->bump / SPROUT_SLOT_GRAN + 3) * SPROUT_SLOT_GRAN, 1);
+  fprintf(stderr, "bad_fl_tail_not_in_occ: no abort\n");
+  return 1;
+}
+
+static int bad_fl_tail_slotmap(void) {
+  scene();
+  SproutRegion* r = region_find(g_o[3]);   /* young: in `occ`, not in `oldocc`, but a slot start */
+  sprout_holes_push_tail(r, r->base + granule_of(g_o[3]) * SPROUT_SLOT_GRAN, 1);
+  fprintf(stderr, "bad_fl_tail_slotmap: no abort\n");
+  return 1;
+}
+
+static int bad_fl_tail_oldocc(void) {
+  scene();
+  SproutRegion* r = region_find(g_o[0]);   /* inside the old string's extent: `oldocc`, no slot start */
+  sprout_holes_push_tail(r, r->base + (granule_of(g_o[0]) + 3) * SPROUT_SLOT_GRAN, 1);
+  fprintf(stderr, "bad_fl_tail_oldocc: no abort\n");
+  return 1;
+}
+
+static int bad_fl_tail_take_unlisted(void) {
+  SproutRegion* r; size_t cls;
+  char* tail = release_tail(&r, &cls);
+  const size_t idx = (size_t)(tail - r->base) / SPROUT_SLOT_GRAN;
+  check(r->tailvf != NULL && bitmap_test(r->tailvf, idx), "the released tail is recorded as listed");
+  if (r->tailvf != NULL) r->tailvf[idx / 64] &= ~((uint64_t)1 << (idx % 64));
+  make_str(cls * SPROUT_SLOT_GRAN - 9);  /* the tail's exact class: allocation takes it */
+  fprintf(stderr, "bad_fl_tail_take_unlisted: no abort\n");
+  return 1;
+}
+
+static int bad_fl_alloc_in_occ(void) {
+  scene();
+  sprout_holes_verify_alloc(&g_hole_cur, region_find(g_o[3]), granule_of(g_o[3]), 1);
+  fprintf(stderr, "bad_fl_alloc_in_occ: no abort\n");
+  return 1;
+}
+
+static int bad_fl_tails_at_sweep(void) {
+  scene();
+  g_hole_tails[2] = (void*)&g_o[0];
+  sprout_holes_verify_before_sweep();
+  fprintf(stderr, "bad_fl_tails_at_sweep: no abort\n");
+  return 1;
+}
+
+static int bad_fl_cursor_not_reset(void) {
+  scene();
+  g_hole_ovf.gran = 5;
+  sprout_holes_verify_after_sweep();
+  fprintf(stderr, "bad_fl_cursor_not_reset: no abort\n");
+  return 1;
+}
+
+/* ---- HDRCHECK under HOLES: a header whose step ends off a `slotmap` start or the run's end ---- */
+
+static void set_aux(void* payload, uint64_t aux) {
+  uint64_t h = sprout_hdr_of(payload);
+  h = (h & (((uint64_t)1 << 14) - 1)) | (aux << 14);
+  memcpy((char*)payload - 8, &h, 8);
+}
+
+static int bad_hdr_too_long(void) {
+  scene();
+  set_aux(g_o[0], 164);                 /* a 100-byte string; the header now says 164 */
+  sprout_holes_hdrcheck_walk();
+  fprintf(stderr, "bad_hdr_too_long: no abort\n");
+  return 1;
+}
+
+static int bad_hdr_too_short(void) {
+  scene();
+  set_aux(g_o[0], 20);
+  sprout_holes_hdrcheck_walk();
+  fprintf(stderr, "bad_hdr_too_short: no abort\n");
+  return 1;
+}
+
 typedef struct {
   const char* name;
   int (*fn)(void);
+  const char* env;   /* the verify switch the case sets, "both" for the two, or NULL */
 } HolesCase;
 
 static const HolesCase k_cases[] = {
-  { "positive",               positive },
-  { "scribble",               scribble },
-  { "tail_retained",          tail_retained },
-  { "bad_slotmap_outside_occ", bad_slotmap_outside_occ },
-  { "bad_youngmap_outside_occ", bad_youngmap_outside_occ },
-  { "bad_extent_outside_occ", bad_extent_outside_occ },
-  { "bad_oldocc_extra",       bad_oldocc_extra },
-  { "bad_oldocc_missing",     bad_oldocc_missing },
-  { "bad_markocc",            bad_markocc },
-  { "bad_color_young",        bad_color_young },
-  { "bad_color_old",          bad_color_old },
-  { "bad_buf_missing",        bad_buf_missing },
-  { "bad_buf_twice",          bad_buf_twice },
-  { "bad_buf_young_on_old",   bad_buf_young_on_old },
+  { "positive",               positive, NULL },
+  { "positive_verify",        positive, "both" },
+  { "scribble",               scribble, NULL },
+  { "scribble_verify",        scribble, "SPROUT_FL_VERIFY" },
+  { "scribble_hdrcheck",      scribble, "SPROUT_GC_HDRCHECK" },
+  { "tail_retained",          tail_retained, NULL },
+  { "bad_slotmap_outside_occ", bad_slotmap_outside_occ, NULL },
+  { "bad_youngmap_outside_occ", bad_youngmap_outside_occ, NULL },
+  { "bad_extent_outside_occ", bad_extent_outside_occ, NULL },
+  { "bad_oldocc_extra",       bad_oldocc_extra, NULL },
+  { "bad_oldocc_missing",     bad_oldocc_missing, NULL },
+  { "bad_markocc",            bad_markocc, NULL },
+  { "bad_color_young",        bad_color_young, NULL },
+  { "bad_color_old",          bad_color_old, NULL },
+  { "bad_buf_missing",        bad_buf_missing, NULL },
+  { "bad_buf_twice",          bad_buf_twice, NULL },
+  { "bad_buf_young_on_old",   bad_buf_young_on_old, NULL },
+  { "bad_fl_cursor_backward", bad_fl_cursor_backward, "SPROUT_FL_VERIFY" },
+  { "bad_fl_tail_twice",      bad_fl_tail_twice, "SPROUT_FL_VERIFY" },
+  { "bad_fl_tail_not_in_occ", bad_fl_tail_not_in_occ, "SPROUT_FL_VERIFY" },
+  { "bad_fl_tail_slotmap",    bad_fl_tail_slotmap, "SPROUT_FL_VERIFY" },
+  { "bad_fl_tail_oldocc",     bad_fl_tail_oldocc, "SPROUT_FL_VERIFY" },
+  { "bad_fl_tail_take_unlisted", bad_fl_tail_take_unlisted, "SPROUT_FL_VERIFY" },
+  { "bad_fl_alloc_in_occ",    bad_fl_alloc_in_occ, "SPROUT_FL_VERIFY" },
+  { "bad_fl_tails_at_sweep",  bad_fl_tails_at_sweep, "SPROUT_FL_VERIFY" },
+  { "bad_fl_cursor_not_reset", bad_fl_cursor_not_reset, "SPROUT_FL_VERIFY" },
+  { "bad_hdr_too_long",       bad_hdr_too_long, "SPROUT_GC_HDRCHECK" },
+  { "bad_hdr_too_short",      bad_hdr_too_short, "SPROUT_GC_HDRCHECK" },
 };
 
 int main(int argc, char** argv) {
@@ -324,11 +466,17 @@ int main(int argc, char** argv) {
   setenv("SPROUT_GC_GENCHECK", "1", 1);
   setenv("SPROUT_GC_MAJOR_EVERY", "1000", 1);
   unsetenv("SPROUT_GC_HDRCHECK");
+  unsetenv("SPROUT_FL_VERIFY");
+  if (c->env != NULL && strcmp(c->env, "both") == 0) {
+    setenv("SPROUT_FL_VERIFY", "1", 1);
+    setenv("SPROUT_GC_HDRCHECK", "1", 1);
+  } else if (c->env != NULL) {
+    setenv(c->env, "1", 1);
+  }
   unsetenv("SPROUT_GC_LINEAGE");
   unsetenv("SPROUT_GC_STRESS");
   unsetenv("SPROUT_GC_AGEPROF");
   unsetenv("SPROUT_GC_REGION_LISTS");
-  unsetenv("SPROUT_FL_VERIFY");
   sprout_set_argv(argc, argv);  /* reads the switches, as a compiled program's main does */
   g_gc_threshold = 0;
   if (c->fn() || g_failed) return 1;
