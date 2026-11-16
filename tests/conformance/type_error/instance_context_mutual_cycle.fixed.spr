@@ -1,0 +1,19 @@
+class Foo t
+  fn foo(x: t) -> Int
+
+class Bar t
+  fn bar(x: t) -> Int
+
+instance Foo Int
+  fn foo(x: Int) -> Int = x
+
+instance Bar Int
+  fn bar(x: Int) -> Int = x
+
+instance Foo (List a) where Bar a
+  fn foo(xs: List a) -> Int = list_fold(\ (acc, x) -> acc + bar(x), 0, xs)
+
+instance Bar (List a) where Foo a
+  fn bar(xs: List a) -> Int = list_fold(\ (acc, x) -> acc + foo(x), 0, xs)
+
+fn main() -> Unit !{IO} = print(to_string(foo([1])))

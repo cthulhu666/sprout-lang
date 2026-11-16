@@ -1,0 +1,11 @@
+# A context that names a variable more often than the head does can grow under
+# substitution, even when it is smaller than the head.
+type T a b c = T a b c
+
+type Pair a b = Pair a b
+
+instance Eq (T a b c) where Eq (Pair a a)
+#~^ ERROR
+  fn eq(x: T a b c, y: T a b c) -> Bool = true
+
+fn main() -> Unit !{IO} = print("unreachable")

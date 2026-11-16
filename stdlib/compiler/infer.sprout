@@ -7613,6 +7613,7 @@ fn typecheck_decls_resolved(
     let Nothing = check_duplicate_module_values(decls, dict_empty()) else Just(p, m) -> typed_ast.TypedErr(p, m)
     let Nothing = check_tyvar_instance_heads(decls) else Just(p, m) -> typed_ast.TypedErr(p, m)
     let Nothing = check_instance_head_kinds(decls, arities, env, qual_env) else Just(p, m) -> typed_ast.TypedErr(p, m)
+    let Nothing = check_instance_context_sizes(decls) else Just(p, m) -> typed_ast.TypedErr(p, m)
     let Nothing = check_indistinct_constraints(decls) else Just(p, m) -> typed_ast.TypedErr(p, m)
     let Nothing = check_overlapping_instances(decls, dict_empty()) else Just(p, m) -> typed_ast.TypedErr(p, m)
     let Nothing = check_missing_superclass_instances(decls) else Just(p, m) -> typed_ast.TypedErr(p, m)
@@ -8985,6 +8986,103 @@ fn check_arity_decls(decls: List ast.Decl, depths: Dict (String, List Int),
                      supers: Dict (List String), arities: Dict Int,
                      env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
   ast.first_decl_error(decl_arity_error(_, depths, supers, arities, env), decls)
+
+# ---------------------------------------------------------------------------
+# Instance context size — spec-v0.md §8.5 rule 4, docs/instance-termination-v0.md
+# ---------------------------------------------------------------------------
+#
+# Each context constraint is smaller than the head and names no variable more often than
+# the head does, so instance resolution ends. Runs after check_instance_head_kinds, so a
+# malformed head is reported as one, and before anything that resolves an instance. Aliases
+# are already expanded (ast.expand_alias_constraints), so this reads the type as resolved.
+fn check_instance_context_sizes(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
+  ast.first_decl_error(decl_context_size_error, decls)
+
+fn decl_context_size_error(decl: ast.Decl) -> Maybe String =
+  match decl with
+  | ast.InstanceDecl head ctx _ _ _ -> instance_context_size_error(head, ctx)
+  | _ -> Nothing
+
+fn instance_context_size_error(head: ast.TypeConstraint, ctx: List ast.TypeConstraint) -> Maybe String =
+  let ast.TypeConstraint _ head_args = head
+      [_ | _] = ctx else Nothing
+      head_occs = ast.te_vars_list(head_args, Nil)
+      [_ | _] = head_occs else
+        Just("the instance `" ++ instance_owner(head) ++ "` has no type variables, so it cannot have a context")
+  in find_map(context_size_error(head, head_args, head_occs, _), ctx)
+
+fn context_size_error(head: ast.TypeConstraint, head_args: List ast.TypeExpr,
+                      head_occs: List String, c: ast.TypeConstraint) -> Maybe String =
+  let ast.TypeConstraint cls args = c
+      occs = ast.te_vars_list(args, Nil)
+      occurs = \ (v, xs) -> count(\u -> u == v, xs)
+  in
+    if te_list_size(args) >= te_list_size(head_args)
+    then Just(context_not_smaller_msg(head, c, string.after_last_dot(cls), te_list_arg_vars(args)))
+    else map(\v -> repeated_var_msg(head, c, v, occurs(v, occs), occurs(v, head_occs)),
+             find(\v -> occurs(v, occs) > occurs(v, head_occs), collect_te_vars_list(args, Nil)))
+
+# The hint lists the variables that occur outside function position; a variable only applied
+# (`f` in `f a`) has a higher kind, so `C f` would not fit.
+fn context_not_smaller_msg(head: ast.TypeConstraint, c: ast.TypeConstraint, cls: String,
+                           vars: List String) -> String =
+  let base = "the instance context `" ++ instance_owner(c) ++ "` is not smaller than the instance head `"
+               ++ instance_owner(head) ++ "`, so instance resolution might never end"
+  in
+    match vars with
+    | [] -> base
+    | _ -> base ++ "; constrain the head's variables instead, as in `where "
+             ++ string.join(", ", list_map(\v -> cls ++ " " ++ v, vars)) ++ "`"
+
+# Distinct variables of `args`, in first-occurrence order, with at least one occurrence that
+# is not the base of an application.
+fn te_list_arg_vars(args: List ast.TypeExpr) -> List String =
+  let used = te_arg_names_list(args, Nil)
+  in list_filter(\v -> list_member(v, used), collect_te_vars_list(args, Nil))
+
+fn te_arg_names_list(items: List ast.TypeExpr, acc: List String) -> List String =
+  list_fold(\ (a, t) -> te_arg_names(t, a), acc, items)
+
+fn te_arg_names(te: ast.TypeExpr, acc: List String) -> List String =
+  match te with
+  | ast.TypeName n -> Cons(n, acc)
+  | ast.TypeApply base arg -> te_arg_names(arg, te_base_names(base, acc))
+  | ast.TypeArrow param ret _ _ -> te_arg_names(ret, te_arg_names(param, acc))
+  | ast.TypeThunk ret _ -> te_arg_names(ret, acc)
+  | ast.TypeEffect inner _ -> te_arg_names(inner, acc)
+  | ast.TupleType items -> te_arg_names_list(items, acc)
+
+# The head of an application spine is skipped; its arguments count.
+fn te_base_names(base: ast.TypeExpr, acc: List String) -> List String =
+  match base with
+  | ast.TypeName _ -> acc
+  | ast.TypeApply inner arg -> te_arg_names(arg, te_base_names(inner, acc))
+  | _ -> te_arg_names(base, acc)
+
+fn repeated_var_msg(head: ast.TypeConstraint, c: ast.TypeConstraint, v: String, in_ctx: Int,
+                    in_head: Int) -> String =
+  "the instance context `" ++ instance_owner(c) ++ "` names `" ++ v ++ "` " ++ times_word(in_ctx)
+    ++ " and the instance head `" ++ instance_owner(head) ++ "` names it " ++ times_word(in_head)
+    ++ ", so instance resolution might never end"
+
+fn times_word(n: Int) -> String =
+  if n == 1 then "once"
+  else if n == 2 then "twice"
+  else int_to_string(n) ++ " times"
+
+# A type name or variable counts 1; a tuple, arrow or thunk 1 plus its parts; an application
+# the sum of its parts; an effect wrapper is its inner type. Repetitions count.
+fn te_size(te: ast.TypeExpr) -> Int =
+  match te with
+  | ast.TypeName _ -> 1
+  | ast.TypeApply base arg -> te_size(base) + te_size(arg)
+  | ast.TypeArrow param ret _ _ -> 1 + te_size(param) + te_size(ret)
+  | ast.TypeThunk ret _ -> 1 + te_size(ret)
+  | ast.TypeEffect inner _ -> te_size(inner)
+  | ast.TupleType items -> 1 + te_list_size(items)
+
+fn te_list_size(items: List ast.TypeExpr) -> Int =
+  list_fold(\ (acc, t) -> acc + te_size(t), 0, items)
 
 
 # ---------------------------------------------------------------------------

@@ -1,1 +1,1 @@
-instance method `same` of instance Same (Box a) writes `t` for the head's `a`
+instance method `same` of instance Same (Box2 a b) writes `t` for the head's `a`

@@ -22,6 +22,21 @@ export type TypeExpr (..) =
   | TypeEffect TypeExpr (List String)
   | TupleType (List TypeExpr)
 
+# Every lowercase variable occurrence in `tes`, repeats included, consed onto `acc`.
+export fn te_vars_list(tes: List TypeExpr, acc: List String) -> List String =
+  match tes with
+  | [] -> acc
+  | [te | rest] -> te_vars_list(rest, te_vars(te, acc))
+
+export fn te_vars(te: TypeExpr, acc: List String) -> List String =
+  match te with
+  | TypeName n -> if source.is_lowercase_name(n) then Cons(n, acc) else acc
+  | TypeApply base arg -> te_vars(arg, te_vars(base, acc))
+  | TupleType items -> te_vars_list(items, acc)
+  | TypeArrow p r _ _ -> te_vars(r, te_vars(p, acc))
+  | TypeThunk r _ -> te_vars(r, acc)
+  | TypeEffect inner _ -> te_vars(inner, acc)
+
 # --- Patterns ---
 
 export type Pattern (..) =

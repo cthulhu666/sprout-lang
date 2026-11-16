@@ -1,14 +1,14 @@
-# An instance's context names the head's variables. A method that writes `Box t` for
-# the head's `Box a` has a variable of its own, which the context does not reach, so
+# An instance's context names the head's variables. A method that writes `Box2 t u` for
+# the head's `Box2 a b` has variables of its own, which the context does not reach, so
 # the method's signature is rejected against the class's at the head.
-type Box a = Box a
+type Box2 a b = Box2 a b
 
 class Same t
   fn same(x: t, y: t) -> Bool
 
-instance Same (Box a) where Eq (Maybe a)
-  fn same(x: Box t, y: Box t) -> Bool =
+instance Same (Box2 a b) where Eq (Maybe a)
+  fn same(x: Box2 t u, y: Box2 t u) -> Bool =
     match (x, y) with
-    | (Box p, Box q) -> Just(p) == Just(q)
+    | (Box2 p _, Box2 q _) -> Just(p) == Just(q)
 
-fn main() -> Unit !{IO} = print(to_string(same(Box(1), Box(1))))
+fn main() -> Unit !{IO} = print(to_string(same(Box2(1, 2), Box2(1, 2))))

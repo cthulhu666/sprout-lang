@@ -1,0 +1,16 @@
+# Two instances whose contexts name each other, at equal size, loop. Each is rejected
+# on its own, so the first in source order is reported.
+class Foo t
+  fn foo(x: t) -> Int
+
+class Bar t
+  fn bar(x: t) -> Int
+
+instance Foo (List a) where Bar (List a)
+#~^ ERROR
+  fn foo(x: List a) -> Int = bar(x)
+
+instance Bar (List a) where Foo (List a)
+  fn bar(x: List a) -> Int = foo(x)
+
+fn main() -> Unit !{IO} = print(to_string(foo([1])))

@@ -1,0 +1,1 @@
+the instance context `Eq (Pair a a)` names `a` twice and the instance head `Eq (T a b c)` names it once, so instance resolution might never end

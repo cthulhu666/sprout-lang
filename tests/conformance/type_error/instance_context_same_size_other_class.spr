@@ -1,0 +1,12 @@
+# Equal size is rejected even for a different class: `Eq (Maybe a)` is as large as the
+# head `Same (Box a)`. The head needs a second variable to leave room.
+type Box a = Box a
+
+class Same t
+  fn same(x: t, y: t) -> Bool
+
+instance Same (Box a) where Eq (Maybe a)
+#~^ ERROR
+  fn same(x: Box a, y: Box a) -> Bool = true
+
+fn main() -> Unit !{IO} = print("unreachable")

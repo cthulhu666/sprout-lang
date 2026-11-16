@@ -1,0 +1,13 @@
+# A head with no type variables binds nothing, so a context under it could only repeat
+# a fixed constraint and has no variable to constrain.
+class Foo t
+  fn foo(x: t) -> Int
+
+class Bar t
+  fn bar(x: t) -> Int
+
+instance Foo Unit where Bar Int
+#~^ ERROR
+  fn foo(x: Unit) -> Int = 1
+
+fn main() -> Unit !{IO} = print("unreachable")

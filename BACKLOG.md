@@ -3015,13 +3015,6 @@ acting.
   under-application of '__tc_Biggest_List_biggest' reached codegen (arity 3, got 1)". The eta
   lambda `lowering.eta_from_evidence` builds omits the method's own hidden `Ord` dictionary. Same
   on master. `TMethodRef`'s Evidence covers the class constraint only, not the method's own.
-- [ ] `P3` **An instance context larger than its head overflows the compiler's stack.**
-  `instance Foo (List a) where Foo (List (List a))` with a call `foo([1])` dies at `--phase
-  check` with "fatal: stack overflow - unbounded or too-deep recursion": `resolve`'s
-  `produce_instance_evidence` recurses through each context constraint with no size bound.
-  Spec §8.5's rules (one type, context variables in the head) all accept it. Fix: require each
-  context constraint to be smaller than the head, as GHC's Paterson condition 2 does, with a
-  located message; spec §8.5 rule.
 - [ ] `P3` **Two walks enumerate the places a constraint can appear.** infer's count check
   (`class_decl_error`, `instance_decl_error`, `validate_fn_constraint`) and kind check
   (`decl_arity_error`, `constraints_arity_error`, `impl_wheres_arity_error`) each list fn,

@@ -1,0 +1,1 @@
+the instance context `Foo (f (Maybe a))` is not smaller than the instance head `Foo (Wrap f a)`, so instance resolution might never end; constrain the head's variables instead, as in `where Foo a`

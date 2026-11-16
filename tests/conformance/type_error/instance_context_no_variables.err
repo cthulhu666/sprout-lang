@@ -1,0 +1,1 @@
+the instance context `Bar (List Int)` is not smaller than the instance head `Foo (Box a)`, so instance resolution might never end
