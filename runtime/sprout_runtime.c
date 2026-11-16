@@ -1008,14 +1008,11 @@ static void sprout_gc_holes_refuse(const char* name) {
 static int g_holes_verify;   /* SPROUT_FL_VERIFY=1 under SPROUT_GC_HOLES, set in sprout_gc_gen_init */
 static int sprout_fl_verify_on(void);
 
-/* The maps replace the free lists and the per-slot sweep, so a mode that reads either is out.
- * SPROUT_FL_VERIFY and SPROUT_GC_HDRCHECK have forms of their own under HOLES. */
+/* The maps replace the free lists, so the per-region lists are out.  SPROUT_FL_VERIFY,
+ * SPROUT_GC_HDRCHECK and SPROUT_GC_LINEAGE have forms of their own under HOLES. */
 static void sprout_gc_holes_check_modes(void) {
-  static const char* const modes[] = { "SPROUT_GC_REGION_LISTS", "SPROUT_GC_LINEAGE" };
-  for (size_t i = 0; i < sizeof(modes) / sizeof(modes[0]); i++) {
-    const char* v = getenv(modes[i]);
-    if (v != NULL && v[0] == '1') sprout_gc_holes_refuse(modes[i]);
-  }
+  const char* v = getenv("SPROUT_GC_REGION_LISTS");
+  if (v != NULL && v[0] == '1') sprout_gc_holes_refuse("SPROUT_GC_REGION_LISTS");
 }
 
 static void sprout_gc_gen_init(void) {
@@ -3398,7 +3395,9 @@ static void gc_mark_enqueue_holes(void* payload, SproutRegion* r) {
   } else {
     idx = (size_t)((char*)hdr_ptr - r->base) / SPROUT_SLOT_GRAN;
     if (bitmap_test(r->markocc, idx)) return;
-    granules = slot_bytes(sprout_hdr_kind(h), sprout_hdr_aux(h)) / SPROUT_SLOT_GRAN;
+    const SproutHeapKind kind = sprout_hdr_kind(h);
+    if (kind == (SproutHeapKind)SPROUT_GC_POISON) return;   /* a lineage corpse a dangling word reaches */
+    granules = slot_bytes(kind, sprout_hdr_aux(h)) / SPROUT_SLOT_GRAN;
     bitmap_set_range(r->markocc, idx, granules);
   }
   const unsigned age_before = sprout_hdr_age(h);
@@ -3689,6 +3688,7 @@ static void sprout_gc_check_reach(void* payload, void* owner, long long field) {
   /* Under HOLES the mark is a `markocc` start bit (a large region's flag); colour means old. */
   int marked = (h & SPROUT_GC_COLOR_BIT) != 0;
   if (g_gen.holes && !marked) marked = r->is_large ? r->large_marked : bitmap_test(r->markocc, bit);
+  if (g_gen.holes && sprout_hdr_kind(h) == (SproutHeapKind)SPROUT_GC_POISON) return;   /* the marker leaves a corpse alone */
   if (!marked) sprout_gc_check_fail(payload, h, owner, field);
   sprout_wl_push(&g_check_wl, payload, "GENCHECK: out of memory for worklist");
 }
@@ -4216,6 +4216,17 @@ static void sprout_fl_verify_against_full_walk(void) {
   if (bad) abort();
 }
 
+/* Lineage: a dead OBJ's slot (`slot` is its header address, `ssize` its size) becomes a corpse,
+ * a POISON header with the size in aux and the free-time backtrace in payload[0..1]. */
+static inline void sprout_gc_poison_obj(char* slot, size_t ssize) {
+  uint64_t phdr = SPROUT_GC_POISON | ((uint64_t)ssize << 14);
+  memcpy(slot, &phdr, 8);
+  void** frames = (void**)malloc(sizeof(void*) * 32);
+  int n = frames ? backtrace(frames, 32) : 0;
+  ((long long*)(slot + 8))[0] = sprout_ptr_word(frames);
+  ((long long*)(slot + 8))[1] = (long long)n;
+}
+
 /* Free one unmarked slot (`slot` is its header address), the same way in both sweeps.  Under
  * lineage an OBJ is poisoned and kept, not listed; any other slot releases its extras and gets
  * a FREE header.  Returns 1 when the slot is FREE and the caller lists it, 0 when it is
@@ -4240,13 +4251,7 @@ static inline int sprout_gc_free_dead_slot(SproutRegion* r, char* slot, uint64_t
     }
   }
   if (lineage_on && kind == SPROUT_HEAP_OBJ) {
-    /* Poison: write poison header with slot_bytes in aux (for walk). */
-    uint64_t phdr = SPROUT_GC_POISON | ((uint64_t)ssize << 14);
-    memcpy(slot, &phdr, 8);
-    void** frames = (void**)malloc(sizeof(void*) * 32);
-    int n = frames ? backtrace(frames, 32) : 0;
-    ((long long*)payload)[0] = sprout_ptr_word(frames);
-    ((long long*)payload)[1] = (long long)n;
+    sprout_gc_poison_obj(slot, ssize);
     /* Slotmap bit STAYS set (dangling reads must resolve to corpse).
      * The corpse leaves the live count like any other dead object;
      * only its memory is retained. */
@@ -4710,49 +4715,72 @@ static void sprout_holes_sweep_buffers(SproutRegion* r, int major) {
   r->buf_young.len = kept;
 }
 
-/* Sweep one ordinary region and set its counts; the caller releases it if live_count is 0. */
+/* Sweep one ordinary region and set its counts; the caller releases it if live_count and
+ * poison_count are both 0.  Under lineage a dead OBJ becomes a corpse in the per-dead loop: it
+ * keeps its `slotmap` bit and gets `oldocc` over its extent, so `live` keeps it from here on.
+ * `slotmap` and `before` count corpses, so the live counts take `poison_count` off. */
 static void sprout_holes_sweep_region(SproutRegion* r, int major) {
   sprout_holes_sweep_buffers(r, major);
   const size_t nwords = (r->bump / SPROUT_SLOT_GRAN + 63) / 64;
-  const int trace = g_gc_stress == 1;
+  const int lineage = sprout_gc_lineage_on();
+  const int trace = g_gc_stress == 1 || lineage;
 #if defined(SPROUT_GC_ALLOCTRACE)
   const int at = sprout_at_on();
 #else
   const int at = 0;
 #endif
-  long long before = 0, live_n = 0, young_n = 0, occ_n = 0;
+  const long long poison0 = r->poison_count;
+  long long before = 0, kept = 0, young_n = 0, occ_n = 0;
   for (size_t w = 0; w < nwords; w++) {
     uint64_t mk = r->markocc[w], od = r->oldocc[w];
     uint64_t live = mk | od;
     uint64_t sm0 = slotmap_word(r, w), sm = sm0 & live;
-    if (trace || at)   /* per-dead-object work, only when a mode asks: the starts about to clear */
+    if (trace || at) {   /* per-dead-object work, only when a mode asks: the starts about to clear */
       for (uint64_t dead = sm0 & ~sm; dead != 0; dead &= dead - 1) {
-        void* payload = r->base + (w * 64 + (size_t)__builtin_ctzll(dead)) * SPROUT_SLOT_GRAN + 8;
+        const size_t gran = w * 64 + (size_t)__builtin_ctzll(dead);
+        char* slot = r->base + gran * SPROUT_SLOT_GRAN;
+        void* payload = slot + 8;
 #if defined(SPROUT_GC_ALLOCTRACE)
         if (at) sprout_at_free(r, payload);
 #endif
         if (trace) sprout_gc_trace_free(payload);   /* the `just gc-trace` anchor */
+        if (lineage) {
+          uint64_t h; memcpy(&h, slot, 8);
+          if (sprout_hdr_kind(h) == SPROUT_HEAP_OBJ) {
+            const size_t ssize = slot_bytes(SPROUT_HEAP_OBJ, sprout_hdr_aux(h));
+            sprout_gc_poison_obj(slot, ssize);
+            bitmap_set_range(r->oldocc, gran, ssize / SPROUT_SLOT_GRAN);   /* may reach word w + 1 */
+            r->poison_count++;
+          }
+        }
       }
+      if (lineage) {   /* the corpses made here are live from now on */
+        od = r->oldocc[w];
+        live = mk | od;
+        sm = sm0 & live;
+      }
+    }
     slotmap_set_word(r, w, sm);
     uint64_t ym = r->youngmap[w] & mk & ~od;
     r->youngmap[w] = ym;
     r->markocc[w] = live;   /* this buffer becomes `occ` below */
     before += __builtin_popcountll(sm0);
-    live_n += __builtin_popcountll(sm);
+    kept += __builtin_popcountll(sm);
     young_n += __builtin_popcountll(ym);
-    occ_n += __builtin_popcountll(live);
+    occ_n += __builtin_popcountll(live);   /* corpses count: their granules are not free */
   }
   uint64_t* old_occ = r->occ;
   r->occ = r->markocc;
   r->markocc = old_occ;
   memset(r->markocc, 0, nwords * sizeof(uint64_t));
+  const long long live_n = kept - r->poison_count, freed = (before - poison0) - live_n;
   r->live_count = live_n;
   r->young_count = young_n;
   r->old_count = g_gen.on ? live_n - young_n : 0;
   r->occ_gran = occ_n;
   r->tail_released = 0;
-  g_managed_heap_count -= before - live_n;
-  g_debug_gc_swept += before - live_n;
+  g_managed_heap_count -= freed;
+  g_debug_gc_swept += freed;
   g_debug_gc_walked += (long long)nwords;
 }
 
@@ -4803,7 +4831,7 @@ static void sprout_holes_sweep(void) {
       continue;
     }
     sprout_holes_sweep_region(r, major);
-    if (r->live_count == 0) {
+    if (r->live_count == 0 && r->poison_count == 0) {   /* a region of corpses is kept */
       r->emptied = 1;
       emptied_any = 1;
     }
@@ -4876,10 +4904,23 @@ static void sprout_holes_check_no_bit13(void) {
   }
 }
 
+/* A major's `oldocc` starts empty, so each lineage corpse's extent goes back before the mark and
+ * the sweep's `live` keeps it, as it does through a minor.  Walks `slotmap` starts. */
+static void sprout_holes_readd_corpses(SproutRegion* r) {
+  const size_t nwords = (r->bump / SPROUT_SLOT_GRAN + 63) / 64;
+  for (size_t w = 0; w < nwords; w++) {
+    for (uint64_t bits = slotmap_word(r, w); bits != 0; bits &= bits - 1) {
+      const size_t gran = w * 64 + (size_t)__builtin_ctzll(bits);
+      uint64_t h; memcpy(&h, r->base + gran * SPROUT_SLOT_GRAN, 8);
+      if ((h & 0xFF) == SPROUT_GC_POISON) bitmap_set_range(r->oldocc, gran, sprout_slot_step(h) / SPROUT_SLOT_GRAN);
+    }
+  }
+}
+
 /* Before the mark.  The freed-tail lists are dropped, so an unused tail is hole space once the
  * sweep recomputes `occ`.  A major empties the remembered set and clears bit 13 through its
  * entries (nothing else carries it), so its own drain re-remembers each parent of a child that
- * stays young; it also clears `oldocc`, which its marker rebuilds. */
+ * stays young; it also clears `oldocc`, which its marker rebuilds (plus the corpses). */
 static void sprout_holes_begin(int minor) {
   memset(g_hole_tails, 0, sizeof(g_hole_tails));
   if (g_holes_verify)   /* the listed-tail marks go with the lists */
@@ -4905,8 +4946,12 @@ static void sprout_holes_begin(int minor) {
   }
   g_gen.remembered.len = 0;
   if (g_gen.check) sprout_holes_check_no_bit13();
-  for (size_t ri = 0; ri < g_region_count; ri++)
-    if (!g_regions[ri].is_large) memset(g_regions[ri].oldocc, 0, SPROUT_SLOTMAP_BYTES);
+  for (size_t ri = 0; ri < g_region_count; ri++) {
+    SproutRegion* r = &g_regions[ri];
+    if (r->is_large) continue;
+    memset(r->oldocc, 0, SPROUT_SLOTMAP_BYTES);
+    if (r->poison_count > 0) sprout_holes_readd_corpses(r);
+  }
 }
 
 __attribute__((noreturn, cold, noinline))
@@ -4954,7 +4999,9 @@ static void sprout_gc_check_old_edges(void* payload, uint64_t h) {
  * after every sweep, every region swept or not.  A walk steps through `slotmap` bits and never
  * over a hole by header (premise 14).  Per ordinary region:
  *   - `slotmap` and `youngmap` lie inside `occ`, `youngmap` inside `slotmap`, `markocc` is zero;
- *   - each object's header is a live kind, its extent is inside `occ` and overlaps no other;
+ *   - each object's header is a live kind, its extent is inside `occ` and overlaps no other; a
+ *     lineage corpse (POISON, only under SPROUT_GC_LINEAGE) is in `oldocc` and `occ`, is never
+ *     young, has no colour test and is counted in `poison_count`, not in the live counts;
  *   - the colour is set exactly on the objects in `oldocc`, and never on one with a young bit;
  *   - `oldocc` equals the coloured objects' extents and `occ` the live extents, word for word;
  *   - the region's counts equal the walk's, and every unremembered old object points at no
@@ -5021,7 +5068,7 @@ static void sprout_gc_check_holes_region(const SproutRegion* r, SproutHolesWalk*
   memset(g_chk_old, 0, sizeof g_chk_old);
   memset(g_chk_own, 0, sizeof g_chk_own);
   memset(g_chk_seen, 0, sizeof g_chk_seen);
-  long long young = 0, old = 0, live = 0;
+  long long young = 0, old = 0, live = 0, poison = 0;
   for (size_t w = 0; w < SPROUT_OCC_WORDS; w++) {
     const uint64_t sm = slotmap_word(r, w), ym = r->youngmap[w], oc = r->occ[w];
     if (sm & ~oc) sprout_gc_check_map_fail("slotmap bit outside occ", r, w, sm & ~oc);
@@ -5035,15 +5082,23 @@ static void sprout_gc_check_holes_region(const SproutRegion* r, SproutHolesWalk*
       uint64_t h; memcpy(&h, r->base + off, 8);
       const uint64_t kind = h & 0xFF;
       if (kind == SPROUT_HEAP_FREE) sprout_gc_check_hdr_fail("FREE header under HOLES", r, off, h);
-      if (kind == SPROUT_GC_POISON) sprout_gc_check_hdr_fail("poison header under HOLES", r, off, h);
+      const int corpse = kind == SPROUT_GC_POISON;
+      if (corpse && !sprout_gc_lineage_on()) sprout_gc_check_hdr_fail("poison header under HOLES", r, off, h);
       if (!sprout_slot_kind_known(kind)) sprout_gc_check_hdr_fail("unknown header kind", r, off, h);
-      const size_t gran = slot_bytes((SproutHeapKind)kind, h >> 14) / SPROUT_SLOT_GRAN;
+      const size_t gran = (corpse ? sprout_slot_step(h) : slot_bytes((SproutHeapKind)kind, h >> 14)) / SPROUT_SLOT_GRAN;
       if (idx + gran > SPROUT_OCC_NONE) sprout_gc_check_hdr_fail("extent past the region's end", r, off, h);
       for (size_t g = idx; g < idx + gran; g++) {
         if (!bitmap_test(r->occ, g)) sprout_gc_check_hdr_fail("live extent outside occ", r, off, h);
         if (bitmap_test(g_chk_live, g)) sprout_gc_check_hdr_fail("live extents overlap", r, off, h);
       }
       bitmap_set_range(g_chk_live, idx, gran);
+      if (corpse) {   /* kept in `oldocc` and `occ`, never young, no colour, and not a live object */
+        if (!bitmap_test(r->oldocc, idx)) sprout_gc_check_hdr_fail("corpse outside oldocc", r, off, h);
+        if (youngmap_test(r, idx)) sprout_gc_check_hdr_fail("young bit set on a corpse", r, off, h);
+        bitmap_set_range(g_chk_old, idx, gran);
+        poison++;
+        continue;
+      }
       const int col = (h & SPROUT_GC_COLOR_BIT) != 0, in_old = bitmap_test(r->oldocc, idx);
       if (col && youngmap_test(r, idx)) sprout_gc_check_hdr_fail("colour set on a young object", r, off, h);
       if (col && !in_old) sprout_gc_check_hdr_fail("colour set on an object outside oldocc", r, off, h);
@@ -5074,6 +5129,7 @@ static void sprout_gc_check_holes_region(const SproutRegion* r, SproutHolesWalk*
   if (r->old_count != old) sprout_gc_check_count_fail("old count", r, r->old_count, old);
   if (r->live_count != live) sprout_gc_check_count_fail("live count", r, r->live_count, live);
   if (r->occ_gran != occupied) sprout_gc_check_count_fail("occupied granule count", r, r->occ_gran, occupied);
+  if (r->poison_count != poison) sprout_gc_check_count_fail("poison count", r, r->poison_count, poison);
   sprout_gc_check_buffer_list(r, &r->buf_young, 0);
   sprout_gc_check_buffer_list(r, &r->buf_old, 1);
   for (size_t w = 0; w < SPROUT_OCC_WORDS; w++)
@@ -5082,7 +5138,8 @@ static void sprout_gc_check_holes_region(const SproutRegion* r, SproutHolesWalk*
       sprout_gc_check_list_fail("buffer owner missing from its list", r, r->base + idx * SPROUT_SLOT_GRAN + 8);
     }
   /* An ordinary region with bump == 0 is the one the sweep opens when none is left. */
-  if (live == 0 && r->bump != 0) sprout_gc_check_count_fail("a sweep left a region with no live slot", r, 0, 0);
+  if (live == 0 && poison == 0 && r->bump != 0)
+    sprout_gc_check_count_fail("a sweep left a region with no live slot", r, 0, 0);
   t->live += live;
   t->old += old;
   t->bumped += (long long)(r->bump / SPROUT_SLOT_GRAN);

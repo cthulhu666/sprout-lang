@@ -600,7 +600,7 @@ for sel in walked_young free_count no_double_list region_release large_young lin
   test "$(cat "$TMP_DIR/ys_$sel.out")" = "young-sweep-$sel"
 done
 
-echo "==> c runtime: GENCHECK, SPROUT_FL_VERIFY and HDRCHECK under SPROUT_GC_HOLES=1 pass on a real heap, walk holes by slotmap, and abort on each corrupted map, count, buffer list, cursor, tail list and header"
+echo "==> c runtime: GENCHECK, SPROUT_FL_VERIFY, HDRCHECK and SPROUT_GC_LINEAGE under SPROUT_GC_HOLES=1 pass on a real heap, walk holes by slotmap, keep lineage corpses, and abort on each corrupted map, count, buffer list, cursor, tail list, header and corpse"
 # holes_check.c includes sprout_runtime.c (like young_sweep.c). Each corrupting case must abort
 # with its own message: a check that tests nothing fails here.
 HC="$TMP_DIR/holes_check"
@@ -642,7 +642,11 @@ holes_abort bad_fl_tails_at_sweep "tail list not empty when the sweep starts" "$
 holes_abort bad_fl_cursor_not_reset "cursor not reset after a collection" "$FLV"
 holes_abort bad_hdr_too_long "header too long" "$HDR"
 holes_abort bad_hdr_too_short "header too short" "$HDR"
-for sel in positive positive_verify scribble scribble_verify scribble_hdrcheck tail_retained; do
+holes_abort bad_corpse_not_in_oldocc "corpse outside oldocc"
+holes_abort bad_corpse_count "poison count"
+holes_abort bad_poison_no_lineage "poison header under HOLES"
+for sel in positive positive_verify scribble scribble_verify scribble_hdrcheck tail_retained \
+           positive_lineage scribble_lineage lineage_corpses; do
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$HC" "$sel" > "$TMP_DIR/hc_$sel.out" 2> "$TMP_DIR/hc_$sel.err" || {
     echo "  holes_check '$sel' failed:" >&2
     cat "$TMP_DIR/hc_$sel.out" "$TMP_DIR/hc_$sel.err" >&2

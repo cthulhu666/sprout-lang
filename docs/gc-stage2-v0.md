@@ -671,9 +671,17 @@ instead of removing it; A keeps three of five steps per dead slot.
   AGEPROF's live histogram are produced at majors from the marker; its freed counts come from the
   counts (freed = heap before − heap after; freed at age 0 = allocations since the last collection
   − marked at age 0), and its consistency check compares against the popcount heap count. A lineage
-  corpse keeps its `slotmap` bit and sets `occ` and `oldocc` over its extent; `gc_mark_enqueue`
-  refuses a POISON header, and under lineage a major walks `slotmap` starts and adds corpses'
-  extents to `live` and `oldocc`, so a corpse outlives majors as it does today.
+  corpse keeps its `slotmap` bit and sets `occ` and `oldocc` over its extent. The sweep's
+  per-dead loop poisons a dead OBJ before the AND, so `live` keeps it from then on; its young bit
+  goes with the AND. `gc_mark_enqueue_holes` refuses a POISON header (a dangling word that reaches
+  a corpse neither marks nor ages it, and `slot_bytes` could not size it), and `sprout_holes_begin`
+  adds the extents of a region's corpses back to `oldocc` after a major clears it, walking
+  `slotmap` starts of regions with `poison_count > 0`, so a corpse outlives majors as it does
+  today. `poison_count` is exact: `live_count` and the heap count are `slotmap`'s popcount minus
+  it, and a region holding only corpses is not released. Corpses count in `occ_gran`: their
+  granules are not free. The free count's mean slot size, `occ_gran` over `live_count`, then
+  includes their granules. Lookups accept a corpse, as on the default (they reject only FREE),
+  so a dangling read reaches `sprout_tag`'s poison abort.
 - *Free count.* Bumped granules minus `occ`'s popcount, per region, divided by the mean live slot
   size in granules, so the footprint floor and `just gc-trigger-check` keep a slot-sized unit. Raw
   granules would delay 23 of the self-compile's 29 floor-applying collections in the replay; the
@@ -738,7 +746,9 @@ Each premise has a test or a check that fails when it breaks.
 10. **Step 5 (option C).** A young-only minor sweeps every region holding a young object or
     allocated into since the last collection, and after any sweep each region's `slotmap` and
     `youngmap` bits lie inside `occ`, so no dead object keeps a start bit and no lookup accepts one.
-    GENCHECK walks every region, swept or not.
+    GENCHECK walks every region, swept or not. Under lineage it accepts a POISON start (and
+    only then), requires it in `oldocc` and `occ` with no young bit or colour check, counts it in
+    `poison_count` and not in the live counts, and keeps a region holding one.
 11. **Step 5.** Between collections `occ` covers every live object's extent, young ones that stayed
     young included; `oldocc` covers exactly the old objects' and lineage corpses' extents; `markocc`
     is zero. GENCHECK compares the maps with the extents of the objects a `slotmap` walk finds.

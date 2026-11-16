@@ -1087,7 +1087,10 @@ must run at least 20 minor collections, and it must print the same output with
 `SPROUT_GC_LINEAGE=1` (same switches, same output): the young-only sweep keeps the free lists
 between minors, FL_VERIFY compares them with a full walk after every collection, and lineage mode
 poisons dead OBJs instead of listing them, which is the case the incremental free count has to
-get right. The default arm is the shipped default, K=3, s=1, c=2 ([gc-stage2-v0.md](gc-stage2-v0.md)
+get right. Under `SPROUT_GC_HOLES=1` ([gc-stage2-v0.md](gc-stage2-v0.md) §5.7) it runs again
+with `SPROUT_FL_VERIFY=1` and HDRCHECK, and with `SPROUT_GC_LINEAGE=1`: a corpse is a `slotmap`
+start kept in `oldocc`, so GENCHECK's map walk must accept it and every major must keep it.
+The default arm is the shipped default, K=3, s=1, c=2 ([gc-stage2-v0.md](gc-stage2-v0.md)
 §5), so it reaches young survivors, the remembered rule and the premise-3 check (an old,
 unremembered object points at no young one; before a major the set is empty and no header has
 bit 13). The nursery share is not varied: under `SPROUT_GC_STRESS` every allocation collects, so
@@ -1114,7 +1117,11 @@ sweep's: a minor over a large old heap walks only the young slots, the free coun
 walk's after reuse and inline-tail splits, no slot is listed twice, fresh empty regions are
 released, large young objects are freed or promoted, lineage mode agrees, and three corrupting
 cases (a cleared young bit, a stale bit on a FREE slot, a perturbed free count) must abort with
-the `GENCHECK:` message. `tests/c_runtime/promote_age.c` holds the stage-2 rules': a survivor
+the `GENCHECK:` message. `tests/c_runtime/holes_check.c` holds the same for `SPROUT_GC_HOLES=1`,
+including lineage: dead OBJs become corpses in a minor and stay through minors and majors, nothing
+is allocated over one, a marker that reaches one leaves it alone, a region of corpses is kept, and
+a corpse missing from `oldocc`, a wrong poison count and a POISON header without lineage abort.
+`tests/c_runtime/promote_age.c` holds the stage-2 rules': a survivor
 is young until its Kth collection (colour, youngmap bit, region counts, also for a large object),
 a major's colour-keeping sweep promotes only at age K−1, a store into a young `Ref` whose parent is
 then promoted keeps the child alive, the set is empty before a major, the 2× rule's two inputs and
