@@ -102,9 +102,10 @@ the replay lowest region first. Replay with LIFO tails: 0 differing cycles at T 
 earlier placement results used.
 
 Replay's calibration: `base` matches the trace's ordinary and large region counts at every `E` in
-every run. `digit_recognizer` (T = 48,500) and `selfcompile` report CALIBRATION MISS and
-`run.sh` exits 1: `base`'s free-slot count is off by 1 at 2 of 8 and 1 of 26 `E`s. The free count
-is not used here.
+every run. These runs reported CALIBRATION MISS on `digit_recognizer` (T = 48,500) and
+`selfcompile`, with `base`'s free-slot count off by 1 at 2 of 8 and 1 of 26 `E`s. The cause was the
+bump path's open-region hint, a table index that a large region inserted below it moves; the
+trace now records it (`H`), and both runs calibrate exactly.
 
 **Outcome.** Peak ordinary regions at a collection's start equal the replay's on all 14 runs;
 the per-collection gap is at most 7%. The gate holds.

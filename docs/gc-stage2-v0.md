@@ -657,10 +657,11 @@ instead of removing it; A keeps three of five steps per dead slot.
   put it: arena chunks are reused last-in first-out, so a new region can sort below the cursor. Allocation sets `occ` over the extent, and `slotmap` and `youngmap` at the start. The
   cursors are (region index, granule) and move with `region_table_insert` and
   `region_table_remove`, as step 4's class cursors do. Each collection resets them.
-- *Inline tails.* `sprout_vec_release_inline_tail` clears `occ` and `oldocc` over the tail, gives it
-  no `slotmap` bit, and lists it by exact class; allocation tries the lists before the cursors. The
+- *Inline tails.* `sprout_vec_release_inline_tail` clears `oldocc` over the tail, gives it no
+  `slotmap` bit, and lists it by exact class; allocation tries the lists before the cursors. The tail
+  keeps its `occ` bits, or a cursor that has not reached it could hand it out a second time. The
   lists are dropped at each collection before the sweep recomputes `occ`, when unused tails become
-  hole space. Without them mutvec_push holds 2.36× today's memory; with them 0.36×.
+  hole space; the region is marked so that the next minor sweeps it even with no young object. Without them mutvec_push holds 2.36× today's memory; with them 0.36×.
 - *Malloc'd data.* Every vector with an out-of-line buffer, every bytes and every builder is on its
   region's young or old buffer list, entered where the buffer is acquired (`sprout_alloc_vector_sized`'s
   out-of-line branch, both growth branches of `vector_push`, `sprout_alloc_bytes_val`,
@@ -862,6 +863,16 @@ and premise 6's free count changes unit.
    allocation path, run on the VM over the §14.8 set with rotate_classes, mutvec_push and
    load_spike, gated as §5.7 says; else option A. Then premises 10–16 with their checks, behind a
    switch for the A/B. Option D is part of C.
+
+   **Implemented behind `SPROUT_GC_HOLES=1`** ([results](../bench/results-2026-11-15-gc-holes-proto.md)).
+   On the VM, against the default, GC time falls 49–96% on every workload that collects and no
+   workload's CPU or RSS rises outside its spread: the self-compile's CPU is 0.95, load_spike's
+   0.63, rotate_classes' 0.73 with 0.12 of its RSS, mutvec_push's RSS 0.76. The free count's unit
+   makes rotate_classes collect 1.93× as often and mutvec_int 1.33×. With the trigger pinned, peak
+   ordinary regions at a collection's start equal the replay's on all 14 runs. GENCHECK,
+   FL_VERIFY's successor, HDRCHECK, lineage, AGEPROF, the census and ALLOCTRACE work under the
+   switch; `tests/c_runtime/holes_check.c` and the HOLES arms of `just gc-gen-check` check
+   premises 10–16.
 6. Retire `SPROUT_GC_REGION_LISTS` once steps 4 and 5 settle it, and update
    `compiler-internals.md` and `gates.md`. Retiring it removes the global lists with
    `sprout_gc_young_sweep_ok` and the staged build (`g_fl_saved`, `fl_push_staged`,
