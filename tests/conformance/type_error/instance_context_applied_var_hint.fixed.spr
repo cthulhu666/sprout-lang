@@ -1,0 +1,12 @@
+# The `where` hint names only variables that occur outside function position. `f` heads
+# an application and has a higher kind, so `Foo f` would not apply.
+type Wrap f a = Wrap(f a)
+
+class Foo t
+  fn foo(x: t) -> Int
+
+instance Foo Int
+  fn foo(x: Int) -> Int = x
+
+instance Foo (Wrap f a) where Foo a
+  fn foo(w: Wrap f a) -> Int = 1

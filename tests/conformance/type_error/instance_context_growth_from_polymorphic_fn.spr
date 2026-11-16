@@ -1,0 +1,12 @@
+# The loop is reached only through a polymorphic function's `where`; the instance is
+# still rejected where it is declared.
+class Foo t
+  fn foo(x: t) -> Int
+
+instance Foo (List a) where Foo (List (List a))
+#~^ ERROR
+  fn foo(x: List a) -> Int = 1
+
+fn go(x: a) -> Int where Foo a = foo([x])
+
+fn main() -> Unit !{IO} = print(to_string(go([1])))

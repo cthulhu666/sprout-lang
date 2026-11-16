@@ -1,0 +1,10 @@
+# An instance context is smaller than its head. `Foo (List (List a))` is larger than
+# `Foo (List a)`, so resolving the use below would never end.
+class Foo t
+  fn foo(x: t) -> Int
+
+instance Foo (List a) where Foo (List (List a))
+#~^ ERROR
+  fn foo(x: List a) -> Int = 1
+
+fn main() -> Unit !{IO} = print(to_string(foo([1])))

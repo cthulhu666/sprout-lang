@@ -1,0 +1,9 @@
+# A context equal to its head resolves to itself, forever.
+class Foo t
+  fn foo(x: t) -> Int
+
+instance Foo (List a) where Foo (List a)
+#~^ ERROR
+  fn foo(x: List a) -> Int = 1
+
+fn main() -> Unit !{IO} = print(to_string(foo([1])))

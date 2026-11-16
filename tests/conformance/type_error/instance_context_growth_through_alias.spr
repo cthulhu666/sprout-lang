@@ -1,0 +1,12 @@
+# An alias in the context is expanded before the size is read, so it cannot hide growth.
+# The message shows the expanded type.
+type alias LL a = List(List a)
+
+class Foo t
+  fn foo(x: t) -> Int
+
+instance Foo (List a) where Foo (LL a)
+#~^ ERROR
+  fn foo(x: List a) -> Int = 1
+
+fn main() -> Unit !{IO} = print(to_string(foo([1])))

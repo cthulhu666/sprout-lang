@@ -1,0 +1,21 @@
+import stdlib.string
+
+# A recursive type's instance constrains the head's variable; resolving `Pretty (List (Rose a))`
+# inside the method ends at `Pretty (Rose a)` through the same dictionary.
+class Pretty t
+  fn pretty(x: t) -> String
+
+instance Pretty Int
+  fn pretty(x: Int) -> String = int_to_string(x)
+
+instance Pretty (List b) where Pretty b
+  fn pretty(xs: List b) -> String = "[" ++ string.join(",", list_map(pretty, xs)) ++ "]"
+
+type Rose a = Node a (List (Rose a))
+
+instance Pretty (Rose a) where Pretty a
+  fn pretty(r: Rose a) -> String =
+    match r with
+    | Node x kids -> pretty(x) ++ pretty(kids)
+
+fn main() -> Unit !{IO} = print(pretty(Node(1, [Node(2, [Node(3, [])]), Node(4, [])])))

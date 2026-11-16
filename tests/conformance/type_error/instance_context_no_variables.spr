@@ -1,0 +1,15 @@
+# A context with no variables fails the size check without a hint: there is no head
+# variable to constrain instead.
+type Box a = Box a
+
+class Foo t
+  fn foo(x: t) -> Int
+
+class Bar t
+  fn bar(x: t) -> Int
+
+instance Foo (Box a) where Bar (List Int)
+#~^ ERROR
+  fn foo(x: Box a) -> Int = 1
+
+fn main() -> Unit !{IO} = print("unreachable")

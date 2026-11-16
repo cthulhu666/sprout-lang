@@ -374,7 +374,7 @@ fn class_linearity_error(cls: String, head_arg: ast.TypeExpr, type_args: List as
       Just patterns = typed_ast.instance_get(key, tables_exists(tables)) else Nothing
       subs = unify_type_args_list(patterns, type_args, dict_empty())
       bounds = instance_bounds(cls, head_arg, tables)
-      unbounded = list_filter(\v -> !list_member(v, bounds), list_reverse(te_vars_list(patterns, [])))
+      unbounded = list_filter(\v -> !list_member(v, bounds), list_reverse(ast.te_vars_list(patterns, [])))
   in match find_map(head_var_fault(cls, patterns, subs, pos, tables, _), unbounded) with
      | Just err -> Just(err)
      | Nothing -> context_linearity_error(key, subs, pos, fwd_keys, tables)
@@ -507,6 +507,7 @@ fn te_app_depth(te: ast.TypeExpr) -> Int =
 # variables of the head (infer.instance_decl_error), so every one is bound by `subs`.
 # A context on an applied variable (`where C (f a)`) is checked only where it is concrete:
 # `where` on one is not supported, so no caller can forward it, and the body cannot use it.
+# The recursion ends because each context is smaller than its head (spec §8.5 rule 4).
 fn check_context_subs(
   outer_class: String,
   outer_head: ast.TypeExpr,
@@ -714,6 +715,7 @@ fn produce_concrete_evidence(
 # a constrained instance recurses on each context constraint substituted at the
 # concrete head's type args, in declaration order (matching lowering's inner_dicts).
 # Each child is itself an EvClasses (the context constraint is super-expanded too).
+# The recursion ends because each context is smaller than its head (spec §8.5 rule 4).
 # The inner dicts share the enclosing function's fwd_keys, so a forwarded inner
 # constraint reads the same ctx_fwd slot in lowering.
 fn produce_instance_evidence(
@@ -770,21 +772,7 @@ fn add_slot(class_name: String, type_args: List ast.TypeExpr, expanded: List ast
 # The type variables an instance head binds (`a` in `instance Eq (Maybe a)`).
 fn head_vars(constraint: ast.TypeConstraint) -> List String =
   match constraint with
-  | ast.TypeConstraint _ type_args -> te_vars_list(type_args, [])
-
-fn te_vars_list(tes: List ast.TypeExpr, acc: List String) -> List String =
-  match tes with
-  | [] -> acc
-  | [te | rest] -> te_vars_list(rest, te_vars(te, acc))
-
-fn te_vars(te: ast.TypeExpr, acc: List String) -> List String =
-  match te with
-  | ast.TypeName n -> if source.is_lowercase_name(n) then Cons(n, acc) else acc
-  | ast.TypeApply base arg -> te_vars(arg, te_vars(base, acc))
-  | ast.TupleType items -> te_vars_list(items, acc)
-  | ast.TypeArrow p r _ _ -> te_vars(r, te_vars(p, acc))
-  | ast.TypeThunk r _ -> te_vars(r, acc)
-  | ast.TypeEffect inner _ -> te_vars(inner, acc)
+  | ast.TypeConstraint _ type_args -> ast.te_vars_list(type_args, [])
 
 # Transitive-superclass DFS order now comes from the single shared source
 # types.class_with_transitive_supers (the same one ast_to_ir's existential

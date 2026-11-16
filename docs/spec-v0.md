@@ -3430,7 +3430,7 @@ call that would otherwise only fail at link time:
 
 **A class takes one type parameter, and a constraint applies its class to one
 type.**  An instance is selected by one dispatch type and a dictionary is keyed on
-it alone, so Sprout has no multi-parameter classes.  Three rules are checked at the
+it alone, so Sprout has no multi-parameter classes.  Four rules are checked at the
 declaration, before any use:
 
 1. A class declares exactly one type parameter.
@@ -3441,6 +3441,15 @@ declaration, before any use:
 3. An instance's context names only variables of its head.  A variable a method's
    signature writes that the head does not is the method's own, which a method-level
    `where` constrains.
+4. An instance's context is smaller than its head.  For each context constraint
+   `C' t'` under the head `C t`, `t'` is smaller than `t`, and no type variable occurs
+   more often in `t'` than in `t`.  The size of a type counts a type name or variable
+   as 1, an application as the sum of its parts, a tuple as 1 plus its items, an arrow
+   or thunk as 1 plus its type parts, and an effect wrapper as its inner type;
+   repetitions count (after alias expansion).  So a head with no type variables
+   (`instance Foo Unit`) cannot have a context.  Each resolution step then replaces a
+   constraint by strictly smaller ones, which guarantees instance resolution
+   terminates.  Rationale: `docs/instance-termination-v0.md`.
 
 | declaration | rejected because |
 |---|---|
@@ -3456,6 +3465,11 @@ declaration, before any use:
 | `class Sh t where u Eq` | the superclass names its class second and constrains another variable |
 | `instance Foo Bar where Baz k` | `k` is not in the head `Foo Bar` |
 | `instance Mk Box where Eq b`, `b` a method's own variable | the context does not reach it |
+| `instance Foo (List a) where Foo (List (List a))` | the context is larger than the head |
+| `instance Foo (List a) where Foo (List a)` | the context is as large as the head: it resolves to itself |
+| `instance Same (Box a) where Eq (Maybe a)` | the context is as large as the head; give the head a second variable |
+| `instance Eq (T a b c) where Eq (Pair a a)` | the context names `a` twice, the head once |
+| `instance Foo Unit where Bar Int` | the head has no type variables, so it takes no context |
 
 ```
 class `Conv` declares 2 type parameters; a class takes exactly one
@@ -3466,6 +3480,9 @@ the superclass `t Eq` of `Sh` names its class second; write the class first: `wh
 the superclass `u Eq` of `Sh` names its class second and must constrain the class variable `t`: `where Eq t`
 the instance context `Baz k` names `k`, which does not appear in the instance head `Foo Bar`
 the instance context `Eq b` names `b`, which the instance head `Mk Box` does not bind; constrain a method's own variable with a method-level `where`
+the instance context `Foo (List (List a))` is not smaller than the instance head `Foo (List a)`, so instance resolution might never end; constrain the head's variables instead, as in `where Foo a`
+the instance context `Eq (Pair a a)` names `a` twice and the instance head `Eq (T a b c)` names it once, so instance resolution might never end
+the instance `Foo Unit` has no type variables, so it cannot have a context
 ```
 
 **Ambiguous class-method dispatch.**  The two rules above are about a *declared*
@@ -3714,8 +3731,8 @@ rejected ("Two constraints of one class", below).
 
 In an instance method the context comes from the instance head, under the head's
 own variable names, and reaches only the variables the head binds; a variable of
-the method's own needs a method-level `where`.  A method that writes `Box t` for the
-head's `Box a` has a variable of its own, so `where Eq (Maybe a)` on the head does
+the method's own needs a method-level `where`.  A method that writes `Box2 t u` for the
+head's `Box2 a b` has variables of its own, so `where Eq (Maybe a)` on the head does
 not reach `Maybe t`.  An unannotated parameter — or a
 type variable inside one's inferred type — has no variable to constrain until it
 is annotated, and a context at an applied variable (`Eq (f a)`) cannot be supplied

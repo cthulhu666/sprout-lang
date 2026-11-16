@@ -133,10 +133,12 @@ fn side_nested(a: Side, b: Side) -> String =
 class Same t
   fn same(x: t, y: t) -> Bool
 
-instance Same (Box a) where Eq (Maybe a)
-  fn same(x: Box a, y: Box a) -> Bool =
+type Box2 a b = Box2 a b
+
+instance Same (Box2 a b) where Eq (Maybe a)
+  fn same(x: Box2 a b, y: Box2 a b) -> Bool =
     match (x, y) with
-    | (Box p, Box q) -> Just(p) == Just(q)
+    | (Box2 p _, Box2 q _) -> Just(p) == Just(q)
 
 fn main() -> Unit !{IO} =
   run_suite("context_dict_identity", [
@@ -166,6 +168,6 @@ fn main() -> Unit !{IO} =
     check_eq("late existential, name reused by a later match", bag_then_maybe(Bag (Never(1), Never(1)), Just(1)), false),
     check_eq("late existential, name reused by a later match, equal", bag_then_maybe(Bag(3, 3), Just(1)), true),
     check_eq("late existential, name reused by an inner arm", side_nested(LeftSide(1), RightSide("s")), "Just(1)/s"),
-    check_eq("compound instance context", same(Box(1), Box(1)), true),
-    check_eq("compound instance context, inner dict used", same(Box (Never(1)), Box (Never(1))), false)
+    check_eq("compound instance context", same(Box2(1, 2), Box2(1, 3)), true),
+    check_eq("compound instance context, inner dict used", same(Box2 (Never(1), 2), Box2 (Never(1), 2)), false)
   ])

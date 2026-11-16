@@ -1,0 +1,1 @@
+the instance context `Bar (List a)` is not smaller than the instance head `Foo (List a)`, so instance resolution might never end; constrain the head's variables instead, as in `where Bar a`

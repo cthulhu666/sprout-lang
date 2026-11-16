@@ -1,0 +1,13 @@
+class Foo t
+  fn foo(x: t) -> Int
+
+instance Foo Int
+  fn foo(x: Int) -> Int = x
+
+instance Foo (List a) where Foo a
+  fn foo(x: List a) -> Int = 1
+
+instance Foo (Maybe a) where Foo a
+  fn foo(x: Maybe a) -> Int = 2
+
+fn main() -> Unit !{IO} = print(to_string(foo([1])))

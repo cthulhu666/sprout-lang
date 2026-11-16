@@ -1,0 +1,1 @@
+the instance context `Eq (Maybe a)` is not smaller than the instance head `Same (Box a)`, so instance resolution might never end; constrain the head's variables instead, as in `where Eq a`
