@@ -2427,6 +2427,11 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   so this is a suspected counter-pressure, not a known regression — but no instrument reports
   retained-by-class arena bytes, so neither direction can be checked today. Prior art and a field
   set to copy (GHC ships this census): `docs/gc-size-classes-v0.md` §6.
+- [ ] `P3` **The `types:` census leaves out live large objects.** `sprout_gc_sweep_large` never
+  calls `sprout_gc_census_add`, so `test_gc_large_object_arena` prints `cstr=0` while two 5.5 MB
+  strings are live. The `SPROUT_GC_HOLES=1` census, counted by the marker at majors, skips large
+  regions to match. A memory report that misses the largest objects misleads exactly when it is
+  read; count them in both modes, or in the marker once HOLES is the default.
 - [ ] `P3` **`opt --passes=verify` can abort in teardown, and `_test-stdlib` reports it as IR
   INVALID.** Seen once on 2026-09-26, homebrew LLVM 23.1.1 on macOS arm64: verification succeeded,
   then `Module::~Module` -> `BasicBlock::eraseFromParent` aborted in libsystem_malloc. The harness

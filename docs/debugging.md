@@ -222,6 +222,9 @@ but the first is verbatim — the cycle line is elided at each `...`, since its 
 The line also ends in `closure_apply=<n>` (older output lacks it): closure values applied. `closure=`
 counts allocations, and a capture-free closure is a static constant that never allocates.
 
+Under `SPROUT_GC_HOLES=1` the marker counts the census, so it is printed at majors only; a minor's
+cycle line has no `types:` line.
+
 **`walked` is what the sweep cost, `swept` is what it bought.** Every slot walked was kept, freed
 this cycle, or already FREE, so `walked - live - swept` is the FREE slots stepped over for nothing:
 116,666 above, 1.19 per object freed. The trigger reads `live` and nothing else, so this part of a

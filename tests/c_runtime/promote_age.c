@@ -31,6 +31,9 @@
  *                    holes_remember_old_child, where a remembered old parent whose child is old
  *                    stays out of the set (an old child's age is at least K).  Colour persists
  *                    under HOLES, so set_before_major and major_age have no HOLES form.
+ *   holes_census   — under HOLES the marker counts the census at a major; a minor keeps the last
+ *                    major's counts and leaves the `types:` line out.  holes_census_minors_off runs
+ *                    census_age with every collection a major: the counts are exact each time.
  *
  * `k_cases` lists every case with its environment; main sets it before sprout_set_argv. */
 #include <stdio.h>
@@ -458,6 +461,32 @@ static int census_age(void) {
   return g_failed;
 }
 
+/* HOLES, minors on, a major after two minors: the marker counts the census at a major.  A minor
+ * leaves the last major's counts in place and the cycle line without a `types:` line. */
+static int holes_census(void) {
+  register_roots();
+  register_root_slot(&g_doom, SPROUT_ROOT_PTR, 0);
+  g_debug_gc_enabled = 1;
+  extend_chain(10);
+  for (int i = 0; i < 4; i++) {
+    long long x = ref_new(i);
+    ref_write(x, g_doom == NULL ? 0 : (long long)(uintptr_t)g_doom);
+    g_doom = (void*)(uintptr_t)x;
+  }
+  collect();                               /* major: counted from the marker */
+  check(g_gc_live_ref == 14 && g_gc_census_off == 0, "the major counts all 14 Refs and prints them");
+  collect();                               /* minor: marks the young, counts nothing */
+  check(g_gc_census_off == 1, "a minor leaves the census line out");
+  g_doom = NULL;
+  collect();                               /* minor: the 4 die */
+  check(g_gc_census_off == 1 && g_gc_live_ref == 14, "a minor keeps the last major's counts");
+  extend_chain(5);
+  collect();                               /* major */
+  check(g_gen.n_major == 2 && g_gc_census_off == 0, "the fourth collection is a major and prints");
+  check(g_gc_live_ref == 15, "the major recounts: 10 + 5 Refs, the 4 dead gone");
+  return g_failed;
+}
+
 /* An old object whose store skipped the barrier, with a young child that stays young: premise 3. */
 static int bad_unremembered_edge(void) {
   register_roots();
@@ -560,6 +589,8 @@ static const AgeCase k_cases[] = {
   { "holes_age_large",           age_large,                   2, 1, "1000", NULL, NULL, -1, 1 },
   { "holes_remember",            remember,                    2, 1, "1000", NULL, NULL, -1, 1 },
   { "holes_remember_old_child",  remember_old_child,          2, 1, "1000", NULL, NULL, -1, 1 },
+  { "holes_census",              holes_census,                0, 1, "2",    NULL, NULL, -1, 1 },
+  { "holes_census_minors_off",   census_age,                  0, 0, "1000", NULL, NULL, -1, 1 },
   { "bad_unremembered_edge",     bad_unremembered_edge,       2, 1, "1000", NULL, NULL, -1 },
   { "bad_major_bit13",           bad_major_bit13,             2, 1, "1",    NULL, NULL, -1 },
   { "bad_major_set",             bad_major_set,               2, 1, "1",    NULL, NULL, -1 },

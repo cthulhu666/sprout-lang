@@ -32,8 +32,13 @@
  *   E cycle kind heap_after free_slots ordinary_regions large_regions walked
  *                          that collection ends.  kind: 0 minors off, 1 major, 2 minor with the
  *                          young-only sweep, 3 minor with the full sweep (GC_KIND_* below).
- *                          heap_after is the live object count, free_slots the free-list length,
- *                          walked the slots the sweep stepped over (the cycle line's walked=).
+ *                          heap_after is the live object count, free_slots the runtime's free
+ *                          count (g_gc_freelist_len) in whatever unit the run used: slots, or under
+ *                          SPROUT_GC_HOLES the granules over the mean live slot size.  --check
+ *                          does not read it; the policy replay compares it with its own free
+ *                          slots only to calibrate, so that figure is meaningful for slot-unit
+ *                          traces alone.  walked the slots the sweep stepped over (the cycle
+ *                          line's walked=), or under HOLES the bitmap words.
  *
  * The runtime flushes the trace after the atexit collection, so a complete trace ends with an E.
  *

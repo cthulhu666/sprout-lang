@@ -4110,7 +4110,8 @@ test-freelist-verify: bootstrap-from-seed
 #   retain_none -> marked_age_ge1 ratio LOW   (nothing survives a cycle)
 # A stuck, inverted, or live-vs-marked-confused counter fails here.  The runtime
 # separately aborts on internal inconsistency (histogram vs totals), so this gate
-# only has to check the separation.
+# only has to check the separation. It runs on the default collector and again under
+# SPROUT_GC_HOLES=1, where the marker counts and no dead slot is visited, with the same bounds.
 [group('test')]
 gc-ageprof-check: bootstrap-from-seed
   #!/usr/bin/env bash
@@ -4121,14 +4122,18 @@ gc-ageprof-check: bootstrap-from-seed
     clang -c "$rtsrc" -O2 {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
       || { echo "gc-ageprof-check: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
   done
-  # Emits "<name> <marked_ratio> <died_young_ratio>" or exits non-zero.
+  # run_one <name> <label> [ENV=V ...]: emits "<name> <marked_ratio> <died_young_ratio> ..." or
+  # exits non-zero. A workload's binary is built once; the label names an arm's output files.
   run_one() {
-    local name="$1" f="tests/stdlib/$1.spr"
+    local name="$1" label="$2" f="tests/stdlib/$1.spr" tag="$1.$2"
+    shift 2
     [ -f "$f" ] || { echo "gc-ageprof-check: missing $f" >&2; return 1; }
-    "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$f" > "$TMPD/$name.ll" 2>"$TMPD/$name.err" \
-      || { echo "gc-ageprof-check: compile failed: $f" >&2; cat "$TMPD/$name.err" >&2; return 1; }
-    clang "$TMPD/$name.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$name.bin" 2>"$TMPD/$name.err" \
-      || { echo "gc-ageprof-check: link failed: $f" >&2; cat "$TMPD/$name.err" >&2; return 1; }
+    if [ ! -x "$TMPD/$name.bin" ]; then
+      "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$f" > "$TMPD/$name.ll" 2>"$TMPD/$name.err" \
+        || { echo "gc-ageprof-check: compile failed: $f" >&2; cat "$TMPD/$name.err" >&2; return 1; }
+      clang "$TMPD/$name.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$name.bin" 2>"$TMPD/$name.err" \
+        || { echo "gc-ageprof-check: link failed: $f" >&2; cat "$TMPD/$name.err" >&2; return 1; }
+    fi
     # SPROUT_GC_ADAPT_FACTOR is PINNED, not left at the default, because the measured
     # re-mark ratio is a function of collection frequency: fewer collections mean each
     # object's first (age-0) mark is a larger share of a smaller total, so raising the
@@ -4139,15 +4144,15 @@ gc-ageprof-check: bootstrap-from-seed
     # the instrument's own correctness check.
     # SPROUT_GC_MINOR=0 is pinned too: under minor collections an old object is not re-marked,
     # which is the quantity this counter exists to measure.
-    SPROUT_GC_MINOR=0 SPROUT_GC_AGEPROF=1 SPROUT_GC_ADAPT_FACTOR=2 "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.prof" \
-      || { echo "gc-ageprof-check: $f aborted under SPROUT_GC_AGEPROF=1" >&2; tail -5 "$TMPD/$name.prof" >&2; return 1; }
-    grep -q "SUITE PASSED" "$TMPD/$name.out" \
-      || { echo "gc-ageprof-check: $f workload did not pass" >&2; tail -5 "$TMPD/$name.out" >&2; return 1; }
+    env "$@" SPROUT_GC_MINOR=0 SPROUT_GC_AGEPROF=1 SPROUT_GC_ADAPT_FACTOR=2 "$TMPD/$name.bin" > "$TMPD/$tag.out" 2>"$TMPD/$tag.prof" \
+      || { echo "gc-ageprof-check: $f ($label) aborted under SPROUT_GC_AGEPROF=1" >&2; tail -5 "$TMPD/$tag.prof" >&2; return 1; }
+    grep -q "SUITE PASSED" "$TMPD/$tag.out" \
+      || { echo "gc-ageprof-check: $f ($label) workload did not pass" >&2; tail -5 "$TMPD/$tag.out" >&2; return 1; }
     local line ages
-    line=$(grep -m1 "ageprof.*marked_total=" "$TMPD/$name.prof") \
-      || { echo "gc-ageprof-check: $f emitted no ageprof summary (is SPROUT_GC_AGEPROF wired up?)" >&2; return 1; }
-    ages=$(grep -m1 "ageprof.*marked_by_age:" "$TMPD/$name.prof") \
-      || { echo "gc-ageprof-check: $f emitted no marked_by_age histogram" >&2; return 1; }
+    line=$(grep -m1 "ageprof.*marked_total=" "$TMPD/$tag.prof") \
+      || { echo "gc-ageprof-check: $f ($label) emitted no ageprof summary (is SPROUT_GC_AGEPROF wired up?)" >&2; return 1; }
+    ages=$(grep -m1 "ageprof.*marked_by_age:" "$TMPD/$tag.prof") \
+      || { echo "gc-ageprof-check: $f ($label) emitted no marked_by_age histogram" >&2; return 1; }
     # Emits "<name> <marked%> <died_young%> <marked_age_ge1> <cycles> <root_floor> <flat> <marked_total>".
     # root_floor is read off age bucket 14 — the last before the 4-bit age saturates.
     # A permanently-rooted object is marked once at every age, so in a workload that
@@ -4169,8 +4174,15 @@ gc-ageprof-check: bootstrap-from-seed
         printf "%s %d %d %d %d %d %d %d\n", n, (100 * v["marked_age_ge1"]) / v["marked_total"], (100 * v["freed_age0"]) / v["freed_total"], v["marked_age_ge1"], v["cycles"], a[14], flat, v["marked_total"]
       }'
   }
-  ALL=$(run_one test_gc_age_retain_all)   || exit 1
-  NONE=$(run_one test_gc_age_retain_none) || exit 1
+  # The same calibration, bounds and all, runs on the default collector and under
+  # SPROUT_GC_HOLES=1, where the marker counts and the sweep visits no dead object.
+  failed=0
+  for arm in "default|" "holes|SPROUT_GC_HOLES=1"; do
+  label="${arm%%|*}"
+  # shellcheck disable=SC2086
+  ALL=$(run_one test_gc_age_retain_all "$label" ${arm#*|})   || exit 1
+  # shellcheck disable=SC2086
+  NONE=$(run_one test_gc_age_retain_none "$label" ${arm#*|}) || exit 1
   read -r _ all_marked all_young _ _ _ _ _ <<< "$ALL"
   read -r _ none_marked none_young none_ge1 none_cycles none_roots none_flat none_total <<< "$NONE"
   # retain_none retains nothing, so every age>=1 mark it reports is a permanently
@@ -4185,20 +4197,20 @@ gc-ageprof-check: bootstrap-from-seed
   # keeps a leak from being absorbed into it.
   none_churn=$(( none_ge1 - none_roots * (none_cycles - 1) ))
   none_churn_pct=$(( 100 * none_churn / none_total ))
-  echo "  retain_all : marked_age_ge1=${all_marked}%  died_young=${all_young}%"
-  echo "  retain_none: marked_age_ge1=${none_marked}%  died_young=${none_young}%  (${none_roots} permanent root(s) => churn survivors ${none_churn_pct}%)"
-  failed=0
+  echo "  [$label] retain_all : marked_age_ge1=${all_marked}%  died_young=${all_young}%"
+  echo "  [$label] retain_none: marked_age_ge1=${none_marked}%  died_young=${none_young}%  (${none_roots} permanent root(s) => churn survivors ${none_churn_pct}%)"
   # Thresholds are deliberately loose — this gate checks that the instrument
   # DISCRIMINATES, not that a workload hits a precise number.  The separation
   # bound is the load-bearing one; a stuck counter passes the one-sided bounds
   # only if it happens to sit inside all of them, which it cannot.
-  (( all_marked >= 70 ))                     || { echo "gc-ageprof-check: retain_all marked_age_ge1 ${all_marked}% < 70% — retained chain is not dominating mark work" >&2; failed=1; }
-  (( none_cycles > 15 ))                     || { echo "gc-ageprof-check: retain_none ran ${none_cycles} cycles, too few to reach age bucket 14 — the permanent-root floor is unreadable, so raise the churn" >&2; failed=1; }
-  (( none_roots <= 8 ))                      || { echo "gc-ageprof-check: retain_none permanent-root floor is ${none_roots}, over 8 — either a rooted global was added (raise this bound) or objects are being retained for the whole run" >&2; failed=1; }
-  (( none_flat == 1 ))                       || { echo "gc-ageprof-check: retain_none age buckets 1..14 are not flat at ${none_roots} — something other than a permanent root is surviving cycles" >&2; failed=1; }
-  (( none_churn_pct <= 5 ))                  || { echo "gc-ageprof-check: retain_none churn survivors ${none_churn_pct}% > 5% (marked_age_ge1=${none_ge1}, ${none_roots} root(s) x ${none_cycles} cycles) — objects are surviving cycles that should not" >&2; failed=1; }
-  (( all_marked - none_churn_pct >= 40 ))    || { echo "gc-ageprof-check: separation $(( all_marked - none_churn_pct ))pp < 40pp — the counter does not discriminate" >&2; failed=1; }
-  (( none_young >= 90 ))                     || { echo "gc-ageprof-check: retain_none died_young ${none_young}% < 90% — weak generational hypothesis not reproduced on pure churn" >&2; failed=1; }
+  (( all_marked >= 70 ))                     || { echo "gc-ageprof-check[$label]: retain_all marked_age_ge1 ${all_marked}% < 70% — retained chain is not dominating mark work" >&2; failed=1; }
+  (( none_cycles > 15 ))                     || { echo "gc-ageprof-check[$label]: retain_none ran ${none_cycles} cycles, too few to reach age bucket 14 — the permanent-root floor is unreadable, so raise the churn" >&2; failed=1; }
+  (( none_roots <= 8 ))                      || { echo "gc-ageprof-check[$label]: retain_none permanent-root floor is ${none_roots}, over 8 — either a rooted global was added (raise this bound) or objects are being retained for the whole run" >&2; failed=1; }
+  (( none_flat == 1 ))                       || { echo "gc-ageprof-check[$label]: retain_none age buckets 1..14 are not flat at ${none_roots} — something other than a permanent root is surviving cycles" >&2; failed=1; }
+  (( none_churn_pct <= 5 ))                  || { echo "gc-ageprof-check[$label]: retain_none churn survivors ${none_churn_pct}% > 5% (marked_age_ge1=${none_ge1}, ${none_roots} root(s) x ${none_cycles} cycles) — objects are surviving cycles that should not" >&2; failed=1; }
+  (( all_marked - none_churn_pct >= 40 ))    || { echo "gc-ageprof-check[$label]: separation $(( all_marked - none_churn_pct ))pp < 40pp — the counter does not discriminate" >&2; failed=1; }
+  (( none_young >= 90 ))                     || { echo "gc-ageprof-check[$label]: retain_none died_young ${none_young}% < 90% — weak generational hypothesis not reproduced on pure churn" >&2; failed=1; }
+  done
   # The store counters are a build flag. Without it the report must say "off", not 0;
   # with it, a workload that stores pairs into a MutVec must count them.
   mkdir -p "$TMPD/rtobj_st"
@@ -4483,7 +4495,8 @@ gc-gen-check: bootstrap-from-seed
 # names a live allocation, allocs - frees equals heap_after at every collection end, vector tail
 # and buffer records are well formed). Each trace must end with the atexit collection's end
 # record, whose cycle is the run's last, and the program's stdout must be what it is without the
-# flag. Covers minors off, minors on, collect-every-allocation, per-region lists and large objects.
+# flag. Covers minors off, minors on, collect-every-allocation, per-region lists and large objects,
+# and the same under SPROUT_GC_HOLES=1, whose sweep writes the F records from the occupancy maps.
 [group('test')]
 gc-alloctrace-check: bootstrap-from-seed
   #!/usr/bin/env bash
@@ -4527,7 +4540,9 @@ gc-alloctrace-check: bootstrap-from-seed
   failed=0
   build_one tests/gc_gen/inline_tail_reuse.spr inline_tail_reuse || exit 1
   for case in "default|" "minor0|SPROUT_GC_MINOR=0" "stress|SPROUT_GC_STRESS=1" \
-              "stress_rl|SPROUT_GC_STRESS=1 SPROUT_GC_REGION_LISTS=1"; do
+              "stress_rl|SPROUT_GC_STRESS=1 SPROUT_GC_REGION_LISTS=1" \
+              "holes|SPROUT_GC_HOLES=1" "holes_minor0|SPROUT_GC_HOLES=1 SPROUT_GC_MINOR=0" \
+              "holes_stress|SPROUT_GC_HOLES=1 SPROUT_GC_STRESS=1"; do
     # shellcheck disable=SC2086
     run_case inline_tail_reuse "${case%%|*}" ${case#*|} || { failed=1; continue; }
     # This program grows inline vectors out of line: T and B records must appear.
@@ -4536,18 +4551,22 @@ gc-alloctrace-check: bootstrap-from-seed
   done
   build_one tests/gc_gen/vector_push.spr vector_push || exit 1
   run_case vector_push stress SPROUT_GC_STRESS=1 || failed=1
+  run_case vector_push holes_stress SPROUT_GC_HOLES=1 SPROUT_GC_STRESS=1 || failed=1
   build_one tests/gc_gen/region_empty_minor.spr region_empty_minor || exit 1
   run_case region_empty_minor stress SPROUT_GC_STRESS=1 || failed=1
+  run_case region_empty_minor holes_stress SPROUT_GC_HOLES=1 SPROUT_GC_STRESS=1 || failed=1
   # Minors and majors without STRESS, and objects past the large-slot threshold.
   build_one tests/stdlib/test_gc_large_object_arena.spr test_gc_large_object_arena || exit 1
-  for case in "default|" "minor0|SPROUT_GC_MINOR=0" "stress|SPROUT_GC_STRESS=1"; do
+  for case in "default|" "minor0|SPROUT_GC_MINOR=0" "stress|SPROUT_GC_STRESS=1" \
+              "holes|SPROUT_GC_HOLES=1" "holes_minor0|SPROUT_GC_HOLES=1 SPROUT_GC_MINOR=0" \
+              "holes_stress|SPROUT_GC_HOLES=1 SPROUT_GC_STRESS=1"; do
     # shellcheck disable=SC2086
     run_case test_gc_large_object_arena "${case%%|*}" ${case#*|} || { failed=1; continue; }
     (( $(field large) > 0 )) \
       || { echo "gc-alloctrace-check: test_gc_large_object_arena.${case%%|*}: no large allocation in the trace" >&2; failed=1; }
-    if [ "${case%%|*}" = default ]; then
+    if [ "${case%%|*}" = default ] || [ "${case%%|*}" = holes ]; then
       (( $(field major) > 0 && $(field minor_young) > 0 )) \
-        || { echo "gc-alloctrace-check: test_gc_large_object_arena.default: expected both major and young-only minor collections" >&2; failed=1; }
+        || { echo "gc-alloctrace-check: test_gc_large_object_arena.${case%%|*}: expected both major and young-only minor collections" >&2; failed=1; }
     fi
   done
   (( failed == 0 )) || exit 1
