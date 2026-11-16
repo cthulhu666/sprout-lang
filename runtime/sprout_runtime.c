@@ -331,7 +331,7 @@ static long long g_gc_live_obj = 0, g_gc_live_closure = 0, g_gc_live_vec = 0;
 static long long g_gc_live_map = 0, g_gc_live_bytes = 0, g_gc_live_builder = 0;
 static long long g_gc_live_tuple = 0, g_gc_live_ref = 0;
 static long long g_gc_live_cstr = 0, g_gc_live_cstr_bytes = 0;
-/* Set under SPROUT_GC_HOLES, whose sweep counts nothing by type: the census line is left out. */
+/* Set for a cycle under SPROUT_GC_HOLES whose census is not counted (a minor): the line is left out. */
 static int g_gc_census_off = 0;
 /* Adaptive-threshold enable switch.  NOT a ratio any more: since the policy became
    `threshold = live * factor` (see sprout_gc_collect_with_reason) the swept fraction
@@ -1011,16 +1011,11 @@ static int sprout_fl_verify_on(void);
 /* The maps replace the free lists and the per-slot sweep, so a mode that reads either is out.
  * SPROUT_FL_VERIFY and SPROUT_GC_HDRCHECK have forms of their own under HOLES. */
 static void sprout_gc_holes_check_modes(void) {
-  static const char* const modes[] = { "SPROUT_GC_REGION_LISTS", "SPROUT_GC_LINEAGE",
-    "SPROUT_GC_AGEPROF" };
+  static const char* const modes[] = { "SPROUT_GC_REGION_LISTS", "SPROUT_GC_LINEAGE" };
   for (size_t i = 0; i < sizeof(modes) / sizeof(modes[0]); i++) {
     const char* v = getenv(modes[i]);
     if (v != NULL && v[0] == '1') sprout_gc_holes_refuse(modes[i]);
   }
-#if defined(SPROUT_GC_ALLOCTRACE)
-  const char* trace = getenv("SPROUT_GC_ALLOCTRACE");
-  if (trace != NULL && trace[0] != '\0') sprout_gc_holes_refuse("SPROUT_GC_ALLOCTRACE");
-#endif
 }
 
 static void sprout_gc_gen_init(void) {
@@ -1049,7 +1044,6 @@ static void sprout_gc_gen_init(void) {
   }
   if (g_gen.holes) {
     sprout_gc_holes_check_modes();
-    g_gc_census_off = 1;
     g_holes_verify = sprout_fl_verify_on();
   }
   if (!g_gen.on) return;
@@ -1227,7 +1221,8 @@ __attribute__((destructor)) static void sprout_ap_report(void) {
   fprintf(stderr, "[sprout ageprof] marked_by_age:");
   for (int a = 0; a <= SPROUT_GC_AGE_MAX; a++)
     if (g_ap_marked_by_age[a]) fprintf(stderr, " %d=%lld", a, g_ap_marked_by_age[a]);
-  fprintf(stderr, "\n[sprout ageprof] live_by_age (last cycle):");
+  /* Under HOLES the marker builds it, and only at a major. */
+  fprintf(stderr, "\n[sprout ageprof] live_by_age (last %s):", g_gen.holes ? "major" : "cycle");
   for (int a = 0; a <= SPROUT_GC_AGE_MAX; a++)
     if (g_ap_live_by_age[a]) fprintf(stderr, " %d=%lld", a, g_ap_live_by_age[a]);
   fprintf(stderr, "\n");
@@ -3130,6 +3125,9 @@ static void sprout_vec_release_inline_tail(VectorVal* v) {
   memcpy(hdr_addr, &h, 8);
   size_t rest = old_slot - new_slot;             /* a multiple of 16, >= 16 */
   char* tail = hdr_addr + new_slot;
+#if defined(SPROUT_GC_ALLOCTRACE)
+  sprout_at_tail(v, rest);
+#endif
   if (g_gen.holes) {
     /* The tail gets no header or slotmap bit; it leaves `oldocc` and joins the list of its exact
        class.  It stays in `occ` until the next sweep: a clear bit would let a cursor that has not
@@ -3143,9 +3141,6 @@ static void sprout_vec_release_inline_tail(VectorVal* v) {
   uint64_t free_hdr = (uint64_t)SPROUT_HEAP_FREE | ((uint64_t)rest << 14);
   memcpy(tail, &free_hdr, 8);
   slotmap_set(r, (size_t)(tail - r->base) / SPROUT_SLOT_GRAN);
-#if defined(SPROUT_GC_ALLOCTRACE)
-  sprout_at_tail(v, rest);
-#endif
   void* payload = tail + 8;
   /* The lineage anchor every other freelist push has (the sweep calls it just
    * before listing the slot).  Without it `just gc-trace` shows the next object
@@ -3346,12 +3341,51 @@ static inline void gc_mark_wl_push(void* payload) {
   sprout_wl_push(&g_gc_mark_wl, payload, "GC mark: out of memory for worklist");
 }
 
+/* The census line counts live slots by kind: a survivor joins it (d = 1), and a counted slot
+ * that dies in a young sweep leaves it (d = -1).  Under SPROUT_GC_HOLES the marker counts each
+ * object it marks at a major (g_holes_census), and nothing subtracts. */
+static inline void sprout_gc_census_adjust(SproutHeapKind kind, unsigned long long aux,
+                                           long long d) {
+  switch (kind) {
+    case SPROUT_HEAP_OBJ:     g_gc_live_obj += d;     break;
+    case SPROUT_HEAP_CLOSURE: g_gc_live_closure += d;  break;
+    case SPROUT_HEAP_VECTOR:  g_gc_live_vec += d;      break;
+    case SPROUT_HEAP_MAP:     g_gc_live_map += d;      break;
+    case SPROUT_HEAP_BYTES:   g_gc_live_bytes += d;    break;
+    case SPROUT_HEAP_BUILDER: g_gc_live_builder += d;  break;
+    case SPROUT_HEAP_TUPLE:   g_gc_live_tuple += d;    break;
+    case SPROUT_HEAP_REF:     g_gc_live_ref += d;      break;
+    case SPROUT_HEAP_CSTR:
+      g_gc_live_cstr += d;
+      g_gc_live_cstr_bytes += d * (long long)aux;
+      break;
+    default: break;
+  }
+}
+static inline void sprout_gc_census_add(SproutHeapKind kind, unsigned long long aux) {
+  sprout_gc_census_adjust(kind, aux, 1);
+}
+static inline void sprout_gc_census_sub(SproutHeapKind kind, unsigned long long aux) {
+  sprout_gc_census_adjust(kind, aux, -1);
+}
+static void sprout_gc_census_reset(void) {
+  g_gc_live_obj = g_gc_live_closure = g_gc_live_vec = 0;
+  g_gc_live_map = g_gc_live_bytes = g_gc_live_builder = 0;
+  g_gc_live_tuple = g_gc_live_ref = 0;
+  g_gc_live_cstr = g_gc_live_cstr_bytes = 0;
+}
+
 /* SPROUT_GC_HOLES=1: the mark is the start granule's bit in `markocc` (a large region's flag),
  * and the header colour means old only.  A minor stops at a coloured object; a major (and any
  * collection with minors off) ignores colour, since it rebuilds `oldocc`.  With minors on, the
  * marker also bumps the age, and an object whose age reaches the promotion age gets the colour
  * and its extent in `oldocc`, so the sweep writes no header. */
 static int g_holes_major;
+/* SPROUT_GC_AGEPROF and the `types:` census under HOLES, set in sprout_holes_begin.  The marker
+ * counts what it marks: the age before its bump, and at a major the live ages and census. */
+static int g_holes_ap;
+static int g_holes_census;
+static long long g_holes_ap_heap0, g_holes_ap_alloc0, g_holes_ap_age0;   /* at the collection's start */
 
 static void gc_mark_enqueue_holes(void* payload, SproutRegion* r) {
   void* hdr_ptr = (char*)payload - 8;
@@ -3367,6 +3401,7 @@ static void gc_mark_enqueue_holes(void* payload, SproutRegion* r) {
     granules = slot_bytes(sprout_hdr_kind(h), sprout_hdr_aux(h)) / SPROUT_SLOT_GRAN;
     bitmap_set_range(r->markocc, idx, granules);
   }
+  const unsigned age_before = sprout_hdr_age(h);
   if (g_gen.on) {
     h = sprout_hdr_age_bump(h);
     if (sprout_hdr_age(h) >= g_gen.promote_age) {
@@ -3374,7 +3409,17 @@ static void gc_mark_enqueue_holes(void* payload, SproutRegion* r) {
       if (!r->is_large) bitmap_set_range(r->oldocc, idx, granules);
     }
     memcpy(hdr_ptr, &h, 8);
+  } else if (g_holes_ap) {   /* minors off: the age counts survivals for AGEPROF alone */
+    h = sprout_hdr_age_bump(h);
+    memcpy(hdr_ptr, &h, 8);
   }
+  if (g_holes_ap) {
+    g_ap_marked_by_age[age_before]++;
+    g_ap_marked_total++;
+    if (g_holes_major) g_ap_live_by_age[sprout_hdr_age(h)]++;   /* the age after the bump, as the sweep reads it */
+  }
+  if (g_holes_census && !r->is_large)   /* slots only, as the sweeps' census counts */
+    sprout_gc_census_add(sprout_hdr_kind(h), sprout_hdr_aux(h));
   g_gc_marked_count++;
   gc_mark_wl_push(payload);
 }
@@ -4171,33 +4216,6 @@ static void sprout_fl_verify_against_full_walk(void) {
   if (bad) abort();
 }
 
-/* The census line counts live slots by kind: a survivor joins it (d = 1), and a counted slot
- * that dies in a young sweep leaves it (d = -1). */
-static inline void sprout_gc_census_adjust(SproutHeapKind kind, unsigned long long aux,
-                                           long long d) {
-  switch (kind) {
-    case SPROUT_HEAP_OBJ:     g_gc_live_obj += d;     break;
-    case SPROUT_HEAP_CLOSURE: g_gc_live_closure += d;  break;
-    case SPROUT_HEAP_VECTOR:  g_gc_live_vec += d;      break;
-    case SPROUT_HEAP_MAP:     g_gc_live_map += d;      break;
-    case SPROUT_HEAP_BYTES:   g_gc_live_bytes += d;    break;
-    case SPROUT_HEAP_BUILDER: g_gc_live_builder += d;  break;
-    case SPROUT_HEAP_TUPLE:   g_gc_live_tuple += d;    break;
-    case SPROUT_HEAP_REF:     g_gc_live_ref += d;      break;
-    case SPROUT_HEAP_CSTR:
-      g_gc_live_cstr += d;
-      g_gc_live_cstr_bytes += d * (long long)aux;
-      break;
-    default: break;
-  }
-}
-static inline void sprout_gc_census_add(SproutHeapKind kind, unsigned long long aux) {
-  sprout_gc_census_adjust(kind, aux, 1);
-}
-static inline void sprout_gc_census_sub(SproutHeapKind kind, unsigned long long aux) {
-  sprout_gc_census_adjust(kind, aux, -1);
-}
-
 /* Free one unmarked slot (`slot` is its header address), the same way in both sweeps.  Under
  * lineage an OBJ is poisoned and kept, not listed; any other slot releases its extras and gets
  * a FREE header.  Returns 1 when the slot is FREE and the caller lists it, 0 when it is
@@ -4319,10 +4337,7 @@ static void sprout_gc_sweep(int keep_color) {
      allocates a managed object: Pass 1/2 only free(), malloc() and realloc(). */
   memset(g_freelist, 0, sizeof(g_freelist));
   g_gc_freelist_len = 0;
-  g_gc_live_obj = g_gc_live_closure = g_gc_live_vec = 0;
-  g_gc_live_map = g_gc_live_bytes = g_gc_live_builder = 0;
-  g_gc_live_tuple = g_gc_live_ref = 0;
-  g_gc_live_cstr = g_gc_live_cstr_bytes = 0;
+  sprout_gc_census_reset();
 
   int lineage_on = sprout_gc_lineage_on();
   int ageprof_on = sprout_gc_ageprof_on();
@@ -4700,14 +4715,24 @@ static void sprout_holes_sweep_region(SproutRegion* r, int major) {
   sprout_holes_sweep_buffers(r, major);
   const size_t nwords = (r->bump / SPROUT_SLOT_GRAN + 63) / 64;
   const int trace = g_gc_stress == 1;
+#if defined(SPROUT_GC_ALLOCTRACE)
+  const int at = sprout_at_on();
+#else
+  const int at = 0;
+#endif
   long long before = 0, live_n = 0, young_n = 0, occ_n = 0;
   for (size_t w = 0; w < nwords; w++) {
     uint64_t mk = r->markocc[w], od = r->oldocc[w];
     uint64_t live = mk | od;
     uint64_t sm0 = slotmap_word(r, w), sm = sm0 & live;
-    if (trace)   /* the `just gc-trace` anchor: the starts about to clear */
-      for (uint64_t dead = sm0 & ~sm; dead != 0; dead &= dead - 1)
-        sprout_gc_trace_free(r->base + (w * 64 + (size_t)__builtin_ctzll(dead)) * SPROUT_SLOT_GRAN + 8);
+    if (trace || at)   /* per-dead-object work, only when a mode asks: the starts about to clear */
+      for (uint64_t dead = sm0 & ~sm; dead != 0; dead &= dead - 1) {
+        void* payload = r->base + (w * 64 + (size_t)__builtin_ctzll(dead)) * SPROUT_SLOT_GRAN + 8;
+#if defined(SPROUT_GC_ALLOCTRACE)
+        if (at) sprout_at_free(r, payload);
+#endif
+        if (trace) sprout_gc_trace_free(payload);   /* the `just gc-trace` anchor */
+      }
     slotmap_set_word(r, w, sm);
     uint64_t ym = r->youngmap[w] & mk & ~od;
     r->youngmap[w] = ym;
@@ -4805,6 +4830,31 @@ static void sprout_holes_sweep(void) {
   if (g_holes_verify) sprout_holes_verify_after_sweep();
 }
 
+/* AGEPROF's counts that need no dead slot, after the sweep.  The marker has counted the marked
+ * objects by age.  Freed = the heap before minus after; freed at age 0 = the allocations since the
+ * last collection minus the ones marked at age 0 (an unmarked allocation died young).  At a major
+ * the marker's live histogram must sum to the heap count, which the sweep took from popcounts. */
+static void sprout_holes_ap_end(void) {
+  long long freed = g_holes_ap_heap0 - g_managed_heap_count;
+  long long freed0 = g_holes_ap_alloc0 - (g_ap_marked_by_age[0] - g_holes_ap_age0);
+  if (freed0 < 0 || freed0 > freed) {
+    fprintf(stderr, "[sprout ageprof] INCONSISTENT at cycle=%lld: freed=%lld freed_age0=%lld\n",
+            g_ap_cycles, freed, freed0);
+    abort();
+  }
+  g_ap_freed_total += freed;
+  g_ap_freed_age0 += freed0;
+  if (!g_holes_major) return;
+  long long live_sum = 0;
+  for (int a = 0; a <= SPROUT_GC_AGE_MAX; a++) live_sum += g_ap_live_by_age[a];
+  if (live_sum != g_managed_heap_count) {
+    fprintf(stderr,
+            "[sprout ageprof] INCONSISTENT at cycle=%lld: live_by_age sums to %lld, "
+            "g_managed_heap_count=%lld\n", g_ap_cycles, live_sum, (long long)g_managed_heap_count);
+    abort();
+  }
+}
+
 /* GENCHECK, at a major's start: the set is empty, so no live header may carry bit 13. */
 static void sprout_holes_check_no_bit13(void) {
   for (size_t ri = 0; ri < g_region_count; ri++) {
@@ -4836,6 +4886,16 @@ static void sprout_holes_begin(int minor) {
     for (size_t ri = 0; ri < g_region_count; ri++)
       if (g_regions[ri].tailvf != NULL) memset(g_regions[ri].tailvf, 0, SPROUT_SLOTMAP_BYTES);
   g_holes_major = !minor;
+  g_holes_ap = sprout_gc_ageprof_on();
+  g_holes_census = g_debug_gc_enabled && !minor;
+  if (g_holes_ap) {
+    g_ap_cycles++;
+    g_holes_ap_heap0 = g_managed_heap_count;
+    g_holes_ap_alloc0 = g_managed_alloc_since_gc;
+    g_holes_ap_age0 = g_ap_marked_by_age[0];
+    if (!minor) memset(g_ap_live_by_age, 0, sizeof(g_ap_live_by_age));
+  }
+  if (g_holes_census) sprout_gc_census_reset();
   if (minor) return;
   for (size_t i = 0; i < g_gen.remembered.len; i++) {
     void* payload = g_gen.remembered.items[i];
@@ -5187,10 +5247,11 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   int young_only = holes ? minor
                          : minor && !next_major && !sprout_gc_ageprof_on() && sprout_gc_young_sweep_ok();
   long long sweep_started_us = time_now_micros();
-  if (holes)           sprout_holes_sweep();
+  if (holes)           { sprout_holes_sweep(); if (g_holes_ap) sprout_holes_ap_end(); }
   else if (young_only) sprout_gc_sweep_young();
   else                 sprout_gc_sweep(gen_on && !next_major);
   long long sweep_us = time_now_micros() - sweep_started_us;
+  g_gc_census_off = holes && minor;   /* a minor's census would be the last major's */
   if (holes && sprout_gc_hdrcheck_on()) sprout_holes_hdrcheck_walk();
   if (gen_on && g_gen.check) sprout_gc_check_sweep(!next_major, young_only);
   if (gen_on && g_gen.check && g_gen.last_live != g_managed_heap_count) {

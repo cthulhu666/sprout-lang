@@ -1049,7 +1049,8 @@ counters' build flag: a default runtime reports them as `off`, and one built wit
 `-DSPROUT_GC_AGEPROF_STORES` counts `test_mutvec_sort`'s stores. It pins `SPROUT_GC_MINOR=0`,
 like the other gates that read whole-heap marks or exact cycle counts: a minor does not re-mark
 old objects, so `marked_total` stops measuring the live set (rule:
-[compiler-internals.md §Non-moving GC](compiler-internals.md)).
+[compiler-internals.md §Non-moving GC](compiler-internals.md)). The calibration runs twice, on the
+default collector and under `SPROUT_GC_HOLES=1`, with the same bounds and the same numbers.
 
 ### An absolute ratio tracked the number of rooted globals, not what the gate measured
 
@@ -1146,7 +1147,8 @@ Builds the runtime with `-DSPROUT_GC_ALLOCTRACE` and runs `tests/gc_gen/inline_t
 (default, `SPROUT_GC_MINOR=0`, `SPROUT_GC_STRESS=1`, with and without
 `SPROUT_GC_REGION_LISTS=1`), `vector_push` and `region_empty_minor` (STRESS), and
 `tests/stdlib/test_gc_large_object_arena` (default, minors off, STRESS), each with
-`SPROUT_GC_ALLOCTRACE=<path>`. Every trace goes through `bench/gc_place/replay --check`:
+`SPROUT_GC_ALLOCTRACE=<path>`, and again under `SPROUT_GC_HOLES=1` (default, minors off, STRESS;
+the sweep writes each `F` from `slotmap & ~live` before it clears them). Every trace goes through `bench/gc_place/replay --check`:
 every `F`, `T` and `B` names an allocated object; no object is freed twice; `F` falls between a
 `G` and its `E`; `allocs − frees` equals `heap_after` at each `E`; `T` hits a vector at most once.
 The trace must end with the atexit collection's `E`, whose cycle is the last `cycle=` line of

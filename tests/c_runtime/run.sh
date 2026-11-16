@@ -689,13 +689,22 @@ SHARE_MSG="SPROUT_GC_NURSERY_SHARE: expected a number in (0, 4]"
 expect_abort bad_share_abc "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE abc
 expect_abort bad_share_0 "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE 0
 expect_abort bad_share_5 "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE 5
-for sel in age2 age3 age_large major_age remember set_before_major major_rule defaults nursery_sizing nursery_share_half nursery_small_heap nursery_min_binds nursery_pinned nursery_floor_before_major nursery_floor_binds nursery_survive nursery_survive_major nursery_survive_off minors_off share_read share_ignored_minors_off census_age holes_age2 holes_age3 holes_age_large holes_remember holes_remember_old_child; do
+for sel in age2 age3 age_large major_age remember set_before_major major_rule defaults nursery_sizing nursery_share_half nursery_small_heap nursery_min_binds nursery_pinned nursery_floor_before_major nursery_floor_binds nursery_survive nursery_survive_major nursery_survive_off minors_off share_read share_ignored_minors_off census_age holes_age2 holes_age3 holes_age_large holes_remember holes_remember_old_child holes_census holes_census_minors_off; do
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$PA" "$sel" > "$TMP_DIR/pa_$sel.out" 2> "$TMP_DIR/pa_$sel.err" || {
     echo "  promote_age '$sel' failed:" >&2
     cat "$TMP_DIR/pa_$sel.out" "$TMP_DIR/pa_$sel.err" >&2
     exit 1
   }
   test "$(cat "$TMP_DIR/pa_$sel.out")" = "promote-age-$sel"
+done
+# Under HOLES the cycle line carries a census only at a major: 2 of holes_census's 4 collections and
+# the atexit one, and all 5 of the minors-off run's and the atexit one.
+for want in holes_census:3 holes_census_minors_off:6; do
+  got=$(grep -c "types: " "$TMP_DIR/pa_${want%%:*}.err" || true)
+  test "$got" = "${want##*:}" || {
+    echo "  promote_age '${want%%:*}': $got census lines, expected ${want##*:}" >&2
+    exit 1
+  }
 done
 
 echo "==> c runtime: NOSCAN vectors are not scanned, keep the bit through set/append/concat/push, and skip the barrier"
