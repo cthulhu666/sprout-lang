@@ -529,7 +529,7 @@ typedef struct {
   const char* thr;     /* SPROUT_GC_THRESHOLD, or NULL */
   const char* share;   /* SPROUT_GC_NURSERY_SHARE, or NULL */
   double survive;      /* g_gen.nursery_survive (c), set after startup; < 0 keeps the default */
-  int holes;           /* SPROUT_GC_HOLES=1 (HDRCHECK off: the two cannot be combined) */
+  int holes;           /* SPROUT_GC_HOLES=1 */
 } AgeCase;
 
 static const AgeCase k_cases[] = {
@@ -594,10 +594,7 @@ int main(int argc, char** argv) {
     return 1;
   }
   setenv("SPROUT_GC_MINOR", c->minor ? "1" : "0", 1);
-  if (c->holes) {
-    setenv("SPROUT_GC_HOLES", "1", 1);
-    setenv("SPROUT_GC_HDRCHECK", "0", 1);
-  }
+  if (c->holes) setenv("SPROUT_GC_HOLES", "1", 1);
   if (c->share) setenv("SPROUT_GC_NURSERY_SHARE", c->share, 1);
   setenv("SPROUT_GC_MAJOR_EVERY", c->every, 1);
   if (c->thr) setenv("SPROUT_GC_THRESHOLD", c->thr, 1);

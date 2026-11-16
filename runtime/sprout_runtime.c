@@ -1005,10 +1005,14 @@ static void sprout_gc_holes_refuse(const char* name) {
   exit(2);
 }
 
-/* The maps replace the free lists and the per-slot sweep, so every mode that reads either is out. */
+static int g_holes_verify;   /* SPROUT_FL_VERIFY=1 under SPROUT_GC_HOLES, set in sprout_gc_gen_init */
+static int sprout_fl_verify_on(void);
+
+/* The maps replace the free lists and the per-slot sweep, so a mode that reads either is out.
+ * SPROUT_FL_VERIFY and SPROUT_GC_HDRCHECK have forms of their own under HOLES. */
 static void sprout_gc_holes_check_modes(void) {
-  static const char* const modes[] = { "SPROUT_GC_REGION_LISTS", "SPROUT_FL_VERIFY",
-    "SPROUT_GC_HDRCHECK", "SPROUT_GC_LINEAGE", "SPROUT_GC_AGEPROF" };
+  static const char* const modes[] = { "SPROUT_GC_REGION_LISTS", "SPROUT_GC_LINEAGE",
+    "SPROUT_GC_AGEPROF" };
   for (size_t i = 0; i < sizeof(modes) / sizeof(modes[0]); i++) {
     const char* v = getenv(modes[i]);
     if (v != NULL && v[0] == '1') sprout_gc_holes_refuse(modes[i]);
@@ -1046,6 +1050,7 @@ static void sprout_gc_gen_init(void) {
   if (g_gen.holes) {
     sprout_gc_holes_check_modes();
     g_gc_census_off = 1;
+    g_holes_verify = sprout_fl_verify_on();
   }
   if (!g_gen.on) return;
   const char* c = getenv("SPROUT_GC_GENCHECK");
@@ -1265,6 +1270,7 @@ typedef struct {
   SproutWorklist buf_old;
   int       large_marked;
   int       tail_released;  /* an inline tail was freed here since the last sweep of this region */
+  uint64_t* tailvf;         /* SPROUT_FL_VERIFY under HOLES: start granules of the listed tails */
 #if defined(SPROUT_GC_ALLOCTRACE)
   uint64_t* tr_ids;       /* trace id per slot granule, indexed like slotmap (NULL if large) */
   uint64_t  tr_large_id;  /* trace id of a large region's one object */
@@ -1739,6 +1745,92 @@ typedef struct { size_t ri; size_t gran; } SproutHoleCursor;
 static SproutHoleCursor g_hole_cur, g_hole_ovf;
 static void*            g_hole_tails[SPROUT_FREELIST_CLASSES];
 
+/* SPROUT_FL_VERIFY under SPROUT_GC_HOLES (docs/gc-stage2-v0.md §6 premise 12).  `g_holes_verify`
+ * is that switch, read at startup; with it off none of this runs.  `g_hv_last[i]` is where the
+ * last allocation of g_hole_cur (0) or g_hole_ovf (1) ended: the region's base and a granule.  A
+ * cursor is compared by base address, which a table insert or remove does not change, and each
+ * collection resets it.  `SproutRegion.tailvf` marks the listed tails' start granules. */
+typedef struct { uintptr_t base; size_t end; } SproutHoleLast;
+static SproutHoleLast g_hv_last[2];
+
+__attribute__((noreturn, cold, noinline))
+static void sprout_holes_verify_fail(const char* what, const SproutRegion* r, size_t gran, size_t n) {
+  fprintf(stderr, "[sprout] FL_VERIFY cycle=%lld holes: %s (region=%p granule=%zu n=%zu)\n",
+          g_gc_cycle_count, what, r != NULL ? (void*)r->base : NULL, gran, n);
+  fflush(stderr);
+  abort();
+}
+
+/* A cursor never sits behind its last allocation: same region and a higher granule, or a later
+ * region.  A region opened for it resets the mark (sprout_holes_verify_opened), since a new
+ * region can sort below. */
+static void sprout_holes_verify_cursor(const SproutHoleCursor* c) {
+  if (c->ri >= g_region_count) return;   /* past the last region: the next take opens one */
+  const SproutRegion* r = &g_regions[c->ri];
+  const SproutHoleLast* last = &g_hv_last[c == &g_hole_ovf];
+  if ((uintptr_t)r->base < last->base || ((uintptr_t)r->base == last->base && c->gran < last->end))
+    sprout_holes_verify_fail("cursor moved backward", r, c->gran, 0);
+}
+
+static void sprout_holes_verify_opened(const SproutHoleCursor* c, const SproutRegion* r) {
+  g_hv_last[c == &g_hole_ovf] = (SproutHoleLast){ (uintptr_t)r->base, 0 };
+}
+
+/* An allocation from a cursor takes granules `occ` does not hold. */
+static void sprout_holes_verify_alloc(const SproutHoleCursor* c, const SproutRegion* r, size_t gran, size_t n) {
+  for (size_t i = 0; i < n; i++)
+    if (bitmap_test(r->occ, gran + i))
+      sprout_holes_verify_fail("allocation over granules already in occ", r, gran + i, n);
+  g_hv_last[c == &g_hole_ovf] = (SproutHoleLast){ (uintptr_t)r->base, gran + n };
+}
+
+/* A freed tail is listed once, and while listed it holds `occ` bits and no `slotmap` or `oldocc`
+ * bit.  Takes `tail` to be n granules. */
+static void sprout_holes_verify_listing(SproutRegion* r, const char* tail, size_t n) {
+  if (r->tailvf == NULL) {
+    r->tailvf = (uint64_t*)calloc(SPROUT_SLOTMAP_BYTES, 1);
+    if (r->tailvf == NULL) sprout_fail("SPROUT_FL_VERIFY: out of memory");
+  }
+  const size_t idx = (size_t)(tail - r->base) / SPROUT_SLOT_GRAN;
+  if (bitmap_test(r->tailvf, idx)) sprout_holes_verify_fail("tail listed twice", r, idx, n);
+  for (size_t g = idx; g < idx + n; g++) {
+    if (!bitmap_test(r->occ, g)) sprout_holes_verify_fail("listed tail is not in occ", r, g, n);
+    if (slotmap_test(r, g)) sprout_holes_verify_fail("listed tail has a slotmap bit", r, g, n);
+    if (bitmap_test(r->oldocc, g)) sprout_holes_verify_fail("listed tail has an oldocc bit", r, g, n);
+  }
+  bitmap_set_range(r->tailvf, idx, 1);
+}
+
+static void sprout_holes_verify_take_tail(SproutRegion* r, const char* tail, size_t n) {
+  const size_t idx = (size_t)(tail - r->base) / SPROUT_SLOT_GRAN;
+  if (r->tailvf == NULL || !bitmap_test(r->tailvf, idx))
+    sprout_holes_verify_fail("tail taken but not listed", r, idx, n);
+  bitmap_clear_range(r->tailvf, idx, 1);
+}
+
+/* The sweep starts with the tail lists dropped (sprout_holes_begin). */
+static void sprout_holes_verify_before_sweep(void) {
+  for (size_t cls = 0; cls < SPROUT_FREELIST_CLASSES; cls++)
+    if (g_hole_tails[cls] != NULL)
+      sprout_holes_verify_fail("tail list not empty when the sweep starts", NULL, cls, 0);
+}
+
+/* Each collection ends with both cursors at region 0, granule 0. */
+static void sprout_holes_verify_after_sweep(void) {
+  if (g_hole_cur.ri != 0 || g_hole_cur.gran != 0)
+    sprout_holes_verify_fail("cursor not reset after a collection", NULL, g_hole_cur.gran, g_hole_cur.ri);
+  if (g_hole_ovf.ri != 0 || g_hole_ovf.gran != 0)
+    sprout_holes_verify_fail("cursor not reset after a collection", NULL, g_hole_ovf.gran, g_hole_ovf.ri);
+  memset(g_hv_last, 0, sizeof(g_hv_last));
+}
+
+/* Lists the freed inline tail `tail`, n granules of exact class n, on its class's list. */
+static void sprout_holes_push_tail(SproutRegion* r, char* tail, size_t n) {
+  if (g_holes_verify) sprout_holes_verify_listing(r, tail, n);
+  memcpy(tail, &g_hole_tails[n], sizeof(void*));
+  g_hole_tails[n] = tail;
+}
+
 static inline void hole_cursor_insert(SproutHoleCursor* c, size_t lo) {
   if (c->ri >= lo) c->ri++;
 }
@@ -1866,6 +1958,7 @@ static SproutRegion* open_new_region(void) {
   memset(&r.buf_old, 0, sizeof(r.buf_old));
   r.large_marked = 0;
   r.tail_released = 0;
+  r.tailvf = NULL;
 #if defined(SPROUT_GC_ALLOCTRACE)
   r.tr_ids = tr_ids;
 #endif
@@ -1908,6 +2001,7 @@ static void region_release_ordinary(size_t ri) {
   free(r->occ);
   free(r->markocc);
   free(r->oldocc);
+  free(r->tailvf);
   sprout_wl_free(&r->buf_young);
   sprout_wl_free(&r->buf_old);
 #if defined(SPROUT_GC_ALLOCTRACE)
@@ -2038,12 +2132,14 @@ static inline int hole_fits_at(const uint64_t* m, size_t g, size_t n) {
  * for c takes c wherever the table put it, since arena chunks are reused last-in first-out and
  * its index may sit below c's.  Returns the slot start; *out is its region. */
 static char* sprout_holes_take(SproutHoleCursor* c, size_t n, SproutRegion** out) {
+  if (g_holes_verify) sprout_holes_verify_cursor(c);
   for (;;) {
     while (c->ri < g_region_count) {
       SproutRegion* r = &g_regions[c->ri];
       if (!r->is_large) {
         size_t p = hole_find(r->occ, c->gran, n);
         if (p != SPROUT_OCC_NONE) {
+          if (g_holes_verify) sprout_holes_verify_alloc(c, r, p, n);
           c->gran = p + n;
           *out = r;
           return r->base + p * SPROUT_SLOT_GRAN;
@@ -2055,6 +2151,7 @@ static char* sprout_holes_take(SproutHoleCursor* c, size_t n, SproutRegion** out
     SproutRegion* nr = open_new_region();
     c->ri = (size_t)(nr - g_regions);
     c->gran = 0;
+    if (g_holes_verify) sprout_holes_verify_opened(c, nr);
   }
 }
 
@@ -2069,6 +2166,7 @@ static char* sprout_holes_slot(size_t slot, size_t cls, SproutRegion** out) {
     memcpy(&g_hole_tails[cls], tail, sizeof(void*));
     s = (char*)tail;
     r = region_find(s);
+    if (g_holes_verify) sprout_holes_verify_take_tail(r, s, cls);
   } else {
     const size_t n = slot / SPROUT_SLOT_GRAN;
     SproutHoleCursor* c = &g_hole_cur;
@@ -2302,6 +2400,7 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
     memset(&r.buf_old, 0, sizeof(r.buf_old));
     r.large_marked = 0;
     r.tail_released = 0;
+    r.tailvf = NULL;
 #if defined(SPROUT_GC_ALLOCTRACE)
     r.tr_ids = NULL;
     r.tr_large_id = tr_id;
@@ -3011,9 +3110,7 @@ static void sprout_vec_release_inline_tail(VectorVal* v) {
     size_t tail_idx = (size_t)(tail - r->base) / SPROUT_SLOT_GRAN;
     bitmap_clear_range(r->oldocc, tail_idx, rest / SPROUT_SLOT_GRAN);
     r->tail_released = 1;   /* the next minor sweeps this region even with no young object in it */
-    const size_t tcls = rest / SPROUT_SLOT_GRAN;   /* 1..255: the slot was at most 4096 B */
-    memcpy(tail, &g_hole_tails[tcls], sizeof(void*));
-    g_hole_tails[tcls] = tail;
+    sprout_holes_push_tail(r, tail, rest / SPROUT_SLOT_GRAN);   /* 1..255: the slot was at most 4096 B */
     return;
   }
   uint64_t free_hdr = (uint64_t)SPROUT_HEAP_FREE | ((uint64_t)rest << 14);
@@ -3647,7 +3744,9 @@ static inline int sprout_slot_kind_known(uint64_t kind_bits) {
  * kind byte nor the bump bound sees it.  The slotmap does: it records where slots start, is
  * never cleared or re-carved, and so must agree with the walk in BOTH directions — a bit where
  * the walk stops, no bit strictly inside a step.  Shared by the full sweep's walk and the
- * young-only sweep's visits. */
+ * young-only sweep's visits.  Under SPROUT_GC_HOLES the sweep clears dead objects' `slotmap`
+ * bits and visits no slot, so none of this holds there: sprout_holes_hdrcheck_walk checks each
+ * run of `occ` instead. */
 static inline void sprout_hdrcheck_slot(const SproutRegion* r, size_t off, size_t ssize, uint64_t kind_bits) {
   size_t walk_slot = off / SPROUT_SLOT_GRAN;
   int start_ok = slotmap_test(r, walk_slot);
@@ -3687,6 +3786,49 @@ static inline void sprout_hdrcheck_vector(void* payload, unsigned long long aux)
             "data=%p inline=%p len=%lld cap=%lld\n",
             vec_count, (void*)hv->data, (void*)vec_inline_data(hv), hv->len, hv->cap);
     abort();
+  }
+}
+
+__attribute__((noreturn, cold, noinline))
+static void sprout_holes_hdrcheck_fail(const char* what, const SproutRegion* r, size_t gran, uint64_t h) {
+  fprintf(stderr, "[sprout] HDRCHECK: holes walk: %s at region %p off=%zu: kind=%llu step=%zu bump=%zu\n",
+          what, (void*)r->base, gran * SPROUT_SLOT_GRAN, (unsigned long long)(h & 0xFF),
+          sprout_slot_step(h), r->bump);
+  fflush(stderr);
+  abort();
+}
+
+/* HDRCHECK under SPROUT_GC_HOLES, after each sweep.  No walk steps over a hole, so the check is
+ * per run of set `occ` bits: the run starts on a `slotmap` start, and each header's step lands
+ * exactly on the next `slotmap` start or the run's end.  A step past it is a header too long, a
+ * step short of it a header too short.  Each object also gets HDRCHECK's other checks: a known
+ * kind, a vector's aux against its data, a string's aux against its strlen. */
+static void sprout_holes_hdrcheck_walk(void) {
+  for (size_t ri = 0; ri < g_region_count; ri++) {
+    const SproutRegion* r = &g_regions[ri];
+    if (r->is_large) continue;
+    const size_t top = r->bump / SPROUT_SLOT_GRAN;
+    for (size_t g = occ_next_set(r->occ, 0); g < top;) {
+      const size_t end = occ_next_clear(r->occ, g);
+      uint64_t h; memcpy(&h, r->base + g * SPROUT_SLOT_GRAN, 8);
+      if (end > top) sprout_holes_hdrcheck_fail("run of occ passes the bump", r, g, h);
+      if (!slotmap_test(r, g)) sprout_holes_hdrcheck_fail("run does not start on a slotmap start", r, g, h);
+      for (size_t k = g; k < end;) {
+        memcpy(&h, r->base + k * SPROUT_SLOT_GRAN, 8);
+        if (!sprout_slot_kind_known(h & 0xFF)) sprout_holes_hdrcheck_fail("unknown header kind", r, k, h);
+        const size_t next = k + sprout_slot_step(h) / SPROUT_SLOT_GRAN;
+        const size_t start = slotmap_next_start(r, k + 1, end);   /* `end` when none */
+        if (next > start) sprout_holes_hdrcheck_fail("header too long: step passes a slotmap start or the run's end", r, k, h);
+        if (next < start) sprout_holes_hdrcheck_fail("header too short: step ends inside an object", r, k, h);
+        void* payload = r->base + k * SPROUT_SLOT_GRAN + 8;
+        const SproutHeapKind kind = (SproutHeapKind)(h & 0xFF);
+        if (kind == SPROUT_HEAP_VECTOR) sprout_hdrcheck_vector(payload, h >> 14);
+        if (kind == SPROUT_HEAP_CSTR && strlen((const char*)payload) != (size_t)(h >> 14))
+          sprout_holes_hdrcheck_fail("CSTR aux differs from strlen", r, k, h);
+        k = next;
+      }
+      g = occ_next_set(r->occ, end);
+    }
   }
 }
 
@@ -4586,6 +4728,7 @@ static void sprout_holes_recount(void) {
 
 static void sprout_holes_sweep(void) {
   const int major = g_holes_major;
+  if (g_holes_verify) sprout_holes_verify_before_sweep();
   sprout_holes_sweep_singletons();
   int freed_large = 0, emptied_any = 0;
   for (size_t ri = 0; ri < g_region_count; ri++) {
@@ -4632,6 +4775,7 @@ static void sprout_holes_sweep(void) {
   sprout_holes_recount();
   g_hole_cur = (SproutHoleCursor){ 0, 0 };
   g_hole_ovf = (SproutHoleCursor){ 0, 0 };
+  if (g_holes_verify) sprout_holes_verify_after_sweep();
 }
 
 /* GENCHECK, at a major's start: the set is empty, so no live header may carry bit 13. */
@@ -4661,6 +4805,9 @@ static void sprout_holes_check_no_bit13(void) {
  * stays young; it also clears `oldocc`, which its marker rebuilds. */
 static void sprout_holes_begin(int minor) {
   memset(g_hole_tails, 0, sizeof(g_hole_tails));
+  if (g_holes_verify)   /* the listed-tail marks go with the lists */
+    for (size_t ri = 0; ri < g_region_count; ri++)
+      if (g_regions[ri].tailvf != NULL) memset(g_regions[ri].tailvf, 0, SPROUT_SLOTMAP_BYTES);
   g_holes_major = !minor;
   if (minor) return;
   for (size_t i = 0; i < g_gen.remembered.len; i++) {
@@ -5017,6 +5164,7 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   else if (young_only) sprout_gc_sweep_young();
   else                 sprout_gc_sweep(gen_on && !next_major);
   long long sweep_us = time_now_micros() - sweep_started_us;
+  if (holes && sprout_gc_hdrcheck_on()) sprout_holes_hdrcheck_walk();
   if (gen_on && g_gen.check) sprout_gc_check_sweep(!next_major, young_only);
   if (gen_on && g_gen.check && g_gen.last_live != g_managed_heap_count) {
     fprintf(stderr, "[sprout] GENCHECK: predicted %lld live objects after the sweep, found %lld\n",
