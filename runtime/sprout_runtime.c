@@ -5268,7 +5268,7 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   long long swept_before = g_debug_gc_swept;
   long long walked_before = g_debug_gc_walked;
   g_gc_cycle_count++;
-  /* Prototype only: ordinary regions held when this collection starts, for the cycle line. */
+  /* HOLES only: ordinary regions held when this collection starts, for the cycle line. */
   long long start_regions = 0;
   if (g_gen.holes && g_debug_gc_enabled)
     for (size_t ri = 0; ri < g_region_count; ri++) start_regions += !g_regions[ri].is_large;
