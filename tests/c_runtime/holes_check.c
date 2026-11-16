@@ -17,6 +17,9 @@
  *   lineage_corpses — dead young OBJs become corpses in a minor and stay through minors and
  *                    majors; nothing is allocated over one, a marker that reaches one leaves it
  *                    alone, and a region holding only corpses is kept.
+ *   *_trace        — under SPROUT_GC_LINEAGE=1 without STRESS, a released vector tail and a dead
+ *                    large object each fire the free anchor (sprout_gc_trace_free), recorded by
+ *                    hooks this file supplies (SPROUT_GC_TRACE_HOOKS_EXTERNAL).
  *   bad_*          — each corrupts one map, count or list after a clean collection and runs the
  *                    check, which must abort with its own message (the caller checks it).
  *   bad_fl_*       — the same under SPROUT_FL_VERIFY=1 (premise 12): the cursors, the tail lists
@@ -30,8 +33,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define SPROUT_GC_TRACE_HOOKS_EXTERNAL
 #include "../../runtime/sprout_runtime.c"
 #include "runtime_case.h"
+
+/* The lineage anchors `just gc-trace` breaks on, recorded: 'A' for an allocation, 'F' for a free. */
+typedef struct { char op; const void* payload; } TraceEvent;
+static TraceEvent g_trace[64];
+static size_t g_trace_n;
+static void trace_note(char op, void* payload) {
+  if (g_trace_n < sizeof g_trace / sizeof g_trace[0]) g_trace[g_trace_n++] = (TraceEvent){ op, payload };
+}
+void sprout_gc_trace_alloc(void* payload) { trace_note('A', payload); }
+void sprout_gc_trace_free(void* payload) { trace_note('F', payload); }
+static int trace_seen(char op, const void* payload) {
+  for (size_t i = 0; i < g_trace_n; i++)
+    if (g_trace[i].op == op && g_trace[i].payload == payload) return 1;
+  return 0;
+}
 
 static void* g_chain;     /* permanent root: head of the old chain of Refs */
 static long long g_tail;  /* last Ref of the chain */
@@ -191,6 +210,31 @@ static int tail_retained(void) {
   check(held == 0, "the freed tail left `occ` at the next minor");
   check(bitmap_test(r->occ, hdr / SPROUT_SLOT_GRAN), "the vector itself is still in `occ`");
   check(vector_length(W(g_o[0])) == 101, "the vector is intact");
+  return g_failed;
+}
+
+/* Under LINEAGE (no STRESS) a vector's released inline tail gets the free anchor at its payload,
+ * so the next object allocated there reads as an alias of the old inline area. */
+static int tail_release_trace(void) {
+  register_roots();
+  g_o[0] = P(vec_make_filled(100, 0));
+  const char* tail_payload = (char*)g_o[0] - 8 + slot_bytes(SPROUT_HEAP_VECTOR, 0) + 8;
+  g_trace_n = 0;
+  vector_push(W(g_o[0]), 1);            /* past the inline capacity: the tail is released */
+  check(g_gc_stress != 1, "the case runs without STRESS");
+  check(trace_seen('F', tail_payload), "the released tail got the lineage free anchor");
+  return g_failed;
+}
+
+/* Under LINEAGE (no STRESS) a dead large object gets the free anchor its allocation has an alloc
+ * anchor for. */
+static int large_free_trace(void) {
+  register_roots();
+  void* big = P(make_str(10000));       /* a large object nothing roots */
+  check(g_gc_stress != 1, "the case runs without STRESS");
+  check(trace_seen('A', big), "the large object's allocation was traced");
+  collect_major();
+  check(trace_seen('F', big), "the dead large object got the lineage free anchor");
   return g_failed;
 }
 
@@ -558,6 +602,8 @@ static const HolesCase k_cases[] = {
   { "positive_lineage",       positive, "SPROUT_GC_LINEAGE" },
   { "scribble_lineage",       scribble, "SPROUT_GC_LINEAGE" },
   { "lineage_corpses",        lineage_corpses, "SPROUT_GC_LINEAGE" },
+  { "tail_release_trace",     tail_release_trace, "SPROUT_GC_LINEAGE" },
+  { "large_free_trace",       large_free_trace, "SPROUT_GC_LINEAGE" },
   { "bad_corpse_not_in_oldocc", bad_corpse_not_in_oldocc, "SPROUT_GC_LINEAGE" },
   { "bad_corpse_count",       bad_corpse_count, "SPROUT_GC_LINEAGE" },
   { "bad_poison_no_lineage",  bad_poison_no_lineage, NULL },

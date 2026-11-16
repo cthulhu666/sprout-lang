@@ -164,9 +164,11 @@ wl_def() {
       W_SRC=bench/gc_minor/load_spike.sprout; W_CMD=("$BIN/load_spike")
       W_THR=283000 ;;     # 252 cycles, peak live 174k
     rotate_classes)       # slot classes take turns: exact-fit placement retains
-      W_SRC=bench/gc_trigger/rotate_classes.sprout; W_CMD=("$BIN/rotate_classes") ;;
+      W_SRC=bench/gc_trigger/rotate_classes.sprout; W_CMD=("$BIN/rotate_classes")
+      W_THR=46100 ;;      # 1,681 cycles, peak live 9.6k
     mutvec_push)          # each push releases an inline tail
-      W_SRC=bench/gc_place/mutvec_push.sprout; W_CMD=("$BIN/mutvec_push") ;;
+      W_SRC=bench/gc_place/mutvec_push.sprout; W_CMD=("$BIN/mutvec_push")
+      W_THR=15100 ;;      # 19 cycles, peak live 516
     galaxy_client)
       # What a player runs (§13.6): game/app.sprout on the catalog, auto-closing after 1200 frames.
       # --system pins the start system: the default is a random home seeded by the clock, which

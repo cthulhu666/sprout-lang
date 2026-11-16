@@ -540,29 +540,40 @@ grep -q "owner: kind=REF .* field=0" "$TMP_DIR/gc_mb.err" || {
   cat "$TMP_DIR/gc_mb.err" >&2
   exit 1
 }
-# A case that must abort at startup: nonzero exit, and stderr carries the message.
-expect_abort() {
-  local sel="$1" msg="$2" fail_text="$3"
-  if ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$GC" "$sel" > "$TMP_DIR/gc_$sel.out" 2> "$TMP_DIR/gc_$sel.err"; then
-    echo "  $fail_text" >&2
+# A case that must abort: nonzero exit, and stderr matches the regex.
+#   abort_check <case binary> <tag> <message regex> [<args for the binary>, default: the tag]
+# The output goes to $TMP_DIR/<binary name>_<tag>.{out,err}; ABORT_NOTE=<text> replaces the
+# "did not abort" line.
+abort_check() {
+  local bin="$1" tag="$2" want="$3"
+  shift 3
+  local args=("$@")
+  [[ ${#args[@]} -eq 0 ]] && args=("$tag")
+  local label out err
+  label="$(basename "$bin")"
+  out="$TMP_DIR/${label}_$tag.out"
+  err="$TMP_DIR/${label}_$tag.err"
+  if ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$bin" "${args[@]}" > "$out" 2> "$err"; then
+    echo "  ${ABORT_NOTE:-$label '$tag' did not abort}" >&2
     exit 1
   fi
-  grep -q "$msg" "$TMP_DIR/gc_$sel.err" || {
-    echo "  $sel failed without the expected message:" >&2
-    cat "$TMP_DIR/gc_$sel.out" "$TMP_DIR/gc_$sel.err" >&2
+  grep -q "$want" "$err" || {
+    echo "  $label '$tag' failed without the message '$want':" >&2
+    cat "$out" "$err" >&2
     exit 1
   }
 }
-expect_abort bad_every_on "SPROUT_GC_MAJOR_EVERY: expected non-negative integer" \
-  "a bad SPROUT_GC_MAJOR_EVERY did not abort with the mode on"
+ABORT_NOTE="a bad SPROUT_GC_MAJOR_EVERY did not abort with the mode on" \
+  abort_check "$GC" bad_every_on "SPROUT_GC_MAJOR_EVERY: expected non-negative integer"
 # The bad value must fail at startup, not inside the atexit collection after the program ran.
-expect_abort bad_every_late "SPROUT_GC_MAJOR_EVERY: expected non-negative integer" \
-  "a bad SPROUT_GC_MAJOR_EVERY did not abort with the mode on (no collection before exit)"
-if grep -q "after-alloc" "$TMP_DIR/gc_bad_every_late.out"; then
+ABORT_NOTE="a bad SPROUT_GC_MAJOR_EVERY did not abort with the mode on (no collection before exit)" \
+  abort_check "$GC" bad_every_late "SPROUT_GC_MAJOR_EVERY: expected non-negative integer"
+if grep -q "after-alloc" "$TMP_DIR/gen_check_bad_every_late.out"; then
   echo "  a bad SPROUT_GC_MAJOR_EVERY was reported only at exit, after the program ran" >&2
   exit 1
 fi
-expect_abort bad_minor "SPROUT_GC_MINOR: expected 0 or 1" "a bad SPROUT_GC_MINOR did not abort at startup"
+ABORT_NOTE="a bad SPROUT_GC_MINOR did not abort at startup" \
+  abort_check "$GC" bad_minor "SPROUT_GC_MINOR: expected 0 or 1"
 for sel in barrier minor_keeps_old major_every clear_before_major doubling no_check bad_every_off default_on empty_on; do
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$GC" "$sel" > "$TMP_DIR/gc_$sel.out" 2> "$TMP_DIR/gc_$sel.err" || {
     echo "  gen_check '$sel' failed:" >&2
@@ -581,15 +592,7 @@ clang "$ROOT/tests/c_runtime/young_sweep.c" "$ROOT/runtime/sprout_scheduler.c" "
 for sel in bad_young_bit bad_young_bit_free bad_free_count; do
   want="GENCHECK: young bit"
   [[ "$sel" == bad_free_count ]] && want="GENCHECK: free count"
-  if ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$YS" "$sel" > "$TMP_DIR/ys_$sel.out" 2> "$TMP_DIR/ys_$sel.err"; then
-    echo "  young_sweep '$sel' did not abort" >&2
-    exit 1
-  fi
-  grep -q "$want" "$TMP_DIR/ys_$sel.err" || {
-    echo "  young_sweep '$sel' failed without the message '$want':" >&2
-    cat "$TMP_DIR/ys_$sel.out" "$TMP_DIR/ys_$sel.err" >&2
-    exit 1
-  }
+  abort_check "$YS" "$sel" "$want"
 done
 for sel in walked_young free_count no_double_list region_release large_young lineage; do
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$YS" "$sel" > "$TMP_DIR/ys_$sel.out" 2> "$TMP_DIR/ys_$sel.err" || {
@@ -606,47 +609,36 @@ echo "==> c runtime: GENCHECK, SPROUT_FL_VERIFY, HDRCHECK and SPROUT_GC_LINEAGE 
 HC="$TMP_DIR/holes_check"
 clang "$ROOT/tests/c_runtime/holes_check.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
   "${CLANG_EXTRA[@]}" -O0 -g ${SAN[@]+"${SAN[@]}"} -o "$HC"
-holes_abort() {  # holes_abort <case> <message> [<prefix regex>, default "GENCHECK: "]
-  local sel="$1" want="$2" pre="${3:-GENCHECK: }"
-  if ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$HC" "$sel" > "$TMP_DIR/hc_$sel.out" 2> "$TMP_DIR/hc_$sel.err"; then
-    echo "  holes_check '$sel' did not abort" >&2
-    exit 1
-  fi
-  grep -q "$pre$want" "$TMP_DIR/hc_$sel.err" || {
-    echo "  holes_check '$sel' failed without the message '$pre$want':" >&2
-    cat "$TMP_DIR/hc_$sel.out" "$TMP_DIR/hc_$sel.err" >&2
-    exit 1
-  }
-}
 FLV="FL_VERIFY cycle=[0-9]* holes: "
 HDR="HDRCHECK: holes walk: "
-holes_abort bad_slotmap_outside_occ "slotmap bit outside occ"
-holes_abort bad_youngmap_outside_occ "youngmap bit outside occ"
-holes_abort bad_extent_outside_occ "live extent outside occ"
-holes_abort bad_oldocc_extra "oldocc differs from the old objects' extents"
-holes_abort bad_oldocc_missing "oldocc differs from the old objects' extents"
-holes_abort bad_markocc "markocc not zero between collections"
-holes_abort bad_color_young "colour set on a young object"
-holes_abort bad_color_old "colour clear on an object in oldocc"
-holes_abort bad_buf_missing "buffer owner missing from its list"
-holes_abort bad_buf_twice "buffer owner listed twice"
-holes_abort bad_buf_young_on_old "young buffer owner on the old list"
-holes_abort bad_fl_cursor_backward "cursor moved backward" "$FLV"
-holes_abort bad_fl_tail_twice "tail listed twice" "$FLV"
-holes_abort bad_fl_tail_not_in_occ "listed tail is not in occ" "$FLV"
-holes_abort bad_fl_tail_slotmap "listed tail has a slotmap bit" "$FLV"
-holes_abort bad_fl_tail_oldocc "listed tail has an oldocc bit" "$FLV"
-holes_abort bad_fl_tail_take_unlisted "tail taken but not listed" "$FLV"
-holes_abort bad_fl_alloc_in_occ "allocation over granules already in occ" "$FLV"
-holes_abort bad_fl_tails_at_sweep "tail list not empty when the sweep starts" "$FLV"
-holes_abort bad_fl_cursor_not_reset "cursor not reset after a collection" "$FLV"
-holes_abort bad_hdr_too_long "header too long" "$HDR"
-holes_abort bad_hdr_too_short "header too short" "$HDR"
-holes_abort bad_corpse_not_in_oldocc "corpse outside oldocc"
-holes_abort bad_corpse_count "poison count"
-holes_abort bad_poison_no_lineage "poison header under HOLES"
+GCK="GENCHECK: "
+abort_check "$HC" bad_slotmap_outside_occ "${GCK}slotmap bit outside occ"
+abort_check "$HC" bad_youngmap_outside_occ "${GCK}youngmap bit outside occ"
+abort_check "$HC" bad_extent_outside_occ "${GCK}live extent outside occ"
+abort_check "$HC" bad_oldocc_extra "${GCK}oldocc differs from the old objects' extents"
+abort_check "$HC" bad_oldocc_missing "${GCK}oldocc differs from the old objects' extents"
+abort_check "$HC" bad_markocc "${GCK}markocc not zero between collections"
+abort_check "$HC" bad_color_young "${GCK}colour set on a young object"
+abort_check "$HC" bad_color_old "${GCK}colour clear on an object in oldocc"
+abort_check "$HC" bad_buf_missing "${GCK}buffer owner missing from its list"
+abort_check "$HC" bad_buf_twice "${GCK}buffer owner listed twice"
+abort_check "$HC" bad_buf_young_on_old "${GCK}young buffer owner on the old list"
+abort_check "$HC" bad_fl_cursor_backward "${FLV}cursor moved backward"
+abort_check "$HC" bad_fl_tail_twice "${FLV}tail listed twice"
+abort_check "$HC" bad_fl_tail_not_in_occ "${FLV}listed tail is not in occ"
+abort_check "$HC" bad_fl_tail_slotmap "${FLV}listed tail has a slotmap bit"
+abort_check "$HC" bad_fl_tail_oldocc "${FLV}listed tail has an oldocc bit"
+abort_check "$HC" bad_fl_tail_take_unlisted "${FLV}tail taken but not listed"
+abort_check "$HC" bad_fl_alloc_in_occ "${FLV}allocation over granules already in occ"
+abort_check "$HC" bad_fl_tails_at_sweep "${FLV}tail list not empty when the sweep starts"
+abort_check "$HC" bad_fl_cursor_not_reset "${FLV}cursor not reset after a collection"
+abort_check "$HC" bad_hdr_too_long "${HDR}header too long"
+abort_check "$HC" bad_hdr_too_short "${HDR}header too short"
+abort_check "$HC" bad_corpse_not_in_oldocc "${GCK}corpse outside oldocc"
+abort_check "$HC" bad_corpse_count "${GCK}poison count"
+abort_check "$HC" bad_poison_no_lineage "${GCK}poison header under HOLES"
 for sel in positive positive_verify scribble scribble_verify scribble_hdrcheck tail_retained \
-           positive_lineage scribble_lineage lineage_corpses; do
+           positive_lineage scribble_lineage lineage_corpses tail_release_trace large_free_trace; do
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$HC" "$sel" > "$TMP_DIR/hc_$sel.out" 2> "$TMP_DIR/hc_$sel.err" || {
     echo "  holes_check '$sel' failed:" >&2
     cat "$TMP_DIR/hc_$sel.out" "$TMP_DIR/hc_$sel.err" >&2
@@ -662,37 +654,24 @@ echo "==> c runtime: promotion age, the remembered rule and the nursery rule, an
 PA="$TMP_DIR/promote_age"
 clang "$ROOT/tests/c_runtime/promote_age.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
   "${CLANG_EXTRA[@]}" -O0 -g ${SAN[@]+"${SAN[@]}"} -o "$PA"
-expect_abort() {  # expect_abort <tag> <message> <args...>
-  local tag="$1" want="$2"
-  shift 2
-  if ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$PA" "$@" > "$TMP_DIR/pa_$tag.out" 2> "$TMP_DIR/pa_$tag.err"; then
-    echo "  promote_age '$tag' did not abort" >&2
-    exit 1
-  fi
-  grep -q "$want" "$TMP_DIR/pa_$tag.err" || {
-    echo "  promote_age '$tag' failed without the message '$want':" >&2
-    cat "$TMP_DIR/pa_$tag.out" "$TMP_DIR/pa_$tag.err" >&2
-    exit 1
-  }
-}
-expect_abort unremembered_edge "GENCHECK: old→young edge not remembered" bad_unremembered_edge
-grep -q "owner: kind=REF .* field=0" "$TMP_DIR/pa_unremembered_edge.err" || {
+abort_check "$PA" unremembered_edge "GENCHECK: old→young edge not remembered" bad_unremembered_edge
+grep -q "owner: kind=REF .* field=0" "$TMP_DIR/promote_age_unremembered_edge.err" || {
   echo "  promote_age: the check did not name the owner and field:" >&2
-  cat "$TMP_DIR/pa_unremembered_edge.err" >&2
+  cat "$TMP_DIR/promote_age_unremembered_edge.err" >&2
   exit 1
 }
-expect_abort major_bit13 "GENCHECK: remembered bit set before a major" bad_major_bit13
-expect_abort major_set "GENCHECK: remembered set not empty before a major" bad_major_set
-expect_abort stray_bit13 "GENCHECK: remembered bits differ from the remembered set" bad_stray_bit13
+abort_check "$PA" major_bit13 "GENCHECK: remembered bit set before a major" bad_major_bit13
+abort_check "$PA" major_set "GENCHECK: remembered set not empty before a major" bad_major_set
+abort_check "$PA" stray_bit13 "GENCHECK: remembered bits differ from the remembered set" bad_stray_bit13
 # A retired switch aborts at startup with a removal message, at any value and with minors off too.
-expect_abort retired_age "SPROUT_GC_PROMOTE_AGE was removed: promotion age is fixed at 3" bad_env SPROUT_GC_PROMOTE_AGE 2
-expect_abort retired_nursery "SPROUT_GC_NURSERY was removed: .*SPROUT_GC_NURSERY_SHARE" bad_env SPROUT_GC_NURSERY 1
-expect_abort retired_survive "SPROUT_GC_NURSERY_SURVIVE was removed: the survivor floor is fixed at 2" bad_env SPROUT_GC_NURSERY_SURVIVE 4
-expect_abort retired_minors_off "SPROUT_GC_PROMOTE_AGE was removed" bad_env SPROUT_GC_MINOR 0 SPROUT_GC_PROMOTE_AGE 2
+abort_check "$PA" retired_age "SPROUT_GC_PROMOTE_AGE was removed: promotion age is fixed at 3" bad_env SPROUT_GC_PROMOTE_AGE 2
+abort_check "$PA" retired_nursery "SPROUT_GC_NURSERY was removed: .*SPROUT_GC_NURSERY_SHARE" bad_env SPROUT_GC_NURSERY 1
+abort_check "$PA" retired_survive "SPROUT_GC_NURSERY_SURVIVE was removed: the survivor floor is fixed at 2" bad_env SPROUT_GC_NURSERY_SURVIVE 4
+abort_check "$PA" retired_minors_off "SPROUT_GC_PROMOTE_AGE was removed" bad_env SPROUT_GC_MINOR 0 SPROUT_GC_PROMOTE_AGE 2
 SHARE_MSG="SPROUT_GC_NURSERY_SHARE: expected a number in (0, 4]"
-expect_abort bad_share_abc "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE abc
-expect_abort bad_share_0 "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE 0
-expect_abort bad_share_5 "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE 5
+abort_check "$PA" bad_share_abc "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE abc
+abort_check "$PA" bad_share_0 "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE 0
+abort_check "$PA" bad_share_5 "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE 5
 for sel in age2 age3 age_large major_age remember set_before_major major_rule defaults nursery_sizing nursery_share_half nursery_small_heap nursery_min_binds nursery_pinned nursery_floor_before_major nursery_floor_binds nursery_survive nursery_survive_major nursery_survive_off minors_off share_read share_ignored_minors_off census_age holes_age2 holes_age3 holes_age_large holes_remember holes_remember_old_child holes_census holes_census_minors_off; do
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$PA" "$sel" > "$TMP_DIR/pa_$sel.out" 2> "$TMP_DIR/pa_$sel.err" || {
     echo "  promote_age '$sel' failed:" >&2
