@@ -600,6 +600,44 @@ for sel in walked_young free_count no_double_list region_release large_young lin
   test "$(cat "$TMP_DIR/ys_$sel.out")" = "young-sweep-$sel"
 done
 
+echo "==> c runtime: GENCHECK under SPROUT_GC_HOLES=1 passes on a real heap, walks holes by slotmap, and aborts on each corrupted map, count and buffer list"
+# holes_check.c includes sprout_runtime.c (like young_sweep.c). Each corrupting case must abort
+# with its own GENCHECK message: a check that tests nothing fails here.
+HC="$TMP_DIR/holes_check"
+clang "$ROOT/tests/c_runtime/holes_check.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
+  "${CLANG_EXTRA[@]}" -O0 -g ${SAN[@]+"${SAN[@]}"} -o "$HC"
+holes_abort() {  # holes_abort <case> <message>
+  local sel="$1" want="$2"
+  if ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$HC" "$sel" > "$TMP_DIR/hc_$sel.out" 2> "$TMP_DIR/hc_$sel.err"; then
+    echo "  holes_check '$sel' did not abort" >&2
+    exit 1
+  fi
+  grep -q "GENCHECK: $want" "$TMP_DIR/hc_$sel.err" || {
+    echo "  holes_check '$sel' failed without the message 'GENCHECK: $want':" >&2
+    cat "$TMP_DIR/hc_$sel.out" "$TMP_DIR/hc_$sel.err" >&2
+    exit 1
+  }
+}
+holes_abort bad_slotmap_outside_occ "slotmap bit outside occ"
+holes_abort bad_youngmap_outside_occ "youngmap bit outside occ"
+holes_abort bad_extent_outside_occ "live extent outside occ"
+holes_abort bad_oldocc_extra "oldocc differs from the old objects' extents"
+holes_abort bad_oldocc_missing "oldocc differs from the old objects' extents"
+holes_abort bad_markocc "markocc not zero between collections"
+holes_abort bad_color_young "colour set on a young object"
+holes_abort bad_color_old "colour clear on an object in oldocc"
+holes_abort bad_buf_missing "buffer owner missing from its list"
+holes_abort bad_buf_twice "buffer owner listed twice"
+holes_abort bad_buf_young_on_old "young buffer owner on the old list"
+for sel in positive scribble tail_retained; do
+  ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$HC" "$sel" > "$TMP_DIR/hc_$sel.out" 2> "$TMP_DIR/hc_$sel.err" || {
+    echo "  holes_check '$sel' failed:" >&2
+    cat "$TMP_DIR/hc_$sel.out" "$TMP_DIR/hc_$sel.err" >&2
+    exit 1
+  }
+  test "$(cat "$TMP_DIR/hc_$sel.out")" = "holes-check-$sel"
+done
+
 echo "==> c runtime: promotion age, the remembered rule and the nursery rule, and GENCHECK aborts on an unremembered old->young edge"
 # promote_age.c includes sprout_runtime.c (like young_sweep.c). The corrupting cases, the retired
 # switches and the bad share values must abort with their message: a check that tests nothing
@@ -638,7 +676,7 @@ SHARE_MSG="SPROUT_GC_NURSERY_SHARE: expected a number in (0, 4]"
 expect_abort bad_share_abc "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE abc
 expect_abort bad_share_0 "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE 0
 expect_abort bad_share_5 "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE 5
-for sel in age2 age3 age_large major_age remember set_before_major major_rule defaults nursery_sizing nursery_share_half nursery_small_heap nursery_min_binds nursery_pinned nursery_floor_before_major nursery_floor_binds nursery_survive nursery_survive_major nursery_survive_off minors_off share_read share_ignored_minors_off census_age; do
+for sel in age2 age3 age_large major_age remember set_before_major major_rule defaults nursery_sizing nursery_share_half nursery_small_heap nursery_min_binds nursery_pinned nursery_floor_before_major nursery_floor_binds nursery_survive nursery_survive_major nursery_survive_off minors_off share_read share_ignored_minors_off census_age holes_age2 holes_age3 holes_age_large holes_remember holes_remember_old_child; do
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$PA" "$sel" > "$TMP_DIR/pa_$sel.out" 2> "$TMP_DIR/pa_$sel.err" || {
     echo "  promote_age '$sel' failed:" >&2
     cat "$TMP_DIR/pa_$sel.out" "$TMP_DIR/pa_$sel.err" >&2
