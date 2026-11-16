@@ -1274,6 +1274,7 @@ typedef struct {
 #if defined(SPROUT_GC_ALLOCTRACE)
   uint64_t* tr_ids;       /* trace id per slot granule, indexed like slotmap (NULL if large) */
   uint64_t  tr_large_id;  /* trace id of a large region's one object */
+  uint64_t  tr_seq;       /* 1-based order an ordinary region was opened in; 0 for a large one */
 #endif
 } SproutRegion;
 
@@ -1546,6 +1547,14 @@ static void arena_recount_regions(void) {
 /* Hint index of a normal region with bump room; validated before use and
  * refreshed on miss — table inserts/removals may shift it. */
 static size_t        g_open_region_hint = 0;
+/* The index shifts with every table insert and removal, large regions included, so the region it
+ * names changes without the hint being written.  The trace records that (H, sprout_at_hint_sync). */
+#if defined(SPROUT_GC_ALLOCTRACE)
+static void sprout_at_hint_sync(void);
+#define SPROUT_AT_HINT_SYNC() sprout_at_hint_sync()
+#else
+#define SPROUT_AT_HINT_SYNC() ((void)0)
+#endif
 
 /* Class freelist: index = slot_bytes/16 (class 1..256 for <= 4096-byte slots).
  * Free slot's header word = {kind=SPROUT_HEAP_FREE, aux=slot_bytes}.
@@ -1879,6 +1888,7 @@ static void region_table_insert(SproutRegion r) {
       g_heap_span = cur_hi - g_heap_lo;
     }
   }
+  SPROUT_AT_HINT_SYNC();
 }
 
 /* Remove region at index i; region's base/slotmap already freed by caller. */
@@ -1896,10 +1906,12 @@ static void region_table_remove(size_t i) {
     hole_cursor_remove(&g_hole_cur, i);
     hole_cursor_remove(&g_hole_ovf, i);
   }
+  SPROUT_AT_HINT_SYNC();
 }
 
 #if defined(SPROUT_GC_ALLOCTRACE)
 static int sprout_at_on(void);
+static uint64_t g_at_region_seq;   /* ordinary regions opened so far */
 #endif
 
 /* Open a fresh 1-MiB region and append it to the table. */
@@ -1961,6 +1973,7 @@ static SproutRegion* open_new_region(void) {
   r.tailvf = NULL;
 #if defined(SPROUT_GC_ALLOCTRACE)
   r.tr_ids = tr_ids;
+  r.tr_seq = ++g_at_region_seq;
 #endif
   region_table_insert(r);
   /* Binary search for the entry we just inserted (table may have realloc'd). */
@@ -1971,6 +1984,7 @@ static SproutRegion* open_new_region(void) {
     else hi = mid;
   }
   g_open_region_hint = lo;
+  SPROUT_AT_HINT_SYNC();
   return &g_regions[lo];
 }
 
@@ -2344,6 +2358,17 @@ static void sprout_at_vec_out(void* payload) {
   sprout_at_emit('B', &id, 1);
 }
 
+/* The region g_open_region_hint names now (its tr_seq; 0 for none or a large region), written
+ * when it differs from the last one written. */
+static uint64_t g_at_hint_sent;
+static void sprout_at_hint_sync(void) {
+  if (!sprout_at_on()) return;
+  uint64_t seq = g_open_region_hint < g_region_count ? g_regions[g_open_region_hint].tr_seq : 0;
+  if (seq == g_at_hint_sent) return;
+  g_at_hint_sent = seq;
+  sprout_at_emit('H', &seq, 1);
+}
+
 static void sprout_at_gc_start(long long cycle) {
   if (!sprout_at_on()) return;
   uint64_t c = (uint64_t)cycle;
@@ -2404,6 +2429,7 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
 #if defined(SPROUT_GC_ALLOCTRACE)
     r.tr_ids = NULL;
     r.tr_large_id = tr_id;
+    r.tr_seq = 0;
 #endif
     region_table_insert(r);
     g_managed_heap_count++;
@@ -2454,6 +2480,7 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
         if (!cand->is_large && cand->bump + needed_slot <= cand->cap) {
           r = cand;
           g_open_region_hint = i - 1;
+          SPROUT_AT_HINT_SYNC();
           break;
         }
       }
