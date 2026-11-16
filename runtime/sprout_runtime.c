@@ -1011,8 +1011,15 @@ static int sprout_fl_verify_on(void);
 /* The maps replace the free lists, so the per-region lists are out.  SPROUT_FL_VERIFY,
  * SPROUT_GC_HDRCHECK and SPROUT_GC_LINEAGE have forms of their own under HOLES. */
 static void sprout_gc_holes_check_modes(void) {
-  const char* v = getenv("SPROUT_GC_REGION_LISTS");
-  if (v != NULL && v[0] == '1') sprout_gc_holes_refuse("SPROUT_GC_REGION_LISTS");
+  if (g_gen.region_lists) sprout_gc_holes_refuse("SPROUT_GC_REGION_LISTS");
+}
+
+/* A 0-or-1 switch: unset or empty is 0, and anything but `0` or `1` fails with `message`. */
+static int sprout_gc_env_01(const char* name, const char* message) {
+  const char* v = getenv(name);
+  if (v == NULL || v[0] == '\0') return 0;
+  if ((v[0] != '0' && v[0] != '1') || v[1] != '\0') sprout_fail(message);
+  return v[0] - '0';
 }
 
 static void sprout_gc_gen_init(void) {
@@ -1027,18 +1034,8 @@ static void sprout_gc_gen_init(void) {
   if (m == NULL || m[0] == '\0' || strcmp(m, "1") == 0) g_gen.on = 1;
   else if (strcmp(m, "0") == 0) g_gen.on = 0;
   else sprout_fail("SPROUT_GC_MINOR: expected 0 or 1");
-  const char* rl = getenv("SPROUT_GC_REGION_LISTS");
-  if (rl != NULL && rl[0] != '\0') {
-    if ((rl[0] != '0' && rl[0] != '1') || rl[1] != '\0')
-      sprout_fail("SPROUT_GC_REGION_LISTS: expected 0 or 1");
-    g_gen.region_lists = rl[0] - '0';
-  }
-  const char* hl = getenv("SPROUT_GC_HOLES");
-  if (hl != NULL && hl[0] != '\0') {
-    if ((hl[0] != '0' && hl[0] != '1') || hl[1] != '\0')
-      sprout_fail("SPROUT_GC_HOLES: expected 0 or 1");
-    g_gen.holes = hl[0] - '0';
-  }
+  g_gen.region_lists = sprout_gc_env_01("SPROUT_GC_REGION_LISTS", "SPROUT_GC_REGION_LISTS: expected 0 or 1");
+  g_gen.holes = sprout_gc_env_01("SPROUT_GC_HOLES", "SPROUT_GC_HOLES: expected 0 or 1");
   if (g_gen.holes) {
     sprout_gc_holes_check_modes();
     g_holes_verify = sprout_fl_verify_on();
@@ -1302,28 +1299,37 @@ static inline void slotmap_set_word(SproutRegion* r, size_t w, uint64_t v) {
 static inline int bitmap_test(const uint64_t* m, size_t i) {
   return (int)((m[i / 64] >> (i % 64)) & 1);
 }
-/* Set or clear `n` bits from bit `start`; an object's extent is at most 256 granules. */
-static inline void bitmap_set_range(uint64_t* m, size_t start, size_t n) {
+/* Set (`set` = 1) or clear `n` bits from bit `start`; an object's extent is at most 256 granules. */
+static inline void bitmap_range(uint64_t* m, size_t start, size_t n, int set) {
   size_t w = start / 64, b = start % 64;
+  const uint64_t all = ~(uint64_t)0;
   if (b + n <= 64) {
-    m[w] |= (n == 64 ? ~(uint64_t)0 : (((uint64_t)1 << n) - 1)) << b;
+    const uint64_t mask = (n == 64 ? all : (((uint64_t)1 << n) - 1)) << b;
+    if (set) m[w] |= mask; else m[w] &= ~mask;
     return;
   }
-  m[w++] |= ~(uint64_t)0 << b;
+  const uint64_t first = all << b;
+  if (set) m[w++] |= first; else m[w++] &= ~first;
   n -= 64 - b;
-  for (; n >= 64; n -= 64) m[w++] = ~(uint64_t)0;
-  if (n > 0) m[w] |= ((uint64_t)1 << n) - 1;
+  for (; n >= 64; n -= 64) m[w++] = set ? all : 0;
+  if (n > 0) {
+    const uint64_t last = ((uint64_t)1 << n) - 1;
+    if (set) m[w] |= last; else m[w] &= ~last;
+  }
 }
-static inline void bitmap_clear_range(uint64_t* m, size_t start, size_t n) {
-  size_t w = start / 64, b = start % 64;
-  if (b + n <= 64) {
-    m[w] &= ~((n == 64 ? ~(uint64_t)0 : (((uint64_t)1 << n) - 1)) << b);
-    return;
-  }
-  m[w++] &= ~(~(uint64_t)0 << b);
-  n -= 64 - b;
-  for (; n >= 64; n -= 64) m[w++] = 0;
-  if (n > 0) m[w] &= ~(((uint64_t)1 << n) - 1);
+static inline void bitmap_set_range(uint64_t* m, size_t start, size_t n) { bitmap_range(m, start, n, 1); }
+static inline void bitmap_clear_range(uint64_t* m, size_t start, size_t n) { bitmap_range(m, start, n, 0); }
+
+/* The granule index of byte `p` of region `r`, and of the slot whose payload is `payload`. */
+static inline size_t region_gran(const SproutRegion* r, const void* p) {
+  return (size_t)((const char*)p - r->base) / SPROUT_SLOT_GRAN;
+}
+static inline size_t region_payload_gran(const SproutRegion* r, const void* payload) {
+  return region_gran(r, (const char*)payload - 8);
+}
+/* The 64-bit words of an occupancy map that cover the granules below r's bump. */
+static inline size_t region_bump_words(const SproutRegion* r) {
+  return (r->bump / SPROUT_SLOT_GRAN + 63) / 64;
 }
 
 static SproutRegion* g_regions = NULL;  /* sorted by base address */
@@ -1792,7 +1798,7 @@ static void sprout_holes_verify_listing(SproutRegion* r, const char* tail, size_
     r->tailvf = (uint64_t*)calloc(SPROUT_SLOTMAP_BYTES, 1);
     if (r->tailvf == NULL) sprout_fail("SPROUT_FL_VERIFY: out of memory");
   }
-  const size_t idx = (size_t)(tail - r->base) / SPROUT_SLOT_GRAN;
+  const size_t idx = region_gran(r, tail);
   if (bitmap_test(r->tailvf, idx)) sprout_holes_verify_fail("tail listed twice", r, idx, n);
   for (size_t g = idx; g < idx + n; g++) {
     if (!bitmap_test(r->occ, g)) sprout_holes_verify_fail("listed tail is not in occ", r, g, n);
@@ -1803,7 +1809,7 @@ static void sprout_holes_verify_listing(SproutRegion* r, const char* tail, size_
 }
 
 static void sprout_holes_verify_take_tail(SproutRegion* r, const char* tail, size_t n) {
-  const size_t idx = (size_t)(tail - r->base) / SPROUT_SLOT_GRAN;
+  const size_t idx = region_gran(r, tail);
   if (r->tailvf == NULL || !bitmap_test(r->tailvf, idx))
     sprout_holes_verify_fail("tail taken but not listed", r, idx, n);
   bitmap_clear_range(r->tailvf, idx, 1);
@@ -2081,29 +2087,20 @@ static inline SproutRegion* region_find(void* p) {
 #define SPROUT_OCC_WORDS (SPROUT_SLOTMAP_BYTES / 8)
 #define SPROUT_OCC_NONE  SPROUT_SLOTS_PER_REGION
 
-/* The first clear bit of `m` at or after bit g. */
-static inline size_t occ_next_clear(const uint64_t* m, size_t g) {
+/* The first bit of `m` at or after bit g that is set, or clear when `flip` is all ones; a run that
+ * reaches the region's end ends there. */
+static inline size_t occ_next(const uint64_t* m, size_t g, uint64_t flip) {
   size_t w = g / 64;
   if (w >= SPROUT_OCC_WORDS) return SPROUT_OCC_NONE;
-  uint64_t v = ~m[w] & (~(uint64_t)0 << (g % 64));
+  uint64_t v = (m[w] ^ flip) & (~(uint64_t)0 << (g % 64));
   while (v == 0) {
     if (++w == SPROUT_OCC_WORDS) return SPROUT_OCC_NONE;
-    v = ~m[w];
+    v = m[w] ^ flip;
   }
   return w * 64 + (size_t)__builtin_ctzll(v);
 }
-
-/* The first set bit of `m` at or after bit g; a run that reaches the region's end ends there. */
-static inline size_t occ_next_set(const uint64_t* m, size_t g) {
-  size_t w = g / 64;
-  if (w >= SPROUT_OCC_WORDS) return SPROUT_OCC_NONE;
-  uint64_t v = m[w] & (~(uint64_t)0 << (g % 64));
-  while (v == 0) {
-    if (++w == SPROUT_OCC_WORDS) return SPROUT_OCC_NONE;
-    v = m[w];
-  }
-  return w * 64 + (size_t)__builtin_ctzll(v);
-}
+static inline size_t occ_next_clear(const uint64_t* m, size_t g) { return occ_next(m, g, ~(uint64_t)0); }
+static inline size_t occ_next_set(const uint64_t* m, size_t g) { return occ_next(m, g, 0); }
 
 /* Are the n bits from bit g clear, all in one word?  The common case: g is where the last request
  * ended.  0 means "not known to be", and the caller scans. */
@@ -2511,6 +2508,15 @@ static void sprout_holes_note_buffer(void* payload) {
                  "GC: out of memory for the buffer list");
 }
 
+/* A vector has just got its malloc'd element buffer: list it for the HOLES sweep and, under
+ * ALLOCTRACE, emit its `B` record.  Called once per acquisition, after ->data is set. */
+static void sprout_vec_buffer_acquired(void* v) {
+  sprout_holes_note_buffer(v);
+#if defined(SPROUT_GC_ALLOCTRACE)
+  sprout_at_vec_out(v);
+#endif
+}
+
 /* Allocate a GC-managed CSTR block with an inline 8-byte header at (payload-8).
  * Header aux = byte length (excluding NUL terminator).
  * The slot is already arena-registered by sprout_gc_alloc_block; the caller
@@ -2537,9 +2543,12 @@ static SproutStr sprout_str_adopt(char* buf, size_t len, const char* ctx) {
 
 /* lldb anchors for scripts/gc_free_trace.py (`just gc-trace`): empty noinline
  * functions fired per alloc/free ONLY under stress or lineage mode, so the
- * tracer has stable symbols to break on with the payload as the argument. */
+ * tracer has stable symbols to break on with the payload as the argument.  A test that defines
+ * SPROUT_GC_TRACE_HOOKS_EXTERNAL supplies the two functions and records the calls. */
+#ifndef SPROUT_GC_TRACE_HOOKS_EXTERNAL
 __attribute__((noinline, used)) void sprout_gc_trace_alloc(void* payload) { (void)payload; }
 __attribute__((noinline, used)) void sprout_gc_trace_free(void* payload) { (void)payload; }
+#endif
 
 static int g_gc_stress = -1;
 static void sprout_gc_maybe_collect_threshold(void) {
@@ -3043,10 +3052,7 @@ static VectorVal* sprout_alloc_vector_sized(size_t count, const char* ctx) {
   else if (inline_count == count) out->data = vec_inline_data(out);
   else {
     out->data = sprout_alloc_vector_data(count, ctx);
-    sprout_holes_note_buffer(out);
-#if defined(SPROUT_GC_ALLOCTRACE)
-    sprout_at_vec_out(out);
-#endif
+    sprout_vec_buffer_acquired(out);
   }
   /* Counts ALLOCATIONS, not vectors: one for an inline vector, two for an
    * out-of-line one (the second in sprout_alloc_vector_data).  It was 2 for
@@ -3080,14 +3086,19 @@ static long long* sprout_realloc_vector_data(long long* data, size_t count, cons
 
 /* Hand the inline area back to the arena when a vector's elements move out of
  * line.  That area is exactly the tail of the slot, so dropping aux to 0 shrinks
- * the live slot to the 32 bytes the value needs and the remainder becomes a slot
+ * the live slot to the 32 bytes the value needs.  Left in place the tail would
+ * be dead for the object's lifetime — 4064 bytes of it for `mutvec_new(508, v)`
+ * followed by a push.
+ *
+ * Under SPROUT_GC_HOLES the tail gets no header or slotmap bit: it leaves
+ * `oldocc`, joins the list of its exact class (sprout_holes_push_tail) and stays
+ * in `occ` until the next sweep drops it.  Otherwise the remainder becomes a slot
  * of its own: a FREE header carrying its byte size in aux, with its slotmap bit
  * set.  That is what the sweep leaves behind for any dead slot, so nothing new
- * has to understand it.  Left in place the tail would be dead for the object's
- * lifetime — 4064 bytes of it for `mutvec_new(508, v)` followed by a push.
+ * has to understand it.
  *
- * The tail goes straight onto the live lists (fl_push_live, or its region's under
- * SPROUT_GC_REGION_LISTS, which lowers the class cursor to it).  The full sweep
+ * Without HOLES the tail goes straight onto the live lists (fl_push_live, or its
+ * region's under SPROUT_GC_REGION_LISTS, which lowers the class cursor to it).  The full sweep
  * memsets and rebuilds the lists, which re-lists it from the walk; a young-only
  * minor keeps them, so this push is the only one the tail gets.  Its youngmap
  * bit stays clear, so no minor frees it.  It must NOT go through fl_push_staged:
@@ -3125,11 +3136,16 @@ static void sprout_vec_release_inline_tail(VectorVal* v) {
 #if defined(SPROUT_GC_ALLOCTRACE)
   sprout_at_tail(v, rest);
 #endif
+  /* The lineage anchor every other freelist push has (the sweep calls it just
+   * before listing the slot).  Without it `just gc-trace` shows the next object
+   * allocated here as a first allocation, hiding that it aliases a vector's
+   * old inline area — the aliasing that tool exists to find. */
+  if (g_gc_stress == 1 || sprout_gc_lineage_on()) sprout_gc_trace_free(tail + 8);
   if (g_gen.holes) {
     /* The tail gets no header or slotmap bit; it leaves `oldocc` and joins the list of its exact
        class.  It stays in `occ` until the next sweep: a clear bit would let a cursor that has not
        reached it hand it out a second time. */
-    size_t tail_idx = (size_t)(tail - r->base) / SPROUT_SLOT_GRAN;
+    size_t tail_idx = region_gran(r, tail);
     bitmap_clear_range(r->oldocc, tail_idx, rest / SPROUT_SLOT_GRAN);
     r->tail_released = 1;   /* the next minor sweeps this region even with no young object in it */
     sprout_holes_push_tail(r, tail, rest / SPROUT_SLOT_GRAN);   /* 1..255: the slot was at most 4096 B */
@@ -3137,13 +3153,8 @@ static void sprout_vec_release_inline_tail(VectorVal* v) {
   }
   uint64_t free_hdr = (uint64_t)SPROUT_HEAP_FREE | ((uint64_t)rest << 14);
   memcpy(tail, &free_hdr, 8);
-  slotmap_set(r, (size_t)(tail - r->base) / SPROUT_SLOT_GRAN);
+  slotmap_set(r, region_gran(r, tail));
   void* payload = tail + 8;
-  /* The lineage anchor every other freelist push has (the sweep calls it just
-   * before listing the slot).  Without it `just gc-trace` shows the next object
-   * allocated here as a first allocation, hiding that it aliases a vector's
-   * old inline area — the aliasing that tool exists to find. */
-  if (g_gc_stress == 1 || sprout_gc_lineage_on()) sprout_gc_trace_free(payload);
   if (g_gen.region_lists) fl_rpush_at(r, (size_t)(r - g_regions), rest / SPROUT_SLOT_GRAN, payload);
   else                    fl_push_live(rest / SPROUT_SLOT_GRAN, payload);
 }
@@ -3393,7 +3404,7 @@ static void gc_mark_enqueue_holes(void* payload, SproutRegion* r) {
     if (r->large_marked) return;
     r->large_marked = 1;
   } else {
-    idx = (size_t)((char*)hdr_ptr - r->base) / SPROUT_SLOT_GRAN;
+    idx = region_gran(r, hdr_ptr);
     if (bitmap_test(r->markocc, idx)) return;
     const SproutHeapKind kind = sprout_hdr_kind(h);
     if (kind == (SproutHeapKind)SPROUT_GC_POISON) return;   /* a lineage corpse a dangling word reaches */
@@ -4556,6 +4567,28 @@ static void sprout_gc_check_hdr_fail(const char* what, const SproutRegion* r, si
   abort();
 }
 
+/* The end of a young-only sweep and of the HOLES sweep: remove each large region the sweep freed
+ * (its base is NULL) and release each ordinary region it marked `emptied`, walking the table from
+ * the top so a removal does not shift an index still to come.  Pass 2's rule: when every ordinary
+ * region was emptied, open one, since the bump path needs it. */
+static void sprout_sweep_release_regions(int freed_large, int emptied_any) {
+  if (!freed_large && !emptied_any) return;
+  int kept_normal = 0;
+  size_t ri = g_region_count;
+  while (ri > 0) {
+    ri--;
+    SproutRegion* r = &g_regions[ri];
+    if (r->is_large) {
+      if (r->base == NULL) region_table_remove(ri);
+    } else if (r->emptied) {
+      region_release_ordinary(ri);
+    } else {
+      kept_normal++;
+    }
+  }
+  if (emptied_any && kept_normal == 0) open_new_region();
+}
+
 static void sprout_gc_sweep_young(void) {
   int lineage_on = sprout_gc_lineage_on();
   int hdrcheck_on = sprout_gc_hdrcheck_on();
@@ -4644,24 +4677,7 @@ static void sprout_gc_sweep_young(void) {
     }
   }
   g_gen.old_count += promoted;
-
-  if (freed_large || emptied_any) {
-    int kept_normal = 0;
-    size_t ri = g_region_count;
-    while (ri > 0) {
-      ri--;
-      SproutRegion* r = &g_regions[ri];
-      if (r->is_large) {
-        if (r->base == NULL) region_table_remove(ri);
-      } else if (r->emptied) {
-        region_release_ordinary(ri);
-      } else {
-        kept_normal++;
-      }
-    }
-    /* Pass 2's rule: the bump path needs an ordinary region. */
-    if (emptied_any && kept_normal == 0) open_new_region();
-  }
+  sprout_sweep_release_regions(freed_large, emptied_any);
   fl_cursors_reset();
   sprout_fl_verify_against_full_walk();
 }
@@ -4686,7 +4702,7 @@ static void sprout_holes_sweep_singletons(void) {
     if (s == NULL) continue;
     SproutRegion* r = region_find(s);
     if (r == NULL || r->is_large) continue;
-    size_t idx = (size_t)((char*)s - 8 - r->base) / SPROUT_SLOT_GRAN;
+    size_t idx = region_payload_gran(r, s);
     if (!bitmap_test(r->markocc, idx) && !bitmap_test(r->oldocc, idx)) g_ctor_meta[i].singleton = NULL;
   }
 }
@@ -4698,7 +4714,7 @@ static void sprout_holes_sweep_buffers(SproutRegion* r, int major) {
   if (major) {
     for (size_t i = 0; i < r->buf_old.len; i++) {
       void* p = r->buf_old.items[i];
-      size_t idx = (size_t)((char*)p - 8 - r->base) / SPROUT_SLOT_GRAN;
+      size_t idx = region_payload_gran(r, p);
       if (bitmap_test(r->markocc, idx)) r->buf_old.items[kept++] = p;
       else sprout_release_payload_extras(p, sprout_hdr_kind(sprout_hdr_of(p)));
     }
@@ -4707,7 +4723,7 @@ static void sprout_holes_sweep_buffers(SproutRegion* r, int major) {
   }
   for (size_t i = 0; i < r->buf_young.len; i++) {
     void* p = r->buf_young.items[i];
-    size_t idx = (size_t)((char*)p - 8 - r->base) / SPROUT_SLOT_GRAN;
+    size_t idx = region_payload_gran(r, p);
     if (!bitmap_test(r->markocc, idx)) sprout_release_payload_extras(p, sprout_hdr_kind(sprout_hdr_of(p)));
     else if (bitmap_test(r->oldocc, idx)) sprout_wl_push(&r->buf_old, p, "GC: out of memory for the buffer list");
     else r->buf_young.items[kept++] = p;
@@ -4721,7 +4737,7 @@ static void sprout_holes_sweep_buffers(SproutRegion* r, int major) {
  * `slotmap` and `before` count corpses, so the live counts take `poison_count` off. */
 static void sprout_holes_sweep_region(SproutRegion* r, int major) {
   sprout_holes_sweep_buffers(r, major);
-  const size_t nwords = (r->bump / SPROUT_SLOT_GRAN + 63) / 64;
+  const size_t nwords = region_bump_words(r);
   const int lineage = sprout_gc_lineage_on();
   const int trace = g_gc_stress == 1 || lineage;
 #if defined(SPROUT_GC_ALLOCTRACE)
@@ -4784,11 +4800,19 @@ static void sprout_holes_sweep_region(SproutRegion* r, int major) {
   g_debug_gc_walked += (long long)nwords;
 }
 
-/* The free count, in slots: granules below the bump marks that `occ` does not cover, over the
- * mean live slot size in granules (occ's total over the live objects), so the footprint floor and
- * `just gc-trigger-check` keep a slot-sized unit.  Also the old count the next minor reads.
- * The count is taken at the sweep and not updated by allocation: a hole behind a cursor, which
- * nothing reaches before the next collection, is still counted free. */
+/* The free count, in slots: granules below the bump marks that `occ` does not cover (`bumped` less
+ * `occupied`), over the mean live slot size in granules (`occupied` over `live`), so the footprint
+ * floor and `just gc-trigger-check` keep a slot-sized unit. */
+static long long sprout_holes_free_slots(long long bumped, long long occupied, long long live) {
+  double mean = live > 0 ? (double)occupied / (double)live : 1.0;
+  if (mean < 1.0) mean = 1.0;
+  const long long free_granules = bumped > occupied ? bumped - occupied : 0;
+  return (long long)((double)free_granules / mean);
+}
+
+/* Sets the free count and the old count the next minor reads.  The free count is taken at the
+ * sweep and not updated by allocation: a hole behind a cursor, which nothing reaches before the
+ * next collection, is still counted free. */
 static void sprout_holes_recount(void) {
   long long bumped = 0, occupied = 0, live = 0, old = 0;
   for (size_t ri = 0; ri < g_region_count; ri++) {
@@ -4800,10 +4824,7 @@ static void sprout_holes_recount(void) {
     live += r->live_count;
   }
   g_gen.old_count = old;
-  double mean = live > 0 ? (double)occupied / (double)live : 1.0;
-  if (mean < 1.0) mean = 1.0;
-  long long free_granules = bumped > occupied ? bumped - occupied : 0;
-  g_gc_freelist_len = (long long)((double)free_granules / mean);
+  g_gc_freelist_len = sprout_holes_free_slots(bumped, occupied, live);
 }
 
 static void sprout_holes_sweep(void) {
@@ -4824,7 +4845,7 @@ static void sprout_holes_sweep(void) {
         r->old_count = old;
         r->young_count = g_gen.on && !old;
       } else {
-        sprout_gc_free_large(r, h, 0);
+        sprout_gc_free_large(r, h, sprout_gc_lineage_on());
         r->old_count = r->young_count = 0;
         freed_large = 1;
       }
@@ -4836,22 +4857,7 @@ static void sprout_holes_sweep(void) {
       emptied_any = 1;
     }
   }
-  if (freed_large || emptied_any) {
-    int kept_normal = 0;
-    size_t ri = g_region_count;
-    while (ri > 0) {
-      ri--;
-      SproutRegion* r = &g_regions[ri];
-      if (r->is_large) {
-        if (r->base == NULL) region_table_remove(ri);
-      } else if (r->emptied) {
-        region_release_ordinary(ri);
-      } else {
-        kept_normal++;
-      }
-    }
-    if (emptied_any && kept_normal == 0) open_new_region();
-  }
+  sprout_sweep_release_regions(freed_large, emptied_any);
   sprout_holes_recount();
   g_hole_cur = (SproutHoleCursor){ 0, 0 };
   g_hole_ovf = (SproutHoleCursor){ 0, 0 };
@@ -4893,7 +4899,7 @@ static void sprout_holes_check_no_bit13(void) {
       if (h & SPROUT_GC_REMEMBERED_BIT) sprout_gc_check_hdr_fail("remembered bit set before a major", r, 0, h);
       continue;
     }
-    const size_t nwords = (r->bump / SPROUT_SLOT_GRAN + 63) / 64;
+    const size_t nwords = region_bump_words(r);
     for (size_t w = 0; w < nwords; w++) {
       for (uint64_t bits = slotmap_word(r, w); bits != 0; bits &= bits - 1) {
         size_t off = (w * 64 + (size_t)__builtin_ctzll(bits)) * SPROUT_SLOT_GRAN;
@@ -4907,7 +4913,7 @@ static void sprout_holes_check_no_bit13(void) {
 /* A major's `oldocc` starts empty, so each lineage corpse's extent goes back before the mark and
  * the sweep's `live` keeps it, as it does through a minor.  Walks `slotmap` starts. */
 static void sprout_holes_readd_corpses(SproutRegion* r) {
-  const size_t nwords = (r->bump / SPROUT_SLOT_GRAN + 63) / 64;
+  const size_t nwords = region_bump_words(r);
   for (size_t w = 0; w < nwords; w++) {
     for (uint64_t bits = slotmap_word(r, w); bits != 0; bits &= bits - 1) {
       const size_t gran = w * 64 + (size_t)__builtin_ctzll(bits);
@@ -5008,8 +5014,8 @@ static void sprout_gc_check_old_edges(void* payload, uint64_t h) {
  *     young one (premise 3, after any sweep: colour persists);
  *   - every object that owns malloc'd data is on exactly one list of its region, the young list
  *     iff its colour is clear, and every entry is such an object.
- * Then the heap count, the old count, the free count (the formula of sprout_holes_recount, on the
- * walk's own numbers) and the remembered set's length against bit 13. */
+ * Then the heap count, the old count, the free count (sprout_holes_free_slots, on the walk's own
+ * numbers) and the remembered set's length against bit 13. */
 __attribute__((noreturn, cold, noinline))
 static void sprout_gc_check_map_fail(const char* what, const SproutRegion* r, size_t word, uint64_t bits) {
   fprintf(stderr, "[sprout] GENCHECK: %s (region=%p word=%zu bits=0x%016llx)\n",
@@ -5166,10 +5172,7 @@ static void sprout_gc_check_sweep_holes(void) {
   if (g_managed_heap_count != t.live + t.large)
     sprout_gc_check_count_fail("heap count", NULL, g_managed_heap_count, t.live + t.large);
   if (g_gen.old_count != t.old) sprout_gc_check_count_fail("old count after the sweep", NULL, g_gen.old_count, t.old);
-  double mean = t.live > 0 ? (double)t.occupied / (double)t.live : 1.0;
-  if (mean < 1.0) mean = 1.0;
-  const long long free_granules = t.bumped > t.occupied ? t.bumped - t.occupied : 0;
-  const long long free_slots = (long long)((double)free_granules / mean);
+  const long long free_slots = sprout_holes_free_slots(t.bumped, t.occupied, t.live);
   if (g_gc_freelist_len != free_slots) sprout_gc_check_count_fail("free count", NULL, g_gc_freelist_len, free_slots);
 }
 
@@ -11546,10 +11549,10 @@ long long vector_mutset(long long vec, long long index, long long value) {
  *
  * Growth out of an INLINE buffer must copy, not realloc: that memory is part of
  * the VectorVal's own slot and was never handed out by malloc.  The vacated area
- * is then handed back to the arena as a FREE slot of its own
- * (sprout_vec_release_inline_tail); left in place it would be dead for the
- * object's lifetime, up to 4064 bytes of it for a vector born at the inline
- * ceiling.  `mutvec_new(n, v)` reaches this path: it fills through
+ * is then handed back to the arena (sprout_vec_release_inline_tail: a FREE slot
+ * of its own, or under SPROUT_GC_HOLES an exact-class tail list entry); left in
+ * place it would be dead for the object's lifetime, up to 4064 bytes of it for
+ * a vector born at the inline ceiling.  `mutvec_new(n, v)` reaches this path: it fills through
  * vec_make_filled, so it IS inline for any n <= SPROUT_VEC_INLINE_MAX, and only
  * `mutvec_empty` starts at capacity 0. */
 long long vector_push(long long vec, long long value) {
@@ -11565,27 +11568,20 @@ long long vector_push(long long vec, long long value) {
       long long* moved = sprout_alloc_vector_data((size_t)new_cap, "vector_push: out of memory");
       if (v->len > 0) memcpy(moved, v->data, (size_t)v->len * sizeof(long long));
       v->data = moved;
-      sprout_holes_note_buffer(v);
-#if defined(SPROUT_GC_ALLOCTRACE)
-      sprout_at_vec_out(v);
-#endif
+      sprout_vec_buffer_acquired(v);
       /* Not zeroed, unlike vector_truncate's vacated slots, and the difference
        * is which object owns them.  Truncate's stay inside a LIVE vector as
        * spare capacity, where a future scanner sizing by ->cap would read them;
-       * these leave the object entirely and become a FREE slot's payload, which
-       * every sweep in the heap already leaves dirty — the sweep steps over a
-       * FREE slot by its header and sprout_heap_lookup rejects it by kind.
-       * Zeroing here would buy nothing the rest of the heap does not already
-       * decline to buy. */
+       * these leave the object entirely and become the tail's payload, which
+       * every sweep in the heap already leaves dirty: a FREE slot is stepped over
+       * by its header and rejected by sprout_heap_lookup by kind, and under
+       * SPROUT_GC_HOLES a hole is never visited.  Zeroing here would buy nothing
+       * the rest of the heap does not already decline to buy. */
       sprout_vec_release_inline_tail(v);
     } else {
-#if defined(SPROUT_GC_ALLOCTRACE)
-      /* The realloc cannot collect and the hook reads only v's slot id, so the order is free. */
-      if (v->data == NULL) sprout_at_vec_out(v);
-#endif
-      const int first_buffer = v->data == NULL;
-      v->data = sprout_realloc_vector_data(v->data, (size_t)new_cap, "vector_push: out of memory");
-      if (first_buffer) sprout_holes_note_buffer(v);
+      long long* prev = v->data;
+      v->data = sprout_realloc_vector_data(prev, (size_t)new_cap, "vector_push: out of memory");
+      if (prev == NULL) sprout_vec_buffer_acquired(v);
     }
     v->cap = new_cap;
   }

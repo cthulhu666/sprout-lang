@@ -509,7 +509,8 @@ fx_write() { mkdir -p "$FX/$(dirname "$1")"; echo "$2" > "$FX/$1"; }
 for p in bootstrap/compile_driver.ll runtime/a.c stdlib/a.sprout scripts/check_clang_cpr.sh \
     scripts/link_whole_program.sh scripts/compile_native.sh testsupport/a.sprout tests/stdlib/test_ir_codegen_match.spr \
     examples/nqueens.sprout examples/astar.sprout examples/digit_recognizer/a.txt \
-    bench/gc_roots/a bench/http_log_middleware/a bench/math_transcendental/a; do
+    bench/gc_roots/a bench/http_log_middleware/a bench/math_transcendental/a \
+    bench/gc_trigger/a bench/gc_place/a; do
   fx_write "$p" x
 done
 fx_write bench/gc_minor/summarize.py 'print("summary")'
