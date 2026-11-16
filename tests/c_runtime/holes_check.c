@@ -12,11 +12,18 @@
  *                    the next minor must drop the tail from `occ`.
  *   *_verify, *_hdrcheck — the positive and scribble cases again with SPROUT_FL_VERIFY=1 or
  *                    SPROUT_GC_HDRCHECK=1: the verify and HDRCHECK walks hold on a real heap.
+ *   *_lineage      — the positive and scribble cases again with SPROUT_GC_LINEAGE=1, which keeps
+ *                    each dead OBJ as a POISON corpse in `slotmap` and `oldocc`.
+ *   lineage_corpses — dead young OBJs become corpses in a minor and stay through minors and
+ *                    majors; nothing is allocated over one, a marker that reaches one leaves it
+ *                    alone, and a region holding only corpses is kept.
  *   bad_*          — each corrupts one map, count or list after a clean collection and runs the
  *                    check, which must abort with its own message (the caller checks it).
  *   bad_fl_*       — the same under SPROUT_FL_VERIFY=1 (premise 12): the cursors, the tail lists
  *                    and each allocation's extent.  bad_hdr_* — under SPROUT_GC_HDRCHECK=1: a
  *                    header whose step does not land on a `slotmap` start or the run's end.
+ *   bad_corpse_*, bad_poison_* — under SPROUT_GC_LINEAGE=1 a corpse missing from `oldocc` or a
+ *                    wrong poison count; without lineage a POISON header at all.
  *
  * `k_cases` lists every case and the switch it sets; main sets the environment before
  * sprout_set_argv. */
@@ -58,9 +65,18 @@ static void extend_chain(long long n) {
   }
 }
 
-/* Strings of mixed classes, vectors with out-of-line buffers, bytes, builders and a large
- * object, none rooted. */
+/* n OBJs of one to five fields nothing roots (corpses under lineage). */
+static void garbage_objs(int n) {
+  for (int i = 0; i < n; i++) {
+    long long o = sprout_alloc_obj(7, 1 + i % 5);
+    for (int f = 0; f < 1 + i % 5; f++) ((long long*)P(o))[f] = 0;
+  }
+}
+
+/* Strings of mixed classes, vectors with out-of-line buffers, bytes, builders, a large
+ * object and OBJs, none rooted. */
 static void churn(int round) {
+  garbage_objs(100);
   for (int i = 0; i < 400; i++) make_str(1 + ((size_t)i * 7 + (size_t)round) % 200);
   for (int i = 0; i < 6; i++) {
     vec_make_filled(600 + i, 0);
@@ -143,6 +159,7 @@ static int scribble(void) {
     collect();
     scribble_holes();
     garbage_refs(400);                  /* allocates into part of the holes */
+    garbage_objs(200);
     for (int i = 0; i < 100; i++) make_str(1 + (size_t)i % 90);
     collect();
     scribble_holes();
@@ -297,6 +314,113 @@ static int bad_buf_young_on_old(void) {
   return bad_end("bad_buf_young_on_old");
 }
 
+/* ---- SPROUT_GC_LINEAGE under HOLES: a dead OBJ is kept as a corpse ---- */
+
+enum { N_CORPSE = 40000 };   /* 32-byte slots: more than one region, so one holds only corpses */
+static void* g_corpse[N_CORPSE];
+
+/* A corpse: POISON header with its slot size in aux, a `slotmap` start, in `oldocc` and `occ`,
+ * and never young.  Returns the number of corpses that fail, and the ones in a region with no
+ * live object through `*alone`. */
+static int corpses_bad(size_t n, size_t* alone) {
+  int bad = 0;
+  *alone = 0;
+  for (size_t i = 0; i < n; i++) {
+    void* p = g_corpse[i];
+    SproutRegion* r = region_find(p);
+    if (r == NULL || r->is_large) { bad++; continue; }
+    const size_t g = granule_of(p);
+    const uint64_t h = sprout_hdr_of(p);
+    if ((h & 0xFF) != SPROUT_GC_POISON || (h >> 14) != 32 || !slotmap_test(r, g) ||
+        !bitmap_test(r->oldocc, g) || !bitmap_test(r->occ, g) || youngmap_test(r, g)) bad++;
+    *alone += r->live_count == 0;
+  }
+  return bad;
+}
+
+static void check_corpses(size_t n, const char* when) {
+  size_t alone;
+  int bad = corpses_bad(n, &alone);
+  if (bad != 0) fprintf(stderr, "%s: %d of %zu corpses are not intact\n", when, bad, n);
+  check(bad == 0, when);
+  check(alone > 0, "some corpse sits in a region with no live object");
+}
+
+static int lineage_corpses(void) {
+  register_roots();
+  extend_chain(2000);
+  age_to_old(W(g_chain), collect);
+  check(g_gen.n_major == 1, "the first collection is a major");
+  sprout_register_ctor(11, "main.Ember", 0, "");
+  void* ember = P(sprout_alloc_obj(11, 0));   /* a singleton nothing roots */
+  for (size_t i = 0; i < N_CORPSE; i++) {
+    long long o = sprout_alloc_obj(7, 2);
+    ((long long*)P(o))[0] = ((long long*)P(o))[1] = 0;
+    g_corpse[i] = P(o);
+  }
+  const long long before = g_managed_heap_count;
+  collect();
+  check(g_gen.n_minor >= 1, "the corpses were made by a minor");
+  check(find_ctor(11)->singleton == NULL, "a dead singleton is cleared from its cache");
+  check((sprout_hdr_of(ember) & 0xFF) == SPROUT_GC_POISON, "the dead singleton is a corpse");
+  check(g_managed_heap_count == before - N_CORPSE - 1, "the heap count excludes the corpses");
+  check(P(sprout_alloc_obj(11, 0)) != ember, "a new singleton is not the corpse");
+  check_corpses(N_CORPSE, "after the minor that killed them");
+  g_o[0] = g_corpse[5];                 /* a dangling root: the marker must leave the corpse alone */
+  const uint64_t h5 = sprout_hdr_of(g_corpse[5]);
+  const size_t regions = g_region_count;
+  for (int round = 0; round < 7; round++) {
+    for (int i = 0; i < 3000; i++) {    /* the same size class: allocation must not land on a corpse */
+      long long o = sprout_alloc_obj(8, 2);
+      ((long long*)P(o))[0] = ((long long*)P(o))[1] = 0;
+    }
+    garbage_refs(500);
+    if (round == 2 || round == 5) collect_major(); else collect();
+    check_corpses(N_CORPSE, "after a later collection");
+    check(sprout_hdr_of(g_corpse[5]) == h5, "a corpse a root reaches is not marked or aged");
+    check(g_region_count >= regions, "no region holding a corpse was released");
+  }
+  check(g_gen.n_major >= 3, "two more majors ran");
+  check(chain_length(g_chain) == 2000, "the old chain is intact");
+  return g_failed;
+}
+
+/* One corpse among old objects, made by a minor. */
+static void corpse_scene(void) {
+  register_roots();
+  extend_chain(200);
+  age_to_old(W(g_chain), collect);
+  long long o = sprout_alloc_obj(7, 2);
+  ((long long*)P(o))[0] = ((long long*)P(o))[1] = 0;
+  g_corpse[0] = P(o);
+  collect();
+  size_t alone;
+  check(corpses_bad(1, &alone) == 0, "the corpse is intact");
+}
+
+static int bad_corpse_not_in_oldocc(void) {
+  corpse_scene();
+  SproutRegion* r = region_find(g_corpse[0]);
+  const size_t g = granule_of(g_corpse[0]);
+  r->oldocc[g / 64] &= ~((uint64_t)1 << (g % 64));
+  return bad_end("bad_corpse_not_in_oldocc");
+}
+
+static int bad_corpse_count(void) {
+  corpse_scene();
+  region_find(g_corpse[0])->poison_count++;
+  return bad_end("bad_corpse_count");
+}
+
+/* No lineage: a POISON header on a live object. */
+static int bad_poison_no_lineage(void) {
+  scene();
+  uint64_t h = sprout_hdr_of(g_o[3]);
+  h = (h & ~(uint64_t)0xFF) | SPROUT_GC_POISON;
+  memcpy((char*)g_o[3] - 8, &h, 8);
+  return bad_end("bad_poison_no_lineage");
+}
+
 /* ---- SPROUT_FL_VERIFY under HOLES (premise 12) ---- */
 
 /* Release a real inline tail: an inline vector of 100 elements grows past its slot.  Returns the
@@ -431,6 +555,12 @@ static const HolesCase k_cases[] = {
   { "scribble_verify",        scribble, "SPROUT_FL_VERIFY" },
   { "scribble_hdrcheck",      scribble, "SPROUT_GC_HDRCHECK" },
   { "tail_retained",          tail_retained, NULL },
+  { "positive_lineage",       positive, "SPROUT_GC_LINEAGE" },
+  { "scribble_lineage",       scribble, "SPROUT_GC_LINEAGE" },
+  { "lineage_corpses",        lineage_corpses, "SPROUT_GC_LINEAGE" },
+  { "bad_corpse_not_in_oldocc", bad_corpse_not_in_oldocc, "SPROUT_GC_LINEAGE" },
+  { "bad_corpse_count",       bad_corpse_count, "SPROUT_GC_LINEAGE" },
+  { "bad_poison_no_lineage",  bad_poison_no_lineage, NULL },
   { "bad_slotmap_outside_occ", bad_slotmap_outside_occ, NULL },
   { "bad_youngmap_outside_occ", bad_youngmap_outside_occ, NULL },
   { "bad_extent_outside_occ", bad_extent_outside_occ, NULL },
@@ -467,13 +597,13 @@ int main(int argc, char** argv) {
   setenv("SPROUT_GC_MAJOR_EVERY", "1000", 1);
   unsetenv("SPROUT_GC_HDRCHECK");
   unsetenv("SPROUT_FL_VERIFY");
+  unsetenv("SPROUT_GC_LINEAGE");
   if (c->env != NULL && strcmp(c->env, "both") == 0) {
     setenv("SPROUT_FL_VERIFY", "1", 1);
     setenv("SPROUT_GC_HDRCHECK", "1", 1);
   } else if (c->env != NULL) {
     setenv(c->env, "1", 1);
   }
-  unsetenv("SPROUT_GC_LINEAGE");
   unsetenv("SPROUT_GC_STRESS");
   unsetenv("SPROUT_GC_AGEPROF");
   unsetenv("SPROUT_GC_REGION_LISTS");

@@ -4337,7 +4337,8 @@ gc-adapt-check: bootstrap-from-seed
 # collections. The default arm is the shipped default (K=3, s=1, c=2) under GENCHECK. Also run
 # with SPROUT_FL_VERIFY=1 and with SPROUT_GC_LINEAGE=1 (same flags, same output), and with the
 # mode off, where the output must be the same, and with SPROUT_GC_HOLES=1 (occupancy maps, minors
-# on under GENCHECK, SPROUT_FL_VERIFY=1 and HDRCHECK, and off; docs/gc-stage2-v0.md §5.7). The nursery share is not varied here: under STRESS
+# on under GENCHECK, SPROUT_FL_VERIFY=1 and HDRCHECK, with SPROUT_GC_LINEAGE=1, and off;
+# docs/gc-stage2-v0.md §5.7). The nursery share is not varied here: under STRESS
 # every allocation collects, and without it these programs run no minor at either share.
 # The two analysis helpers are static and need a live analysis service to reach from Sprout, so a C case covers
 # them (tests/c_runtime/analysis_strings.c).
@@ -4385,7 +4386,8 @@ gc-gen-check: bootstrap-from-seed
       || { echo "gc-gen-check: $name ran only $minors minor collections; the barrier was not exercised" >&2; failed=1; }
     # The young-only sweep keeps the free lists between minors: FL_VERIFY compares them with a
     # full walk after every collection, and lineage poisons dead OBJs instead of listing them.
-    for mode in SPROUT_FL_VERIFY=1 SPROUT_GC_LINEAGE=1; do
+    # Under HOLES a corpse is a `slotmap` start kept in `oldocc`, through majors too (§5.7).
+    for mode in SPROUT_FL_VERIFY=1 SPROUT_GC_LINEAGE=1 "SPROUT_GC_HOLES=1 SPROUT_GC_LINEAGE=1"; do
       # shellcheck disable=SC2086
       env $mode SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 \
         "$TMPD/$name.bin" > "$TMPD/$name.mode.out" 2>"$TMPD/$name.mode.err"

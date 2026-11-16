@@ -528,7 +528,8 @@ SPROUT_GC_STRESS=1 ./myprog
 payloads (tag → sentinel) and stashes the free backtrace in the corpse; the next
 read of a poisoned pointer aborts and dumps that backtrace — the alloc that
 triggered the fatal collection, i.e. the unrooted-live-across site. In-process,
-exact keying, no `lldb` needed. Build the runtime `-O1 -g` for readable frames.
+exact keying, no `lldb` needed. Build the runtime `-O1 -g` for readable frames. It also works
+under `SPROUT_GC_HOLES=1`, where a corpse is a `slotmap` start kept in `oldocc` through majors.
 This supersedes `just gc-trace`'s `lldb`-based free-trace below for most cases (its
 history-keying is unreliable); `just gc-trace` remains for cases `SPROUT_GC_LINEAGE`
 doesn't cover (it only poisons `SPROUT_HEAP_OBJ`; closures/vectors free via
