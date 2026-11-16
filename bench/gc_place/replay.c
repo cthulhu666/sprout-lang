@@ -21,6 +21,13 @@
  *                          At most once per id; only a VECTOR (kind 3).
  *   B id                   vector id now owns a malloc'd element buffer (it did not at its A, or
  *                          never had inline elements).  Bytes and builders own theirs from A.
+ *   H seq                  the open-region hint (the bump path's first candidate) now names the
+ *                          ordinary region opened seq-th (counting from 1), or no ordinary region
+ *                          when seq is 0 (a large region, or past the table).  The runtime keeps
+ *                          the hint as a table index, so it moves to another region whenever a
+ *                          region is inserted or removed below it, a large one included; H is
+ *                          written when that changes the region it names.  Optional: a trace
+ *                          without H is replayed with the hint following the bump path only.
  *   G cycle                a collection starts (cycle number, counting from 1).
  *   E cycle kind heap_after free_slots ordinary_regions large_regions walked
  *                          that collection ends.  kind: 0 minors off, 1 major, 2 minor with the
@@ -56,6 +63,7 @@ typedef struct {
   int (*free_)(void* ctx, uint64_t id);
   int (*tail)(void* ctx, uint64_t id, uint64_t rest_bytes);
   int (*vec_out)(void* ctx, uint64_t id);
+  int (*hint)(void* ctx, uint64_t seq);
   int (*gc_start)(void* ctx, uint64_t cycle);
   int (*gc_end)(void* ctx, uint64_t cycle, uint64_t kind, uint64_t heap_after, uint64_t free_slots,
                 uint64_t ordinary, uint64_t large, uint64_t walked);
@@ -109,7 +117,7 @@ static int decode(Reader* rd, const Handlers* h, void* ctx) {
     int n;
     switch (tag) {
       case 'A': n = 2; break;
-      case 'F': case 'B': case 'G': n = 1; break;
+      case 'F': case 'B': case 'G': case 'H': n = 1; break;
       case 'T': n = 2; break;
       case 'E': n = 7; break;
       default: return fail(rd, "unknown record tag 0x%02x", tag);
@@ -122,6 +130,7 @@ static int decode(Reader* rd, const Handlers* h, void* ctx) {
       case 'F': bad = h->free_(ctx, v[0]); break;
       case 'T': bad = h->tail(ctx, v[0], v[1]); break;
       case 'B': bad = h->vec_out(ctx, v[0]); break;
+      case 'H': bad = h->hint(ctx, v[0]); break;
       case 'G': bad = h->gc_start(ctx, v[0]); break;
       case 'E': bad = h->gc_end(ctx, v[0], v[1], v[2], v[3], v[4], v[5], v[6]); break;
     }
@@ -211,6 +220,11 @@ static int chk_vec_out(void* ctx, uint64_t id) {
   return 0;
 }
 
+static int chk_hint(void* ctx, uint64_t seq) {
+  (void)ctx; (void)seq;
+  return 0;
+}
+
 static int chk_gc_start(void* ctx, uint64_t cycle) {
   Check* c = ctx;
   if (c->in_gc) return err("G %llu inside collection %llu", (unsigned long long)cycle, (unsigned long long)c->gc_cycle);
@@ -242,7 +256,7 @@ static int chk_finish(void* ctx) {
   return 0;
 }
 
-static const Handlers check_handlers = { chk_alloc, chk_free, chk_tail, chk_vec_out, chk_gc_start, chk_gc_end, chk_finish };
+static const Handlers check_handlers = { chk_alloc, chk_free, chk_tail, chk_vec_out, chk_hint, chk_gc_start, chk_gc_end, chk_finish };
 
 /* ── placement simulator (docs/gc-stage2-v0.md §5.7, options C and E against today's layout) ────
  *
@@ -389,6 +403,7 @@ struct Policy {
   uint64_t (*regions)(const Policy*);
   uint64_t (*chunks)(const Policy*);   /* NULL, or the 1 MiB chunks the regions are carved from */
   uint64_t (*free_units)(const Policy*);   /* free slots (base, class-R) or granules (holes), after an E */
+  void (*hint)(Policy*, uint64_t seq);   /* an H record, or NULL; see the format notes */
   void (*snap)(Policy*);   /* at a new G peak */
   /* an ordinary object enters (+1) or leaves (-1) the young set; in_free: a free during a collection */
   void (*young_adj)(Policy*, const Obj*, int delta, int in_free);
@@ -651,6 +666,12 @@ static int sim_vec_out(Sim* s, uint64_t id) {
   return 0;
 }
 
+static int sim_hint(Sim* s, uint64_t seq) {
+  for (int i = 0; i < s->npol; i++)
+    if (s->pols[i]->hint) s->pols[i]->hint(s->pols[i], seq);
+  return 0;
+}
+
 /* The footprint floor of sprout_gc_collect_with_reason for a heap and a free measure. */
 static uint64_t floor_of(uint64_t heap, uint64_t free_units) { return heap + (heap + free_units) / 3; }
 
@@ -740,12 +761,15 @@ static int sim_gc_end(Sim* s, uint64_t kind, uint64_t heap_after, uint64_t ordin
 }
 
 /* ── base ───────────────────────────────────────────────────────────────────────────────── */
-typedef struct { uint32_t bump, live; uint32_t* fc; uint8_t used; } BReg;   /* fc[class]: free slots */
+/* fc[class]: free slots; seq: 1-based order of opening, as the trace's H records count */
+typedef struct { uint32_t bump, live; uint32_t* fc; uint8_t used; uint64_t seq; } BReg;
 typedef struct {
   Policy p;
   BReg* r;
   uint32_t n, cap, nused;
-  int64_t hint;
+  int64_t hint;   /* region index, -1 none */
+  uint64_t seq_next, hint_seq;   /* regions opened; the seq an H record named */
+  int hint_dirty;   /* hint is stale: resolve hint_seq at the next bump, when its region exists */
   uint32_t cursor[NCLS];
   uint64_t free;   /* free slots over the used regions: the runtime's g_gc_freelist_len */
   uint64_t bump_allocs, hint_tests, scans, scan_regions;   /* the bump path: allocations, hint tests, downward scans and regions they test */
@@ -766,9 +790,18 @@ static uint32_t base_open(Base* b) {
   if (r->fc == NULL) r->fc = xcalloc(NCLS, sizeof(uint32_t)); else memset(r->fc, 0, NCLS * sizeof(uint32_t));
   r->bump = r->live = 0;
   r->used = 1;
+  r->seq = ++b->seq_next;
   b->nused++;
   b->hint = i;
+  b->hint_seq = r->seq;
+  b->hint_dirty = 0;
   return i;
+}
+
+static void base_hint(Policy* p, uint64_t seq) {
+  Base* b = (Base*)p;
+  b->hint_seq = seq;
+  b->hint_dirty = 1;
 }
 
 static void base_alloc(Policy* p, Obj* o) {
@@ -788,6 +821,12 @@ static void base_alloc(Policy* p, Obj* o) {
   }
   b->bump_allocs++;
   int64_t ri = -1;
+  if (b->hint_dirty) {
+    b->hint = -1;
+    for (uint32_t i = 0; i < b->n; i++)
+      if (b->r[i].used && b->r[i].seq == b->hint_seq) { b->hint = i; break; }
+    b->hint_dirty = 0;
+  }
   if (b->hint >= 0 && (uint32_t)b->hint < b->n) {
     const BReg* r = &b->r[b->hint];
     b->hint_tests++;
@@ -799,7 +838,7 @@ static void base_alloc(Policy* p, Obj* o) {
       const BReg* r = &b->r[i - 1];
       if (!r->used) continue;
       b->scan_regions++;
-      if (r->bump + sz <= REGION_BYTES) { ri = i - 1; b->hint = ri; break; }
+      if (r->bump + sz <= REGION_BYTES) { ri = i - 1; b->hint = ri; b->hint_seq = r->seq; break; }
     }
   }
   if (ri < 0) ri = base_open(b);
@@ -835,7 +874,7 @@ static void base_gc_end(Policy* p, uint64_t kind) {
       r->used = 0;
       b->nused--;
       released++;
-      if (b->hint == (int64_t)i) b->hint = -1;
+      if (b->hint == (int64_t)i && !b->hint_dirty) b->hint = -1;
     }
   }
   if (b->nused == 0 && (full || released)) base_open(b);
@@ -1319,7 +1358,7 @@ static Policy* policy_new(const char* name) {
     Base* b = xcalloc(1, sizeof *b);
     b->hint = -1;
     b->p = (Policy){ .name = "base", .type = PK_BASE, .region_bytes = REGION_BYTES, .alloc = base_alloc, .free_ = base_free,
-                     .tail = base_tail, .gc_end = base_gc_end, .regions = base_regions, .free_units = base_free_units };
+                     .tail = base_tail, .hint = base_hint, .gc_end = base_gc_end, .regions = base_regions, .free_units = base_free_units };
     p = &b->p;
   } else if (strcmp(name, "holes") == 0 || strcmp(name, "holes-ovf") == 0 ||
              strcmp(name, "holes-ovf-tails") == 0) {
@@ -1587,13 +1626,14 @@ static int s_alloc(void* c, uint64_t id, uint64_t kind, uint64_t sz) { return si
 static int s_free(void* c, uint64_t id) { return sim_free(c, id); }
 static int s_tail(void* c, uint64_t id, uint64_t rest) { return sim_tail(c, id, rest); }
 static int s_vec_out(void* c, uint64_t id) { return sim_vec_out(c, id); }
+static int s_hint(void* c, uint64_t seq) { return sim_hint(c, seq); }
 static int s_gc_start(void* c, uint64_t cycle) { (void)cycle; return sim_gc_start(c); }
 static int s_gc_end(void* c, uint64_t cycle, uint64_t kind, uint64_t heap_after, uint64_t free_slots, uint64_t ordinary, uint64_t large, uint64_t walked) {
   (void)cycle;
   return sim_gc_end(c, kind, heap_after, ordinary, large, free_slots, walked);
 }
 static int s_finish(void* c) { (void)c; return 0; }
-static const Handlers sim_handlers = { s_alloc, s_free, s_tail, s_vec_out, s_gc_start, s_gc_end, s_finish };
+static const Handlers sim_handlers = { s_alloc, s_free, s_tail, s_vec_out, s_hint, s_gc_start, s_gc_end, s_finish };
 
 /* ── --selftest: the policies on tiny hand-written traces ─────────────────────────────────── */
 static int g_fail, g_checks;
@@ -2001,7 +2041,55 @@ static void test_walked_in_e_record(void) {
   fclose(f);
 }
 
+/* Region 1 is filled to 32 B from the end and the next request opens region 2 (hint: region 2).
+ * A large region then goes in below the hint's index, so the runtime's hint names region 1 (H 1)
+ * and a 32 B request lands there.  Freeing the 64 B and 32 B objects empties region 2 only if the
+ * 32 B request went to region 1: the E's free_slots is 1 then, 0 if it went to region 2. */
+static void write_hint_trace(FILE* f, int with_h) {
+  fputs("SPAT1\n", f);
+  for (int i = 0; i < 255; i++) { fputc('A', f); put_varint(f, KIND_VECTOR); put_varint(f, 4096); }
+  fputc('A', f); put_varint(f, KIND_VECTOR); put_varint(f, 4064);   /* id 255: region 1 has 32 B left */
+  if (with_h) { fputc('H', f); put_varint(f, 1); }
+  fputc('A', f); put_varint(f, KIND_VECTOR); put_varint(f, 64);     /* id 256: opens region 2 */
+  if (with_h) { fputc('H', f); put_varint(f, 2); }
+  fputc('A', f); put_varint(f, KIND_VECTOR); put_varint(f, 8192);   /* id 257: a large region */
+  if (with_h) { fputc('H', f); put_varint(f, 1); }
+  fputc('A', f); put_varint(f, KIND_VECTOR); put_varint(f, 32);     /* id 258 */
+  fputc('G', f); put_varint(f, 1);
+  fputc('F', f); put_varint(f, 256);
+  fputc('F', f); put_varint(f, 258);
+  fputc('E', f);
+  uint64_t e[7] = { 1, GC_KIND_MAJOR, 257, 1, 1, 1, 0 };   /* heap_after 257, 1 free slot, 1 + 1 regions */
+  for (int i = 0; i < 7; i++) put_varint(f, e[i]);
+}
+
+static void test_hint_record(void) {
+  for (int with_h = 1; with_h >= 0; with_h--) {
+    FILE* f = tmpfile();
+    if (f == NULL) { printf("selftest: no tmpfile\n"); exit(2); }
+    write_hint_trace(f, with_h);
+    Reader* rd = xcalloc(1, sizeof *rd);
+    rd->f = f;
+    rewind(f);
+    Check c;
+    memset(&c, 0, sizeof c);
+    CHECK(decode(rd, &check_handlers, &c) == 0, "with_h=%d: --check rejects the trace: %s", with_h, g_err);
+    Sim* s = xcalloc(1, sizeof *s);
+    CHECK(sim_init(s, "base") == 0, "bad policy list");
+    memset(rd, 0, sizeof *rd);
+    rd->f = f;
+    rewind(f);
+    CHECK(decode(rd, &sim_handlers, s) == 0, "with_h=%d: replay rejects the trace: %s", with_h, g_err);
+    CHECK(s->cal_n == 0 && s->cal_large_miss == 0, "with_h=%d: regions off by up to %llu at %llu Es, large misses %llu", with_h, U(s->cal_maxdiff), U(s->cal_n), U(s->cal_large_miss));
+    /* with H the 32 B request is placed in region 1 and the free count matches; without it the
+     * hint still names region 2 and base is one slot short, which is the old calibration miss */
+    CHECK(s->cal_free_n == 1 && s->cal_free_miss == (uint64_t)!with_h, "with_h=%d: free-slot misses %llu of %llu, want %d", with_h, U(s->cal_free_miss), U(s->cal_free_n), !with_h);
+    fclose(f);
+  }
+}
+
 static int run_selftest(void) {
+  test_hint_record();
   test_walked_in_e_record();
   test_young_regions_swept();
   test_hole_exactly_filled();
