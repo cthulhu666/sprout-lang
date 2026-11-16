@@ -25,6 +25,12 @@
  *   share_*        — SPROUT_GC_NURSERY_SHARE is read with minors on and ignored with them off.
  *   census_age     — at K=3 the live census counts a young survivor once and drops one that dies.
  *   bad_*          — each aborts with a message the caller checks.
+ *   holes_*        — age_seq (K=2 and 3), age_large and remember again under SPROUT_GC_HOLES=1,
+ *                    where the marker bumps the age and the remembered rule tests the bumped
+ *                    age (young_below = K), so a rule off by one in either direction fails; and
+ *                    holes_remember_old_child, where a remembered old parent whose child is old
+ *                    stays out of the set (an old child's age is at least K).  Colour persists
+ *                    under HOLES, so set_before_major and major_age have no HOLES form.
  *
  * `k_cases` lists every case with its environment; main sets it before sprout_set_argv. */
 #include <stdio.h>
@@ -152,6 +158,26 @@ static int remember(void) {
   check(ref_read(p) == c && ref_read(c) == 42, "the edge and the child are intact");
   check(is_old(c) && !is_remembered(p) && g_gen.remembered.len == 0,
         "the child is promoted, and the parent is dropped from the set");
+  return g_failed;
+}
+
+/* P and C are both old, and a store (with its barrier) remembers P.  The minor traces P through
+ * the set; C is old, so the marker neither bumps nor re-marks it, and the rule must read its age
+ * as at least K: P leaves the set and nothing is left in it. */
+static int remember_old_child(void) {
+  register_roots();
+  long long p = ref_new(0);
+  long long c = ref_new(42);
+  g_keep = (void*)(uintptr_t)p;
+  g_keep2 = (void*)(uintptr_t)c;
+  age_to_old(p, collect);
+  check(is_old(p) && is_old(c), "P and C are old");
+  ref_write(p, c);                         /* the barrier remembers P */
+  check(is_remembered(p) && g_gen.remembered.len == 1, "P is remembered");
+  collect();                               /* minor: P traced through the set, C is old */
+  check(g_gen.n_minor == g_k, "the last collection is a minor");
+  check(!is_remembered(p) && g_gen.remembered.len == 0, "an old child leaves P out of the set");
+  check(ref_read(p) == c && ref_read(c) == 42, "the edge and the child are intact");
   return g_failed;
 }
 
@@ -503,6 +529,7 @@ typedef struct {
   const char* thr;     /* SPROUT_GC_THRESHOLD, or NULL */
   const char* share;   /* SPROUT_GC_NURSERY_SHARE, or NULL */
   double survive;      /* g_gen.nursery_survive (c), set after startup; < 0 keeps the default */
+  int holes;           /* SPROUT_GC_HOLES=1 (HDRCHECK off: the two cannot be combined) */
 } AgeCase;
 
 static const AgeCase k_cases[] = {
@@ -528,6 +555,11 @@ static const AgeCase k_cases[] = {
   { "share_read",                share_read,                  1, 1, "1000", NULL, "2", -1 },
   { "share_ignored_minors_off",  share_ignored_minors_off,    1, 0, "1000", NULL, "abc", -1 },
   { "census_age",                census_age,                  0, 1, "1000", NULL, NULL, -1 },
+  { "holes_age2",                age_seq,                     2, 1, "1000", NULL, NULL, -1, 1 },
+  { "holes_age3",                age_seq,                     0, 1, "1000", NULL, NULL, -1, 1 },
+  { "holes_age_large",           age_large,                   2, 1, "1000", NULL, NULL, -1, 1 },
+  { "holes_remember",            remember,                    2, 1, "1000", NULL, NULL, -1, 1 },
+  { "holes_remember_old_child",  remember_old_child,          2, 1, "1000", NULL, NULL, -1, 1 },
   { "bad_unremembered_edge",     bad_unremembered_edge,       2, 1, "1000", NULL, NULL, -1 },
   { "bad_major_bit13",           bad_major_bit13,             2, 1, "1",    NULL, NULL, -1 },
   { "bad_major_set",             bad_major_set,               2, 1, "1",    NULL, NULL, -1 },
@@ -550,6 +582,7 @@ int main(int argc, char** argv) {
   unsetenv("SPROUT_GC_STRESS");
   unsetenv("SPROUT_GC_AGEPROF");
   unsetenv("SPROUT_GC_THRESHOLD");
+  unsetenv("SPROUT_GC_HOLES");
   unsetenv("SPROUT_GC_PROMOTE_AGE");
   unsetenv("SPROUT_GC_NURSERY");
   unsetenv("SPROUT_GC_NURSERY_SHARE");
@@ -561,6 +594,10 @@ int main(int argc, char** argv) {
     return 1;
   }
   setenv("SPROUT_GC_MINOR", c->minor ? "1" : "0", 1);
+  if (c->holes) {
+    setenv("SPROUT_GC_HOLES", "1", 1);
+    setenv("SPROUT_GC_HDRCHECK", "0", 1);
+  }
   if (c->share) setenv("SPROUT_GC_NURSERY_SHARE", c->share, 1);
   setenv("SPROUT_GC_MAJOR_EVERY", c->every, 1);
   if (c->thr) setenv("SPROUT_GC_THRESHOLD", c->thr, 1);

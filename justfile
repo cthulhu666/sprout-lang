@@ -4316,7 +4316,8 @@ gc-adapt-check: bootstrap-from-seed
 # print the exact stdout in its sidecar tests/gc_gen/<name>.out, and must have run minor
 # collections. The default arm is the shipped default (K=3, s=1, c=2) under GENCHECK. Also run
 # with SPROUT_FL_VERIFY=1 and with SPROUT_GC_LINEAGE=1 (same flags, same output), and with the
-# mode off, where the output must be the same. The nursery share is not varied here: under STRESS
+# mode off, where the output must be the same, and with SPROUT_GC_HOLES=1 (occupancy maps, minors
+# on under GENCHECK and off; docs/gc-stage2-v0.md §5.7). The nursery share is not varied here: under STRESS
 # every allocation collects, and without it these programs run no minor at either share.
 # The two analysis helpers are static and need a live analysis service to reach from Sprout, so a C case covers
 # them (tests/c_runtime/analysis_strings.c).
@@ -4397,6 +4398,23 @@ gc-gen-check: bootstrap-from-seed
       [ -z "$bad" ] \
         || { echo "gc-gen-check: $name: $bad full-walk minors not followed by a major under $mode (cycle numbers)" >&2; failed=1; }
     fi
+    # Occupancy maps (docs/gc-stage2-v0.md §5.7): GENCHECK walks every region by slotmap and checks
+    # the maps, counts and buffer lists. Same stdout, same minor-count floor.
+    SPROUT_GC_HOLES=1 SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 SPROUT_DEBUG_GC=1 \
+      "$TMPD/$name.bin" > "$TMPD/$name.mode.out" 2>"$TMPD/$name.holes.gc"
+    rc=$?
+    if [ "$rc" != 0 ] || ! cmp -s "$want_file" "$TMPD/$name.mode.out"; then
+      report_mismatch "$name" "failed under SPROUT_GC_HOLES=1 MINOR=1 GENCHECK=1 STRESS=1 (rc=$rc)" "$TMPD/$name.mode.out"
+      grep -A4 'GENCHECK' "$TMPD/$name.holes.gc" | head -8 >&2
+      failed=1
+    else
+      hminors=$(grep -c 'kind=minor' "$TMPD/$name.holes.gc")
+      (( hminors >= min_minors )) \
+        || { echo "gc-gen-check: $name ran only $hminors minor collections under SPROUT_GC_HOLES=1; the barrier was not exercised" >&2; failed=1; }
+    fi
+    SPROUT_GC_HOLES=1 SPROUT_GC_MINOR=0 SPROUT_GC_STRESS=1 "$TMPD/$name.bin" > "$TMPD/$name.off" 2>/dev/null
+    cmp -s "$want_file" "$TMPD/$name.off" \
+      || { report_mismatch "$name" "differs with SPROUT_GC_HOLES=1 SPROUT_GC_MINOR=0" "$TMPD/$name.off"; failed=1; }
     SPROUT_GC_MINOR=0 "$TMPD/$name.bin" > "$TMPD/$name.off" 2>/dev/null
     cmp -s "$want_file" "$TMPD/$name.off" \
       || { report_mismatch "$name" "differs with SPROUT_GC_MINOR=0" "$TMPD/$name.off"; failed=1; }
@@ -4417,6 +4435,7 @@ gc-gen-check: bootstrap-from-seed
     build_one "$f" "$name" || { failed=1; continue; }
     ok=1
     for mode in "SPROUT_GC_MINOR=1" \
+                "SPROUT_GC_HOLES=1 SPROUT_GC_MINOR=1" \
                 "SPROUT_GC_MINOR=1 SPROUT_GC_REGION_LISTS=1 SPROUT_FL_VERIFY=1" \
                 "SPROUT_GC_MINOR=0 SPROUT_GC_REGION_LISTS=1 SPROUT_FL_VERIFY=1"; do
       # shellcheck disable=SC2086
