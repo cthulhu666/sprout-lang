@@ -225,6 +225,17 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
    printer, the oracle. Effects as pure < `IO` only; the effect-variable point comes in stage 4.
    Needed now, since the compiler enforces rule 8 on every program and `print_str` is `!{IO}`.
    Exit: oracle green in CI.
+   - **1a (landed): everything but T2.** `formal/SproutCore/` holds the stage-1 fragment: Int, Bool,
+     String, Unit, tuples and effect-carrying arrows; lambdas, application, local `let`, `if`, `!`,
+     `do` blocks and `print_str`; top-level `fn` (annotated or not), `let` and mutually recursive
+     groups; `main`. The checker follows the spec, one `-- spec §…` tag per rule. The printer,
+     the Plausible generator with mutations, the shrinker and the `sprout-oracle` executable are in;
+     so are the three recipes, the spec snapshot and the `lean` CI job (`docs/gates.md` §Lean
+     model). No theorems, so the `sorry` count is 0. Not run on Linux before the first CI run.
+     The oracle's first findings are in `formal/oracle/ALLOWLIST`: one compiler gap (an effectful
+     `let` right-hand side, spec §5.2.1, already scheduled in `try-propagate-v0.md`) and one spec
+     gap (the compiler's value restriction on a top-level `let`, which the spec does not state).
+   - **1b: T2**, inference soundness, and the axiom check of §7.
 2. **ADTs and match.** T1, T4, the unreachable-branch rule. Exit: the per-column gap and the
    fallbacks are written up in this doc.
 3. **Linearity.** T5 over linear ADTs, containment, `where linear`, binding groups, top-level

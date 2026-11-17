@@ -872,6 +872,79 @@ test-pr-rebase:
 test-bench-vm:
   bash scripts/test_bench_vm.sh
 
+# ── Lean model of the core typing rules (docs/lean-model-v0.md, docs/gates.md §Lean model) ──
+# Needs the Lean pin in mise.toml. A separate CI job, not part of `test` or `gate`.
+
+# Run it after re-checking formal/SproutCore against a spec change; commit it with the model change.
+# Copy the spec sections the model follows into formal/spec-snapshot/.
+[group('lean')]
+lean-spec-snapshot:
+  python3 scripts/lean_spec_snapshot.py --write
+
+# Fail when a spec section the model follows differs from its snapshot.
+[group('lean')]
+lean-spec-snapshot-check:
+  python3 scripts/lean_spec_snapshot.py --check
+
+# Stage 1a has no theorems, so the axiom check of docs/lean-model-v0.md §7 waits for stage 1b.
+# Build formal/; fail on an unfinished proof (a `sorry`) in formal/SproutCore or a stale spec snapshot.
+[group('lean')]
+lean-model: lean-spec-snapshot-check
+  #!/usr/bin/env bash
+  set -euo pipefail
+  lake -d formal build
+  if grep -rnw --include='*.lean' 'sorry' formal/SproutCore; then
+    echo "lean-model: unfinished proof left in formal/SproutCore" >&2
+    exit 1
+  fi
+  echo "==> lean-model ✓ — formal/ builds, 0 sorry, spec snapshot current"
+
+# Fixed seed; override with LEAN_ORACLE_SEED. Shrunk programs go to build/lean-oracle/.
+# Fails on a disagreement outside formal/oracle/ALLOWLIST, a harness error, or a stale allowlist entry.
+# N generated programs through the Lean model and `compile_driver_bin_stage1 --phase check`.
+[group('lean')]
+lean-oracle n="500": bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  lake -d formal build sprout-oracle
+  rm -rf "{{build_dir}}/lean-oracle"
+  formal/.lake/build/bin/sprout-oracle --count {{quote(n)}} --seed "${LEAN_ORACLE_SEED:-20261117}" \
+    --driver "{{build_dir}}/compile_driver_bin_stage1" --stdlib "{{stdlib_root}}" \
+    --out "{{build_dir}}/lean-oracle" --allowlist formal/oracle/ALLOWLIST
+
+# A model with one rule removed must disagree with the compiler, a printer with a planted bug must
+# give a harness error and not a disagreement, a stale allowlist entry must fail the run, and the
+# snapshot check must notice a changed section.
+# Self-test of the Lean oracle, as `test-review-gate` tests its hook.
+[group('test')]
+test-lean-oracle: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  lake -d formal build sprout-oracle
+  D=$(mktemp -d /tmp/sprout_lean_oracle_XXXXXX); trap 'rm -rf "$D"' EXIT
+  O=formal/.lake/build/bin/sprout-oracle
+  COMMON=(--driver "{{build_dir}}/compile_driver_bin_stage1" --stdlib "{{stdlib_root}}" --out "$D/out"
+          --allowlist formal/oracle/ALLOWLIST)
+  echo "== planted model: a local let generalises =="
+  $O "${COMMON[@]}" --count 200 --plant no-local-let-mono --expect disagreement \
+    --expect-shape "Call type mismatch" 2>&1 | tail -n 2
+  echo "== planted printer bug =="
+  $O "${COMMON[@]}" --count 40 --plant printer-bug --expect harness-error 2>&1 | tail -n 2
+  echo "== stale allowlist entry =="
+  printf 'model-accepts/compiler-rejects: no such shape | stale\n' > "$D/allow"
+  if out=$($O "${COMMON[@]}" --allowlist "$D/allow" --count 3 2>&1); then
+    echo "test-lean-oracle: a stale allowlist entry did not fail the run" >&2; exit 1
+  fi
+  grep -q 'STALE ALLOWLIST ENTRY' <<<"$out" || { echo "$out" >&2; echo "test-lean-oracle: no stale-entry report" >&2; exit 1; }
+  echo "== snapshot check notices a change =="
+  LEAN_SNAPSHOT_DIR="$D/snap" python3 scripts/lean_spec_snapshot.py --write
+  LEAN_SNAPSHOT_DIR="$D/snap" python3 scripts/lean_spec_snapshot.py --check
+  echo "drift" >> "$D/snap/spec-7-typing-rules.md"
+  if LEAN_SNAPSHOT_DIR="$D/snap" python3 scripts/lean_spec_snapshot.py --check 2>/dev/null; then
+    echo "test-lean-oracle: the snapshot check missed a changed section" >&2; exit 1
+  fi
+  echo "==> test-lean-oracle ✓"
+
 # Validate and test the `/prs` pane plugin. Local only: CI has no `claude` CLI.
 [group('test')]
 test-pr-tracker:
@@ -5323,7 +5396,12 @@ gate-audit:
   #     depends on for the artifact it inspects.
   #   runtime-debian12 — CI-only: it needs a container runtime, which is not a required
   #     contributor dependency (the linux-smoke rule).
-  EXCLUDE="bootstrap-from-seed build-fmt-from-seed refresh-seed ci-fast-gates test-stdlib-core-stage1 test-stdlib-compiler-stage1 windows-tu-check windows-poll-selftest plugin-test plugin-build plugin-split-check runtime-debian12"
+  #   lean-model / lean-oracle / test-lean-oracle — CI-only for the plugin-test reason: they need
+  #     the Lean pin in mise.toml, which a contributor who never touches formal/ has no reason to
+  #     install, and the oracle takes minutes. Their own `lean` CI job runs them
+  #     (docs/lean-model-v0.md §7: a Lean breakage must not block compiler work until the model
+  #     has proved its value).
+  EXCLUDE="bootstrap-from-seed build-fmt-from-seed refresh-seed ci-fast-gates test-stdlib-core-stage1 test-stdlib-compiler-stage1 windows-tu-check windows-poll-selftest plugin-test plugin-build plugin-split-check runtime-debian12 lean-model lean-oracle test-lean-oracle"
   # Tasks gate runs from its BODY (not reachable via --show dependency expansion).
   BODY="gc-safety-check"
   expand() {  # print a recipe name and, recursively, its dependency recipe names

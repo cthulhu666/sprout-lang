@@ -7,6 +7,9 @@ gh = "2.97.0"
 # rather than a reimplementation that tests a translation. Pinned here rather than
 # taken from the host so CI gets it from mise like everything else.
 node = "22"
+# The Lean model of the core typing rules (docs/lean-model-v0.md); only `just lean-model` and
+# `just lean-oracle` need it. Installs `lean` and `lake`; no elan.
+"github:leanprover/lean4" = "4.35.0"
 
 [env]
 _.path = ["/opt/homebrew/opt/llvm/bin"]
