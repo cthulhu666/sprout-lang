@@ -27,6 +27,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   concrete; an open variable one side can bind to pure would launder. Find a reaching program, or
   route those sites through a fresh result variable as `if` now does.
   `docs/effect-subsumption-v0.md` §6.5b.
+- [ ] `P2` **A pure top-level `let` calling a non-generalised function value is rejected as IO.**
+  `let f = let v = 0 in \(x: Bool) -> x` then `let g = f(false)`: `checker.sprout`'s top-level
+  purity check says `g` "performs IO when its module loads". With `let f = \(x: Bool) -> x` it is
+  accepted. `f`'s open effect variable seems to count as IO; spec §7 rule 8 property 3 accepts an
+  unresolved variable. Same with `f = if c then \… else \…`. Found by the Lean oracle
+  (`formal/oracle/ALLOWLIST`); add a `run/` fixture with the fix.
 - [ ] `P3` **A type argument is judged covariantly, which is wrong for a mutable container.**
   `Ref` should be invariant in its argument. No reaching program is known — four shapes that
   laundered before bounded effect variables now reject, but via a bound travelling through
