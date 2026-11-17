@@ -214,6 +214,7 @@ before asking for a call.
 - `runtime/` C runtime, GC, poller and scheduler (`sprout_runtime.c`, `sprout_poll.c`, `sprout_scheduler.c`); link all three.
 - `ide/` the Sprout IDE (`ide.*` modules, resolved with `--package-root`); imports `stdlib.*` and never the reverse, so it lifts out whole. Design: `docs/ide-v0.md`.
 - `tests/stdlib/` native Sprout test files (`.spr`, run via `just test`); `tests/ide/` the IDE's own suites (`just test-ide`); `tests/conformance/` executable language behavior fixtures.
+- `formal/` the Lean model of the core typing rules and its oracle (`docs/lean-model-v0.md`); a separate CI job, `just lean-model`.
 - `bootstrap/` committed LLVM IR seed (`compile_driver.ll`) for stage-1 bootstrap.
 - `mise.toml` toolchain definition; `justfile` standard developer tasks.
 

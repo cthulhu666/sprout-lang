@@ -1752,6 +1752,12 @@ deferral happened, not for current behaviour. Still open:
 - [ ] `P2` **Lean model of core typing rules, as proofs and a test oracle.** A Lean 4 model of
   Sprout Core (HM, effects, exhaustiveness, linearity) with soundness theorems; its checker diffs
   against `--phase check` on generated programs. Stages and status: `docs/lean-model-v0.md` §9.
+- [ ] `P3` **The spec does not state the value restriction on a top-level `let`.** The compiler
+  rejects a non-value initialiser whose type still has free variables (`value restriction:
+  non-value binding … has an ambiguous polymorphic type`; `is_syntactic_value` in `infer.sprout`),
+  e.g. `let l = let v = "" in \x -> x`. `spec-v0.md` §5.2 and §7 rule 16 only say a binding
+  generalises at its boundary. Found by the Lean oracle; its shape is allowlisted in
+  `formal/oracle/ALLOWLIST`. State the rule (what is a value), or drop the restriction.
 - [ ] `P3` **Expression-side list-literal sweep.** Rewrite multi-element `Cons(a, Cons(b, …))`
   *constructions* in `ast_to_ir.sprout`, `compiler.sprout` and similar to `[a, b]` literals, in
   batches with a seed refresh per batch. `docs/style-guide-v0.md` §8 has the policy on what to

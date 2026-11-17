@@ -7,6 +7,9 @@ notes.md
 build/
 retros/
 
+# Lean model (formal/): Lake's build output and fetched packages.
+formal/.lake/
+
 # Dev screenshots from the graphics backend (SPROUT_GFX_SCREENSHOT).
 sprout_shot.png
 

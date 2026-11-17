@@ -1,0 +1,14 @@
+name = "sprout_core"
+defaultTargets = ["SproutCore", "sprout-oracle"]
+
+[[require]]
+name = "plausible"
+git = "https://github.com/leanprover-community/plausible"
+rev = "v4.35.0"
+
+[[lean_lib]]
+name = "SproutCore"
+
+[[lean_exe]]
+name = "sprout-oracle"
+root = "Oracle"

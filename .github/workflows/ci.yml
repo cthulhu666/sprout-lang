@@ -28,6 +28,7 @@ jobs:
     outputs:
       run_compiler: ${{ steps.detect.outputs.run_compiler }}
       docs_only: ${{ steps.detect.outputs.docs_only }}
+      run_lean: ${{ steps.detect.outputs.run_lean }}
     steps:
       - uses: actions/checkout@v4
 
@@ -49,6 +50,9 @@ jobs:
         id: detect
         run: |
           set -u
+          # run_lean is true unless the end of this step proves otherwise (a later write wins),
+          # so every early exit below fails open.
+          echo "run_lean=true" >> "$GITHUB_OUTPUT"
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "non-PR event (${{ github.event_name }}) — running compiler tests"
             echo "run_compiler=true" >> "$GITHUB_OUTPUT"; exit 0
@@ -71,6 +75,15 @@ jobs:
             echo "no compiler-affecting paths changed — SKIPPING compiler tests (still run on master + nightly)"
             printf 'changed files:\n%s\n' "$CHANGED"
             echo "run_compiler=false" >> "$GITHUB_OUTPUT"
+          fi
+          # run_lean: the Lean model and its oracle depend on formal/, the spec sections the
+          # snapshot pins, and everything the compiler binary is built from. A spec-only change
+          # is docs_only, which skips every build job, so this job needs its own decision or the
+          # snapshot gate could never fire on the PR that changes the spec.
+          if printf '%s\n' "$CHANGED" | grep -qE '^(formal/|docs/spec-v0\.md|docs/lean-model-v0\.md|scripts/lean_spec_snapshot\.py|stdlib/|runtime/|bootstrap/|justfile|mise\.toml|\.github/)'; then
+            echo "run_lean=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_lean=false" >> "$GITHUB_OUTPUT"
           fi
           # docs_only: nothing outside docs/, top-level *.md and the two extensionless
           # prose files moved, so no gate in this repo can observe the change. Strict
@@ -428,6 +441,34 @@ jobs:
             fi
           done
           echo "all shards green"
+
+  # The Lean model of the core typing rules (docs/lean-model-v0.md, docs/gates.md §Lean model).
+  # Its own job, not a `test` dependency: a Lean breakage must not block compiler work until the
+  # model has proved its value (design §7). It reuses the stage-1 cache, since the oracle runs
+  # `compile_driver_bin_stage1 --phase check`. Lean comes from mise.toml (the github backend);
+  # not run on Linux before this job existed, so a first-run failure of the Lean install is
+  # possible. Do not write the word "just" before a recipe name in a comment here: gate-audit
+  # scrapes this file for it.
+  lean:
+    needs: changes
+    if: needs.changes.outputs.run_lean == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - *checkout
+      - *install-mise
+      - *install-llvm
+      - *cache-stage1
+      - *bootstrap
+
+      - name: Lean model builds, no unfinished proofs, spec snapshot current
+        run: just lean-model
+
+      - name: Oracle self-test (planted model and printer defects)
+        run: just test-lean-oracle
+
+      - name: Oracle, 500 generated programs (fixed seed)
+        run: just lean-oracle 500
 
   # Everything above runs on Linux, so until this job existed CI exercised the epoll+timerfd
   # poller ONLY and never compiled a line of the macOS-specific TLS client. Two consequences,

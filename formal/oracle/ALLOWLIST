@@ -1,0 +1,17 @@
+# One known disagreement per line: `<shape> | <reason>`. The shape is the oracle's own label
+# (printed with each DISAGREEMENT). A listed shape that stops disagreeing fails the run, so
+# the list cannot rot (docs/lean-model-v0.md §6). Lines starting with `#` are comments.
+#
+# Compiler gap: spec §5.2.1 and §5.2.2 make an effectful right-hand side of `let ... in` and of a
+# `do` `let` an error; the checker accepts it in an `!{IO}` function. Known and scheduled:
+# docs/try-propagate-v0.md §4.5 and §9 Q15 (step 5 enforces it). The model follows the spec.
+model-rejects/compiler-accepts: let-rhs-io | compiler does not enforce the pure right-hand side of let..in and do-let (spec §5.2.1, §5.2.1a)
+# Spec gap: the compiler applies a syntactic value restriction to a top-level `let` (`is_syntactic_value`
+# in infer.sprout, docs/fundamentals-code-review-handoff-2026-07-03.md W3) and rejects a non-value
+# initialiser whose type still has free variables. spec §5.2 and §7 rule 16 say nothing about it.
+model-accepts/compiler-rejects: value restriction | the spec does not state the value restriction on top-level let (compiler rejects non-value let with a polymorphic type)
+# Compiler bug: a top-level `let` that calls a pure function value bound by an earlier non-value
+# top-level `let` (so not generalised, its effect variable stays open) is rejected as "performs IO
+# when its module loads". The spec calls that `let` pure, and says an unresolved effect variable is
+# accepted (spec §7 rule 8, property 3). `let f = let v = 0 in \(x: Bool) -> x` then `let g = f(false)`.
+model-accepts/compiler-rejects: top-level _ performs IO when its module loads, but top-level bindings must be pure | compiler rejects a pure top-level let that calls a non-generalised function value (open effect variable counted as IO; spec §5.2, §7 rule 8 property 3)
