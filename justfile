@@ -943,6 +943,13 @@ test-lean-oracle: bootstrap-from-seed
   if LEAN_SNAPSHOT_DIR="$D/snap" python3 scripts/lean_spec_snapshot.py --check 2>/dev/null; then
     echo "test-lean-oracle: the snapshot check missed a changed section" >&2; exit 1
   fi
+  echo "== snapshot check notices an unsnapshotted tag =="
+  mkdir -p "$D/model"
+  printf -- '-- spec §9.9: planted\n' > "$D/model/Planted.lean"
+  if out=$(LEAN_MODEL_DIR="$D/model" python3 scripts/lean_spec_snapshot.py --check 2>&1); then
+    echo "test-lean-oracle: the snapshot check missed a tag citing an unsnapshotted section" >&2; exit 1
+  fi
+  grep -q '§9.9' <<<"$out" || { echo "$out" >&2; echo "test-lean-oracle: no report naming §9.9" >&2; exit 1; }
   echo "==> test-lean-oracle ✓"
 
 # Validate and test the `/prs` pane plugin. Local only: CI has no `claude` CLI.

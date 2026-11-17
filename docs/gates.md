@@ -1445,12 +1445,14 @@ touches `formal/`.
   to the compiler.
 - `just test-lean-oracle`: a model with the local-`let` rule removed must disagree with the
   compiler, a printer with a planted bug must give a harness error and not a disagreement, a stale
-  allowlist entry must fail the run, and the snapshot check must fail on a doctored section.
+  allowlist entry must fail the run, and the snapshot check must fail on a doctored section and
+  on a rule tag citing a section it does not hold.
 - Spec snapshot: `formal/spec-snapshot/` holds spec §5.1–5.6, §5.8, §7 and §10.10, cut by heading
   (`scripts/lean_spec_snapshot.py`). Any change to them fails `lean-model` until the model has been
   re-checked against the new text and `just lean-spec-snapshot` has refreshed the copy in the same
-  commit. The `changes` job sets `run_lean` for it, since a spec-only change is `docs_only` and
-  would skip every other job.
+  commit. A `-- spec §…` rule tag in `formal/SproutCore/` citing a section outside the snapshot
+  also fails it, so the list cannot fall behind the model. The `changes` job sets `run_lean` for
+  it, since a spec-only change is `docs_only` and would skip every other job.
 
 The oracle compares verdicts, not messages, so two sides can reject one program for different
 reasons. Stage 1's effect model has no effect variables: the generator never solves a type

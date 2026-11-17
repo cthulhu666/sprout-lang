@@ -233,8 +233,10 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
      so are the three recipes, the spec snapshot and the `lean` CI job (`docs/gates.md` §Lean
      model). No theorems, so the `sorry` count is 0. Not run on Linux before the first CI run.
      The oracle's first findings are in `formal/oracle/ALLOWLIST`: one compiler gap (an effectful
-     `let` right-hand side, spec §5.2.1, already scheduled in `try-propagate-v0.md`) and one spec
-     gap (the compiler's value restriction on a top-level `let`, which the spec does not state).
+     `let` right-hand side, spec §5.2.1, already scheduled in `try-propagate-v0.md`), one spec
+     gap (the compiler's value restriction on a top-level `let`, which the spec does not state),
+     and one new compiler bug (a pure top-level `let` calling a non-generalised function value is
+     rejected as IO). The last two are `BACKLOG.md` entries.
    - **1b: T2**, inference soundness, and the axiom check of §7.
 2. **ADTs and match.** T1, T4, the unreachable-branch rule. Exit: the per-column gap and the
    fallbacks are written up in this doc.
