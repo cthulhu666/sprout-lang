@@ -252,11 +252,13 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
 ## 10. Toolchain
 
 - Lean is not in the mise registry (checked 2026-11-17). It comes through mise's `github:`
-  backend instead, `"github:leanprover/lean4" = "4.35.0"`, which keeps AGENTS.md's "tools via
-  mise" rule; elan is not needed. Checked on macOS arm64: it installs `lean` and `lake`, Lake
-  fetches Plausible from git and builds a native executable. Not yet checked on Linux x86_64,
-  where the release asset is `lean-4.35.0-linux.tar.zst` with no arch suffix; the first CI run
-  checks it.
+  backend instead, which keeps AGENTS.md's "tools via mise" rule; elan is not needed. It installs
+  `lean` and `lake`, Lake fetches Plausible from git and builds a native executable; checked on
+  macOS arm64 and on CI's Linux x86_64.
+- **Not in `mise.toml`.** The release ships its own `clang` 23 without system headers. Listed in
+  `mise.toml`, it went on every job's PATH, shadowed the real `clang` on the macOS runner, and
+  broke the runtime build (`stdio.h` not found). The justfile's `lake` variable runs
+  `mise exec github:leanprover/lean4@4.35.0 -- lake`, so Lean is on PATH only for that command.
 - Pin an exact release, not the newest: v4.36.0 came out 2026-11-16, v4.35.0 on 2026-10-12
   (Cedar pins v4.35.0).
 - No Mathlib unless a proof needs it. It is large and slows CI. Plausible

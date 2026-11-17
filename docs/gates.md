@@ -1429,8 +1429,9 @@ only compiles: nothing is linked or run.
 
 Design: `docs/lean-model-v0.md`. A separate CI job (`lean`), not part of `test`, `gate` or
 `ci-fast-gates`, so a Lean breakage does not block compiler work. `gate-audit` lists the three
-recipes as CI-only. Lean comes from `mise.toml`, so none of this runs for a contributor who never
-touches `formal/`.
+recipes as CI-only. Lean comes from mise, pinned in the justfile's `lake` variable and not in
+`mise.toml`: its release ships a `clang` without system headers that would shadow the real one on
+PATH. It installs on first use, so nothing changes for a contributor who never touches `formal/`.
 
 - `just lean-model`: `lake -d formal build`, then fails on a `sorry` in `formal/SproutCore`, and
   first on a stale spec snapshot (below). Stage 1a has no theorems; the axiom check waits for 1b.

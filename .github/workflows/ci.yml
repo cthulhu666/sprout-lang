@@ -445,9 +445,8 @@ jobs:
   # The Lean model of the core typing rules (docs/lean-model-v0.md, docs/gates.md §Lean model).
   # Its own job, not a `test` dependency: a Lean breakage must not block compiler work until the
   # model has proved its value (design §7). It reuses the stage-1 cache, since the oracle runs
-  # `compile_driver_bin_stage1 --phase check`. Lean comes from mise.toml (the github backend);
-  # not run on Linux before this job existed, so a first-run failure of the Lean install is
-  # possible. Do not write the word "just" before a recipe name in a comment here: gate-audit
+  # `compile_driver_bin_stage1 --phase check`. Lean comes from mise's github backend, pinned
+  # in the justfile, not mise.toml, so its bundled clang stays off every other job's PATH. Do not write the word "just" before a recipe name in a comment here: gate-audit
   # scrapes this file for it.
   lean:
     needs: changes
