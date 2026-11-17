@@ -39,11 +39,44 @@ def cut(lines, start, end):
     return lines[first:last]
 
 
+# LEAN_MODEL_DIR is for `just test-lean-oracle`, which plants a tag citing an unsnapshotted section.
+MODEL = pathlib.Path(os.environ.get("LEAN_MODEL_DIR", ROOT / "formal" / "SproutCore"))
+TAG = re.compile(r"--\s*spec\s+(.*)")
+SECTION = re.compile(r"§(\d+(?:\.\d+[a-z]?)*)")
+HEADING = re.compile(r"^#+\s+(\d+(?:\.\d+[a-z]?)*)\.?\s")
+
+
+def uncovered_tags(lines):
+    """Sections a `-- spec §…` rule tag cites that no snapshotted section holds."""
+    covered = set()
+    for _, start, end in SECTIONS:
+        for l in cut(lines, start, end):
+            m = HEADING.match(l)
+            if m:
+                covered.add(m.group(1))
+    missing = []
+    for path in sorted(MODEL.rglob("*.lean")):
+        for n, l in enumerate(path.read_text().splitlines(), 1):
+            m = TAG.search(l)
+            if not m:
+                continue
+            for sec in SECTION.findall(m.group(1)):
+                if not any(sec == c or sec.startswith(c + ".") for c in covered):
+                    missing.append(f"{os.path.relpath(path, ROOT)}:{n}: §{sec}")
+    return missing
+
+
 def main(argv):
     if len(argv) != 2 or argv[1] not in ("--write", "--check"):
         sys.exit(__doc__)
     lines = SPEC.read_text().splitlines(keepends=True)
     failed = False
+    missing = uncovered_tags(lines)
+    if missing:
+        sys.stderr.write("lean-spec-snapshot: rule tags cite spec sections the snapshot does not hold.\n"
+                         "Add them to SECTIONS in scripts/lean_spec_snapshot.py:\n  "
+                         + "\n  ".join(missing) + "\n")
+        return 1
     for name, start, end in SECTIONS:
         text = "".join(cut(lines, start, end))
         path = OUT / name
