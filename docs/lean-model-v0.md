@@ -1,6 +1,7 @@
 # A Lean model of Sprout's core typing rules (v0)
 
-Status: **approved 2026-11-17; stage 1 in progress.** Non-normative. Proposes tooling; changes no language rule.
+Status: **approved 2026-11-17; stage 1 in progress.** Non-normative. Proposes tooling; changes
+no language rule.
 `docs/spec-v0.md` stays the source of truth. The model is checked against it, never the reverse.
 
 ## 1. Problem
@@ -125,8 +126,11 @@ everywhere (spec §3). `print` is out: it needs `ToString`.
 - Arguments are checked in two passes, non-lambdas first (rule 3).
 - A top-level `let` must be pure and may not hold a linear value (§5.2, §5.8). A `fn` may not
   come before a top-level `let` it uses, so the printer orders `let`s first.
-- Exhaustiveness is per column (§5.5). Top-level unreachable branches are an error (§5.5, second
-  paragraph).
+- A top-level `let` generalises only when its initialiser is a syntactic value. The compiler does
+  this (`is_syntactic_value` in `infer.sprout`); the spec does not say so. The model follows the
+  spec, so the oracle is expected to flag it as a spec gap (§6).
+- Exhaustiveness is per column (§5.5). Top-level unreachable branches are an error (§5.5,
+  "Unreachable top-level branches").
 - Linearity: a declared `linear` ADT; a type that contains one structurally, not through an arrow
   (§5.8); a type variable with or without `where linear`; exactly one use per binder on every path;
   a bare non-final `do` statement is a discard, not a use; **a lambda may not capture a linear
@@ -141,21 +145,23 @@ Each theorem is stated over the model's typing judgment and a small-step semanti
 - **T2 Inference soundness.** If the model's algorithm returns a type, the declarative judgment
   derives it. The judgment encodes rules 15 and 16, which the spec states as an algorithm ("first
   use commits"); writing them declaratively is part of the work and may show gaps in the text.
-- **T3 Effect soundness, outside the variable channel.** A term typed pure, none of whose callees
-  has an effect variable in its signature, takes no `print_str` step. Includes rule 8's
-  directional comparison and peer joins. Not claimed: anything about effect variables, because the
-  spec does not claim it either (§2 non-goals).
+- **T3 Effect soundness, outside the variable channel.** A term typed pure, from which no function
+  with an effect variable in its signature is reachable through calls, takes no `print_str` step.
+  Direct callees are not enough: a pure `f` may call `g : … !{e}` at purity, and `g` may print.
+  Includes rule 8's directional comparison and peer joins. Not claimed: anything about effect
+  variables, because the spec does not claim it either (§2 non-goals).
 - **T4 Exhaustiveness.** A full usefulness check is correct: a match it accepts never gets stuck.
   The per-column rule is stated as its own function, and the model describes exactly what it
   accepts that the full check rejects. `(true, true) | (false, false)` is one case (spec §5.5);
   `type-system-review-2026-08-13.md` F9 lists more.
 - **T5 Linearity.** In a semantics that tags linear values, a well-typed program **that reaches a
   value** has used each linear value exactly once: never dropped, never used twice. Covers `where
-  linear` bounds and binding groups. A program stuck on a match consumes nothing, which is why the
-  theorem is conditional on reaching a value.
+  linear` bounds and binding groups. A program stuck on a match may have consumed some linear values
+  and still hold others; the abort releases nothing. That is why the theorem covers only runs that
+  reach a value.
 
-A theorem not yet proved is a `sorry`, and the gate (§7) counts them. Merging a `sorry` is allowed
-during a stage; closing a stage needs zero.
+No `sorry` merges. A theorem lands proved, or its statement waits on a branch. The gate (§7) fails
+on any `sorry`, so a merged theorem is a proved one.
 
 ## 6. The oracle
 
@@ -172,8 +178,9 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
 - **Compiler side.** `--phase check` bundles and type-checks and prints `OK`
   (`docs/debugging.md` §Diagnostic Phases). No compiler change is needed.
 - **Three verdicts, not two.** A failure prefixed `bundle:` (`stdlib/compiler/compiler.sprout`,
-  `compile_phase_check_with_roots`'s `BundleErr` arm) means the printer wrote something the parser or bundler refused. That
-  is a harness error, never a disagreement: it fails the run and points at the printer.
+  `compile_phase_check_with_roots`'s `BundleErr` arm) means the printer wrote something the
+  parser or bundler refused. That is a harness error, never a disagreement: it fails the run and
+  points at the printer.
 - **Disagreement.** The harness shrinks the program, writes it out, and fails. A human decides
   which side is wrong. A compiler bug becomes a `type_error/` or `run/` fixture. A model bug is
   fixed in Lean. A spec gap goes to `BACKLOG.md`.
@@ -185,16 +192,18 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
 
 ## 7. Drift gate
 
-- `just lean-model`: `lake build`, then count `sorry` and print each theorem's axioms. Fails on any
-  axiom other than Lean's standard three (`propext`, `Classical.choice`, `Quot.sound`).
+- `just lean-model`: `lake build`, then fail on any `sorry`, and on any theorem whose axioms
+  (`#print axioms`) go beyond Lean's standard three (`propext`, `Classical.choice`, `Quot.sound`).
+  A `sorry` would show there as `sorryAx`, so the two checks agree.
 - `just lean-oracle N`: N generated programs through both sides. Fixed seed in CI, so failures
   reproduce. A scheduled job runs a fresh seed.
-- **Spec snapshot.** The modelled spec sections (§5.5, §5.8, §7) are copied into
-  `formal/spec-snapshot/`, like `tests/golden/ir`. Any change to them fails the gate until the
-  snapshot is refreshed in the same commit as the model change, or with a note that the model
-  needs none. Rule numbers alone are not enough: §5.8 is unnumbered prose, rule 8 alone runs to 45
-  lines, and the retro's cause 1 was a premise change inside an existing rule, which adds no
-  number.
+- **Spec snapshot.** Every spec section a rule tag (§4) cites is copied into
+  `formal/spec-snapshot/`, like `tests/golden/ir`. A tag citing a section that is not in the
+  snapshot fails the gate, so the list cannot fall behind the model. Any change to a snapshotted
+  section fails the gate until the snapshot is refreshed in the same commit as the model change,
+  or with a note that the model needs none. Rule numbers alone are not enough: §5.8 is
+  unnumbered prose, rule 8 alone runs to 45 lines, and the retro's cause 1 was a premise change
+  inside an existing rule, which adds no number.
 - CI: a separate job, not part of `just test`, so a Lean breakage does not block compiler work
   until the model has proved its value. Promote it after stage 3.
 
@@ -213,8 +222,9 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
 ## 9. Stages
 
 1. **Toolchain, HM and the effect order.** Pin Lean (§10). Types, terms, inference, T2, the
-   printer, the oracle. Effects as the three-point order without variables, since the compiler
-   enforces rule 8 on every program and `print_str` is `!{IO}`. Exit: oracle green in CI.
+   printer, the oracle. Effects as pure < `IO` only; the effect-variable point comes in stage 4.
+   Needed now, since the compiler enforces rule 8 on every program and `print_str` is `!{IO}`.
+   Exit: oracle green in CI.
 2. **ADTs and match.** T1, T4, the unreachable-branch rule. Exit: the per-column gap and the
    fallbacks are written up in this doc.
 3. **Linearity.** T5 over linear ADTs, containment, `where linear`, binding groups, top-level
@@ -265,8 +275,8 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
   Definition of Done change until the CI job is promoted (§7).
 - **Backlog.** The retro's deferred T3 ("a `/sprout-review` pass that writes linear misuse
   programs") is partly automated by stage 3, inside Core only; the entry stays for the rest. X3
-  (compile the spec's `linear` examples) and C2 (one group-boundary check) are unaffected. On
-  approval, one `BACKLOG.md` entry tracks the stages and links here.
+  (compile the spec's `linear` examples) and C2 (one group-boundary check) are unaffected. One
+  `BACKLOG.md` entry tracks the stages and links here.
 
 ## 13. Impact
 

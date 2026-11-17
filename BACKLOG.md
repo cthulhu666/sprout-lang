@@ -1751,8 +1751,7 @@ deferral happened, not for current behaviour. Still open:
 
 - [ ] `P2` **Lean model of core typing rules, as proofs and a test oracle.** A Lean 4 model of
   Sprout Core (HM, effects, exhaustiveness, linearity) with soundness theorems; its checker diffs
-  against `--phase check` on generated programs. Stages 1–5 and exit criteria:
-  `docs/lean-model-v0.md` §9. Stage 1 (toolchain, HM, effect order, printer, oracle) is next.
+  against `--phase check` on generated programs. Stages and status: `docs/lean-model-v0.md` §9.
 - [ ] `P3` **Expression-side list-literal sweep.** Rewrite multi-element `Cons(a, Cons(b, …))`
   *constructions* in `ast_to_ir.sprout`, `compiler.sprout` and similar to `[a, b]` literals, in
   batches with a seed refresh per batch. `docs/style-guide-v0.md` §8 has the policy on what to
