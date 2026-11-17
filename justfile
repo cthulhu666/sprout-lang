@@ -873,7 +873,10 @@ test-bench-vm:
   bash scripts/test_bench_vm.sh
 
 # ── Lean model of the core typing rules (docs/lean-model-v0.md, docs/gates.md §Lean model) ──
-# Needs the Lean pin in mise.toml. A separate CI job, not part of `test` or `gate`.
+# A separate CI job, not part of `test` or `gate`. Lean is pinned here, not in mise.toml: its
+# release ships its own `clang` (no system headers), which on PATH shadows the real one and breaks
+# every runtime build. Keep the version equal to formal/lean-toolchain.
+lake := "mise exec github:leanprover/lean4@4.35.0 -- lake"
 
 # Run it after re-checking formal/SproutCore against a spec change; commit it with the model change.
 # Copy the spec sections the model follows into formal/spec-snapshot/.
@@ -892,7 +895,7 @@ lean-spec-snapshot-check:
 lean-model: lean-spec-snapshot-check
   #!/usr/bin/env bash
   set -euo pipefail
-  lake -d formal build
+  {{lake}} -d formal build
   if grep -rnw --include='*.lean' 'sorry' formal/SproutCore; then
     echo "lean-model: unfinished proof left in formal/SproutCore" >&2
     exit 1
@@ -906,7 +909,7 @@ lean-model: lean-spec-snapshot-check
 lean-oracle n="500": bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  lake -d formal build sprout-oracle
+  {{lake}} -d formal build sprout-oracle
   rm -rf "{{build_dir}}/lean-oracle"
   formal/.lake/build/bin/sprout-oracle --count {{quote(n)}} --seed "${LEAN_ORACLE_SEED:-20261117}" \
     --driver "{{build_dir}}/compile_driver_bin_stage1" --stdlib "{{stdlib_root}}" \
@@ -920,7 +923,7 @@ lean-oracle n="500": bootstrap-from-seed
 test-lean-oracle: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  lake -d formal build sprout-oracle
+  {{lake}} -d formal build sprout-oracle
   D=$(mktemp -d /tmp/sprout_lean_oracle_XXXXXX); trap 'rm -rf "$D"' EXIT
   O=formal/.lake/build/bin/sprout-oracle
   COMMON=(--driver "{{build_dir}}/compile_driver_bin_stage1" --stdlib "{{stdlib_root}}" --out "$D/out"
