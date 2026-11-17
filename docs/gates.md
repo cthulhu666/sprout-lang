@@ -1446,7 +1446,7 @@ touches `formal/`.
 - `just test-lean-oracle`: a model with the local-`let` rule removed must disagree with the
   compiler, a printer with a planted bug must give a harness error and not a disagreement, a stale
   allowlist entry must fail the run, and the snapshot check must fail on a doctored section.
-- Spec snapshot: `formal/spec-snapshot/` holds spec §5.5, §5.8 and §7, cut by heading
+- Spec snapshot: `formal/spec-snapshot/` holds spec §5.1–5.6, §5.8, §7 and §10.10, cut by heading
   (`scripts/lean_spec_snapshot.py`). Any change to them fails `lean-model` until the model has been
   re-checked against the new text and `just lean-spec-snapshot` has refreshed the copy in the same
   commit. The `changes` job sets `run_lean` for it, since a spec-only change is `docs_only` and
