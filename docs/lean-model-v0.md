@@ -184,8 +184,10 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
 - **Disagreement.** The harness shrinks the program, writes it out, and fails. A human decides
   which side is wrong. A compiler bug becomes a `type_error/` or `run/` fixture. A model bug is
   fixed in Lean. A spec gap goes to `BACKLOG.md`.
-- **Known gaps** go in an allowlist, one shape and one reason per line, like `run/XFAIL`, and a
-  listed gap that stops disagreeing fails the run so the list cannot rot. The first entries are
+- **Known gaps** go in an allowlist, one id, shape and reason per line, like `run/XFAIL`. Each id
+  names a fixed witness program (`formal/SproutCore/Witnesses.lean`) that the run checks on both
+  sides every time: a listed gap whose witness stops disagreeing fails the run so the list cannot
+  rot, and a gap the random sample did not reach is not stale. The first entries are
   the exhaustiveness check's accept-everything fallbacks in `infer.sprout`: a scrutinee whose type
   is a type variable, a function or a record; a constructor missing from the map; field types that
   do not resolve. The model's per-column function follows the spec's text and does not have them.
@@ -199,8 +201,8 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
   reproduce. A scheduled job runs a fresh seed.
 - **Spec snapshot.** Every spec section a rule tag (§4) cites is copied into
   `formal/spec-snapshot/`, like `tests/golden/ir`. A tag citing a section that is not in the
-  snapshot fails the gate, so the list cannot fall behind the model. Any change to a snapshotted
-  section fails the gate until the snapshot is refreshed in the same commit as the model change,
+  snapshot fails the gate (the heading number must match exactly: §5.6.1 is not covered by
+  §5.6), so the list cannot fall behind the model. Any change to a snapshotted section fails the gate until the snapshot is refreshed in the same commit as the model change,
   or with a note that the model needs none. Rule numbers alone are not enough: §5.8 is
   unnumbered prose, rule 8 alone runs to 45 lines, and the retro's cause 1 was a premise change
   inside an existing rule, which adds no number.

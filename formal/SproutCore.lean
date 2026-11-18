@@ -4,3 +4,5 @@ import SproutCore.Print
 import SproutCore.Gen
 import SproutCore.GenProgram
 import SproutCore.Shrink
+import SproutCore.Tests
+import SproutCore.Witnesses

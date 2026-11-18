@@ -875,8 +875,8 @@ test-bench-vm:
 # ── Lean model of the core typing rules (docs/lean-model-v0.md, docs/gates.md §Lean model) ──
 # A separate CI job, not part of `test` or `gate`. Lean is pinned here, not in mise.toml: its
 # release ships its own `clang` (no system headers), which on PATH shadows the real one and breaks
-# every runtime build. Keep the version equal to formal/lean-toolchain.
-lake := "mise exec github:leanprover/lean4@4.35.0 -- lake"
+# every runtime build. The version is read from formal/lean-toolchain (`leanprover/lean4:vX.Y.Z`).
+lake := "mise exec github:leanprover/lean4@" + replace(trim(read("formal/lean-toolchain")), "leanprover/lean4:v", "") + " -- lake"
 
 # Run it after re-checking formal/SproutCore against a spec change; commit it with the model change.
 # Copy the spec sections the model follows into formal/spec-snapshot/.
@@ -903,7 +903,8 @@ lean-model: lean-spec-snapshot-check
   echo "==> lean-model ✓ — formal/ builds, 0 sorry, spec snapshot current"
 
 # Fixed seed; override with LEAN_ORACLE_SEED. Shrunk programs go to build/lean-oracle/.
-# Fails on a disagreement outside formal/oracle/ALLOWLIST, a harness error, or a stale allowlist entry.
+# Fails on a disagreement outside formal/oracle/ALLOWLIST, a harness error, or an allowlist entry
+# whose witness (formal/SproutCore/Witnesses.lean) no longer disagrees.
 # N generated programs through the Lean model and `compile_driver_bin_stage1 --phase check`.
 [group('lean')]
 lean-oracle n="500": bootstrap-from-seed
@@ -916,8 +917,9 @@ lean-oracle n="500": bootstrap-from-seed
     --out "{{build_dir}}/lean-oracle" --allowlist formal/oracle/ALLOWLIST
 
 # A model with one rule removed must disagree with the compiler, a printer with a planted bug must
-# give a harness error and not a disagreement, a stale allowlist entry must fail the run, and the
-# snapshot check must notice a changed section.
+# give a harness error and not a disagreement, a small run must pass, an allowlist entry whose
+# witness does not disagree (or that has none) must fail the run, and the snapshot check must
+# notice a changed section and an uncovered rule tag.
 # Self-test of the Lean oracle, as `test-review-gate` tests its hook.
 [group('test')]
 test-lean-oracle: bootstrap-from-seed
@@ -931,14 +933,25 @@ test-lean-oracle: bootstrap-from-seed
   echo "== planted model: a local let generalises =="
   $O "${COMMON[@]}" --count 200 --plant no-local-let-mono --expect disagreement \
     --expect-shape "Call type mismatch" 2>&1 | tail -n 2
+  echo "== planted model, no shape named =="
+  $O "${COMMON[@]}" --count 200 --plant no-local-let-mono --expect disagreement 2>&1 | tail -n 2
   echo "== planted printer bug =="
   $O "${COMMON[@]}" --count 40 --plant printer-bug --expect harness-error 2>&1 | tail -n 2
-  echo "== stale allowlist entry =="
-  printf 'model-accepts/compiler-rejects: no such shape | stale\n' > "$D/allow"
+  echo "== small runs pass: an allowlist entry the run did not sample is not stale =="
+  $O "${COMMON[@]}" --count 15 --seed 7 2>&1 | tail -n 2
+  $O "${COMMON[@]}" --count 8 --seed 3 2>&1 | tail -n 2
+  echo "== stale allowlist entry: its witness does not disagree with the shape =="
+  printf 'let-rhs-io | model-accepts/compiler-rejects: no such shape | stale\n' > "$D/allow"
   if out=$($O "${COMMON[@]}" --allowlist "$D/allow" --count 3 2>&1); then
     echo "test-lean-oracle: a stale allowlist entry did not fail the run" >&2; exit 1
   fi
   grep -q 'STALE ALLOWLIST ENTRY' <<<"$out" || { echo "$out" >&2; echo "test-lean-oracle: no stale-entry report" >&2; exit 1; }
+  echo "== allowlist entry with no witness =="
+  printf 'no-such-id | model-accepts/compiler-rejects: x | no witness\n' > "$D/allow"
+  if out=$($O "${COMMON[@]}" --allowlist "$D/allow" --count 3 2>&1); then
+    echo "test-lean-oracle: an allowlist entry without a witness did not fail the run" >&2; exit 1
+  fi
+  grep -q 'no witness' <<<"$out" || { echo "$out" >&2; echo "test-lean-oracle: no missing-witness report" >&2; exit 1; }
   echo "== snapshot check notices a change =="
   LEAN_SNAPSHOT_DIR="$D/snap" python3 scripts/lean_spec_snapshot.py --write
   LEAN_SNAPSHOT_DIR="$D/snap" python3 scripts/lean_spec_snapshot.py --check
@@ -953,6 +966,13 @@ test-lean-oracle: bootstrap-from-seed
     echo "test-lean-oracle: the snapshot check missed a tag citing an unsnapshotted section" >&2; exit 1
   fi
   grep -q '§9.9' <<<"$out" || { echo "$out" >&2; echo "test-lean-oracle: no report naming §9.9" >&2; exit 1; }
+  echo "== snapshot check: a subsection of a snapshotted heading is not covered =="
+  # the 5.6 cut stops at `### 5.6.1`, so §5.6.1 is outside the snapshot
+  printf -- '-- spec §5.6.1: planted\n' > "$D/model/Planted.lean"
+  if out=$(LEAN_MODEL_DIR="$D/model" python3 scripts/lean_spec_snapshot.py --check 2>&1); then
+    echo "test-lean-oracle: the snapshot check counted §5.6.1 as covered by §5.6" >&2; exit 1
+  fi
+  grep -q '§5.6.1' <<<"$out" || { echo "$out" >&2; echo "test-lean-oracle: no report naming §5.6.1" >&2; exit 1; }
   echo "==> test-lean-oracle ✓"
 
 # Validate and test the `/prs` pane plugin. Local only: CI has no `claude` CLI.
@@ -5407,8 +5427,8 @@ gate-audit:
   #   runtime-debian12 — CI-only: it needs a container runtime, which is not a required
   #     contributor dependency (the linux-smoke rule).
   #   lean-model / lean-oracle / test-lean-oracle — CI-only for the plugin-test reason: they need
-  #     the Lean pin in mise.toml, which a contributor who never touches formal/ has no reason to
-  #     install, and the oracle takes minutes. Their own `lean` CI job runs them
+  #     the Lean pin (the `lake` variable), which a contributor who never touches formal/ has no
+  #     reason to install, and the oracle takes minutes. Their own `lean` CI job runs them
   #     (docs/lean-model-v0.md §7: a Lean breakage must not block compiler work until the model
   #     has proved its value).
   EXCLUDE="bootstrap-from-seed build-fmt-from-seed refresh-seed ci-fast-gates test-stdlib-core-stage1 test-stdlib-compiler-stage1 windows-tu-check windows-poll-selftest plugin-test plugin-build plugin-split-check runtime-debian12 lean-model lean-oracle test-lean-oracle"

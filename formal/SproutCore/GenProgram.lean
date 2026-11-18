@@ -70,14 +70,9 @@ def genLets (n : Nat) : G (List Decl × Info) := do
         (2, pure (Expr.tup [.var x, .var x], Ty.tup [a, a]))]
       decls := decls ++ [.letD name none (.lam x none body)]
       info := { info with polyLets := info.polyLets ++ [⟨name, ["a"], [a], ret, .pure⟩] }
-    | 1 =>
-      let t ← genClosedTy 1
-      let init ← genExpr env 2 t
-      let ann ← chance 30
-      decls := decls ++ [.letD name (if ann then some t else none) init]
-      info := { info with letVars := info.letVars ++ [(name, t)] }
     | _ =>
-      let t ← genArrTy false
+      -- a value of a closed type (1), or of an arrow type (2)
+      let t ← if kind == 1 then genClosedTy 1 else genArrTy false
       let init ← genExpr env 2 t
       let ann ← chance 30
       decls := decls ++ [.letD name (if ann then some t else none) init]
@@ -230,17 +225,10 @@ def mutate (info : Info) (decls : List Decl) : G (List Decl) := do
     -- an unknown variable
     pure (decls ++ [.fn m [] (some (.int, .pure)) (.var "zz")])
   | 15 =>
-    -- a pure function value in a non-value top-level `let`, called from another top-level `let`
-    -- (spec §5.2: a top-level `let` must be pure)
-    let p ← genSimpleTy
-    let r ← genSimpleTy
-    let closed : GEnv := { canIO := false }
-    let a ← genLam closed 0 p r .pure
-    let b ← genLam closed 0 p r .pure
-    let c ← genExpr closed 1 .bool
-    let arg ← genExpr closed 1 p
-    let l ← freshName "l"
-    pure (.letD l none (.ite c a b) :: .letD m none (.app (.var l) [arg]) :: decls)
+    -- `main` above a top-level `let` it uses: `main` is a `fn` too (spec §7 rule 16)
+    let isMain : Decl → Bool := fun d => match d with | .mainFn .. => true | _ => false
+    pure (decls.filter (!isMain ·) ++ [.mainFn (some (.unit, .io)) (.app (.var "print_str") [.var m]),
+      .letD m none (.str "m")])
   | _ =>
     -- a peer join under a parameter, and a second function value in a slot (spec §7 rule 8)
     let h ← freshName "h"
