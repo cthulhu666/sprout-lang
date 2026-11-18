@@ -31,19 +31,17 @@ inductive CV where
   | reject (msg : String)
   | harness (msg : String)
 
-def has (s sub : String) : Bool := (s.splitOn sub).length > 1
-
 def firstLineWith (s sub : String) : String :=
-  ((s.splitOn "\n").find? (fun l => has l sub)).getD ""
+  ((s.splitOn "\n").find? (fun l => l.contains sub)).getD ""
 
 def runCompiler (cfg : Cfg) (file : String) : IO CV := do
   let o ← IO.Process.output { cmd := cfg.driver, args := #["--phase", "check", cfg.stdlib, file] }
   let out := o.stdout ++ o.stderr
-  if has out "bundle: " then
+  if out.contains "bundle: " then
     return .harness (firstLineWith out "bundle: ")
-  else if o.exitCode == 0 && ((out.splitOn "\n").any (· == "OK")) && !(has out "ERROR:") then
+  else if o.exitCode == 0 && ((out.splitOn "\n").any (· == "OK")) && !(out.contains "ERROR:") then
     return .accept
-  else if o.exitCode != 0 && has out "ERROR:" then
+  else if o.exitCode != 0 && out.contains "ERROR:" then
     return .reject (firstLineWith out "ERROR:")
   else
     return .harness s!"unclassified (exit {o.exitCode}): {(out.splitOn "\n").head!}"
@@ -96,19 +94,22 @@ def evalProg (s : Setup) (p : Program) : IO (Except String Unit × CV) := do
   let c ← runCompiler s.cfg file
   return (checkProgram s.rules p, c)
 
-/-- Greedy shrink: take the first smaller program with the same disagreement shape. -/
-partial def shrinkLoop (s : Setup) (shape : String) (p : Program) (budget : Nat) : IO Program := do
-  if budget == 0 then return p
+/-- Greedy shrink: take the first smaller program with the same disagreement shape. `p` comes
+with its two verdicts, and the result does too. -/
+partial def shrinkLoop (s : Setup) (shape : String) (p : Program) (m : Except String Unit)
+    (c : CV) (budget : Nat) : IO (Program × Except String Unit × CV) := do
+  if budget == 0 then return (p, m, c)
   let mut budget := budget
   for cand in shrinkProgram p do
     if budget == 0 then break
     budget := budget - 1
-    let (m, c) ← evalProg s cand
-    if shapeOf m c == some shape then
-      return (← shrinkLoop s shape cand budget)
-  return p
+    let (m', c') ← evalProg s cand
+    if shapeOf m' c' == some shape then
+      return (← shrinkLoop s shape cand m' c' budget)
+  return (p, m, c)
 
-def parseAllow (path : String) : IO (List (String × String)) := do
+/-- The allowlist: `(id, shape, reason)` per entry. -/
+def parseAllow (path : String) : IO (List (String × String × String)) := do
   if !(← System.FilePath.pathExists path) then return []
   let txt ← IO.FS.readFile path
   let mut out := []
@@ -116,8 +117,10 @@ def parseAllow (path : String) : IO (List (String × String)) := do
     let l := l.trimAscii.toString
     if l == "" || l.startsWith "#" then continue
     match l.splitOn " | " with
-    | [shape, reason] => out := out ++ [(shape.trimAscii.toString, reason.trimAscii.toString)]
-    | _ => throw (IO.userError s!"ALLOWLIST: expected `shape | reason`: {l}")
+    | id :: shape :: reason@(_ :: _) =>
+      out := out ++ [(id.trimAscii.toString, shape.trimAscii.toString,
+        " | ".intercalate reason |>.trimAscii.toString)]
+    | _ => throw (IO.userError s!"ALLOWLIST: expected `id | shape | reason`: {l}")
   return out
 
 def parseArgs : List String → Cfg → Except String Cfg
@@ -147,6 +150,11 @@ def main (args : List String) : IO UInt32 := do
   let work ← IO.FS.createTempDir
   let s : Setup := { cfg, rules, popts, work := work.toString }
   let allow ← parseAllow cfg.allowlist
+  for (id, _, _) in allow do
+    if (witnesses.lookup id).isNone then
+      IO.FS.removeDirAll work
+      IO.eprintln s!"ALLOWLIST: entry `{id}` has no witness in formal/SproutCore/Witnesses.lean"
+      return 2
   let mut nAccept := 0
   let mut nReject := 0
   let mut harness : List String := []
@@ -169,24 +177,33 @@ def main (args : List String) : IO UInt32 := do
       | none => pure ()
       | some shape =>
         disagreements := disagreements + 1
-        let small ← shrinkLoop s shape p 400
-        let (m', c') ← evalProg s small
+        let (small, m', c') ← shrinkLoop s shape p m c 400
         let src := printProgram popts small
         IO.FS.writeFile (cfg.out ++ s!"/disagree-{seed}.spr") src
         IO.FS.writeFile (cfg.out ++ s!"/disagree-{seed}.txt")
           s!"seed: {seed}\nshape: {shape}\nmodel: {verdictStr m'}\ncompiler: {cvStr c'}\n"
-        if allow.any (·.1 == shape) then
+        if allow.any (·.2.1 == shape) then
           allowed := allowed ++ [shape]
         else
           bad := bad ++ [s!"seed {seed}: {shape}"]
           IO.println s!"DISAGREEMENT seed {seed}: {shape}\n  model:    {verdictStr m'}\n  compiler: {cvStr c'}\n{src}"
+  -- An entry is stale when its fixed witness no longer disagrees with the entry's shape, whatever
+  -- the random sample held.
+  let mut stale : List String := []
+  unless planted do
+    for (id, shape, _) in allow do
+      match witnesses.lookup id with
+      | none => pure ()
+      | some w =>
+        let (m, c) ← evalProg s w
+        if shapeOf m c != some shape then
+          stale := stale ++ [s!"{id}: {shape} (witness: model {verdictStr m}, compiler {cvStr c})"]
   IO.FS.removeDirAll work
-  let stale := allow.filter fun (sh, _) => !(allowed.contains sh)
   IO.println s!"programs {cfg.count} (model accept {nAccept}, reject {nReject}); disagreements {disagreements} (allowlisted {allowed.length}); harness errors {harness.length}"
   for h in harness.take 5 do IO.println s!"HARNESS ERROR {h}"
   match cfg.expect with
   | "disagreement" =>
-    if !bad.isEmpty && harness.isEmpty && (bad.any fun b => has b cfg.expectShape) then
+    if !bad.isEmpty && harness.isEmpty && (bad.any fun b => b.contains cfg.expectShape) then
       IO.println "self-test ok: the planted model defect was found"
       return 0
     IO.println "self-test FAILED: expected a new disagreement and no harness error"
@@ -198,9 +215,9 @@ def main (args : List String) : IO UInt32 := do
     IO.println "self-test FAILED: expected a harness error and no disagreement"
     return 1
   | _ =>
-    for (sh, _) in stale do
-      IO.println s!"STALE ALLOWLIST ENTRY (no longer disagrees): {sh}"
-    if bad.isEmpty && harness.isEmpty && (planted || stale.isEmpty) then
+    for st in stale do
+      IO.println s!"STALE ALLOWLIST ENTRY (its witness no longer disagrees): {st}"
+    if bad.isEmpty && harness.isEmpty && stale.isEmpty then
       IO.println "oracle ok"
       return 0
     return 1

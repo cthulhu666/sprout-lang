@@ -99,8 +99,8 @@ partial def flow (a e : Ty) : M Unit := do
       -- spec §7 rule 8: a function VALUE may not enter a slot that permits less effect
       unless ae.le ee do reject "effect-slot" "IO function where a pure one is required"
     else if aps.length > eps.length then
-      -- the expected arrow's result is itself the rest of the actual arrow
-      unless ae.le ee do reject "effect-slot" "IO function where a pure one is required"
+      -- the expected arrow's result is itself the rest of the actual arrow; the effect sits on
+      -- the innermost arrow, so the outer one is pure and this inner `flow` compares the effect
       flow (.arr (aps.drop k) ar ae) er
     else
       unless ae.le .pure do reject "effect-slot" "IO function where a pure one is required"
@@ -264,6 +264,10 @@ def bindLocal (rules : Rules) (env : Env) (x : String) (t : Ty) : M Env := do
     let (n, t') ← generalize keep t
     return (x, .poly n t') :: env
 
+/-- `t` flows into `Bool`, or reject with `key`. -/
+def expectBool (t : Ty) (key detail : String) : M Unit := do
+  unless (← try flow t .bool; pure true catch _ => pure false) do reject key detail
+
 /-- The slots of a call, its result type and the effect the call itself performs. -/
 partial def peel (t : Ty) (n : Nat) : M (List Ty × Ty × Eff) := do
   match ← shallow t with
@@ -332,8 +336,7 @@ partial def infer (rules : Rules) (env : Env) : Expr → M (Ty × Eff)
   | .ite c t e => do
     -- spec §7 rule 2: `if` condition must be Bool
     let (tc, ec) ← infer rules env c
-    unless (← try flow tc .bool; pure true catch _ => pure false) do
-      reject "if-cond" "condition is not Bool"
+    expectBool tc "if-cond" "condition is not Bool"
     let (tt, et) ← infer rules env t
     let (te, ee) ← infer rules env e
     -- spec §5.4: both branches have a common type neither owns; spec §7 rule 8: peer join
@@ -351,8 +354,7 @@ partial def infer (rules : Rules) (env : Env) : Expr → M (Ty × Eff)
   | .notE e => do
     -- spec §5.3b: the operand of `!` must be Bool
     let (t, eff) ← infer rules env e
-    unless (← try flow t .bool; pure true catch _ => pure false) do
-      reject "not-bool" "operand of ! is not Bool"
+    expectBool t "not-bool" "operand of ! is not Bool"
     pure (.bool, eff)
   | .doB steps final => do
     let mut env' := env
@@ -440,29 +442,28 @@ def inferFnGroup (rules : Rules) (base : Env) (fns : List FnInfo) : M Env := do
   -- spec §7 rule 16: a group is typed monomorphically, then generalised at the boundary.
   -- Members with a complete signature are visible to peers already quantified (rule 16).
   let mut groupEnv : Env := []
-  let mut built : List (FnInfo × List Ty × Ty × Eff × Ty) := []
+  -- the scheme is `some` for a complete signature, computed once
+  let mut built : List (FnInfo × List Ty × Ty × Eff × Ty × Option (Nat × Ty)) := []
   for f in fns do
     let vs := f.writtenVars
     let mut sks := []
     for v in vs do sks := sks ++ [(v, ← freshSkolem)]
     let m := fun s => (sks.lookup s).getD .unit
     let (ps, r, e, t) ← f.build m
-    built := built ++ [(f, ps, r, e, t)]
-    if f.complete then
-      let (n, sch) ← f.scheme
-      groupEnv := (f.name, .fnPoly f.params.length n sch) :: groupEnv
-    else
-      groupEnv := (f.name, .fnMono f.params.length t) :: groupEnv
+    let sch ← if f.complete then some <$> f.scheme else pure none
+    built := built ++ [(f, ps, r, e, t, sch)]
+    match sch with
+    | some (n, sc) => groupEnv := (f.name, .fnPoly f.params.length n sc) :: groupEnv
+    | none => groupEnv := (f.name, .fnMono f.params.length t) :: groupEnv
   let env := groupEnv ++ base
-  for (f, ps, r, e, _) in built do
+  for (f, ps, r, e, _, _) in built do
     let params := (f.params.map (·.1)).zip ps
     checkBody rules env params r e f.body
   let mut out : Env := []
-  for (f, _, _, _, t) in built do
-    if f.complete then
-      let (n, sch) ← f.scheme
-      out := (f.name, .fnPoly f.params.length n sch) :: out
-    else
+  for (f, _, _, _, t, sch) in built do
+    match sch with
+    | some (n, sc) => out := (f.name, .fnPoly f.params.length n sc) :: out
+    | none =>
       let (n, t') ← generalize [] t
       out := (f.name, .fnPoly f.params.length n t') :: out
   return out ++ base
@@ -492,6 +493,10 @@ def Node.name : Node → String
   | .fnN f => f.name
   | .letN n _ _ => n
 
+def Node.isLet : Node → Bool
+  | .letN .. => true
+  | .fnN _ => false
+
 def Node.refs (names : List String) : Node → List String
   | .fnN f => (fv (f.params.map (·.1)) f.body).filter names.contains
   | .letN _ _ i => (fv [] i).filter names.contains
@@ -499,12 +504,13 @@ def Node.refs (names : List String) : Node → List String
 /-- The checker. `accept` is `ok ()`; a rejection carries `<key>: <detail>`. -/
 def checkProgram (rules : Rules := {}) (p : Program) : Except String Unit := do
   let mut nodes : Array Node := #[]
-  let mut mains : List (Option (Ty × Eff) × Expr) := []
+  -- each `main` with the number of nodes declared above it
+  let mut mains : List (Nat × Option (Ty × Eff) × Expr) := []
   for d in p.decls do
     match d with
     | .fn n ps sg b => nodes := nodes.push (.fnN ⟨n, ps, sg, b⟩)
     | .letD n a i => nodes := nodes.push (.letN n a i)
-    | .mainFn sg b => mains := mains ++ [(sg, b)]
+    | .mainFn sg b => mains := mains ++ [(nodes.size, sg, b)]
   let names := nodes.toList.map Node.name
   -- spec §5.1: a name may be declared at most once at a module's top level
   for (n, i) in names.zipIdx do
@@ -529,6 +535,11 @@ def checkProgram (rules : Rules := {}) (p : Program) : Except String Unit := do
       | _, _ => pure ()
       es := es ++ [j]
     edges := edges.push es
+  for (pos, _, body) in mains do
+    for r in (fv [] body).filter names.contains do
+      -- spec §7 rule 16: `main` is a `fn`, so it may not sit above a top-level `let` it uses
+      if (idx r).getD 0 ≥ pos && (nodes[(idx r).getD 0]!.isLet) then
+        throw s!"fn-before-let: main precedes the `let` {r} it uses"
   -- reachability, to find binding groups (minimal mutually dependent sets)
   let n := nodes.size
   let mut reach : Array (Array Bool) := Array.replicate n (Array.replicate n false)
@@ -574,7 +585,7 @@ def checkProgram (rules : Rules := {}) (p : Program) : Except String Unit := do
         if fnMembers.length != members.length then
           reject "let-in-group" "a top-level `let` in a recursive group"
         env ← inferFnGroup rules env fnMembers
-    for (sg, body) in mains do
+    for (_, sg, body) in mains do
       -- spec §10.10 / §7 rule 10: `main` is `fn main() -> Unit !{IO}` (or `Int !{IO}`), written out
       match sg with
       | none => reject "main-sig" "main must declare its return type and effect"

@@ -61,7 +61,9 @@ def uncovered_tags(lines):
             if not m:
                 continue
             for sec in SECTION.findall(m.group(1)):
-                if not any(sec == c or sec.startswith(c + ".") for c in covered):
+                # exact: a cut that stops at `### 5.6.1` holds §5.6, not §5.6.1 (a subsection
+                # of a covered heading is covered only if the cut reaches its own heading)
+                if sec not in covered:
                     missing.append(f"{os.path.relpath(path, ROOT)}:{n}: §{sec}")
     return missing
 

@@ -1433,27 +1433,32 @@ recipes as CI-only. Lean comes from mise, pinned in the justfile's `lake` variab
 `mise.toml`: its release ships a `clang` without system headers that would shadow the real one on
 PATH. It installs on first use, so nothing changes for a contributor who never touches `formal/`.
 
-- `just lean-model`: `lake -d formal build`, then fails on a `sorry` in `formal/SproutCore`, and
+- `just lean-model`: `lake -d formal build` (which also runs the `#guard` regressions of
+  `formal/SproutCore/Tests.lean`), then fails on a `sorry` in `formal/SproutCore`, and
   first on a stale spec snapshot (below). Stage 1a has no theorems; the axiom check waits for 1b.
 - `just lean-oracle [N]`: N programs (default 500, seed 20261117, override with `LEAN_ORACLE_SEED`)
   from the Lean generator, each printed to a `.spr` and checked by both the model and
   `build/compile_driver_bin_stage1 --phase check`. Fails on a disagreement whose shape is not in
   `formal/oracle/ALLOWLIST`, on a harness error (`bundle: …`, meaning the printer wrote code the
-  parser refused, so fix the printer), and on an allowlist entry that no longer disagrees. A
+  parser refused, so fix the printer), and on an allowlist entry whose fixed witness program
+  (`formal/SproutCore/Witnesses.lean`, keyed by the entry's id) no longer disagrees with its shape;
+  an entry with no witness is an error, and an entry the random sample did not reach is not stale. A
   disagreement is shrunk and written to `build/lean-oracle/`. Decide which side is wrong from the
   spec text and the compiler source: a compiler bug becomes a `type_error/` or `run/` fixture, a
   model bug is fixed in `formal/SproutCore`, a spec gap goes to `BACKLOG.md`. Do not bend the model
   to the compiler.
 - `just test-lean-oracle`: a model with the local-`let` rule removed must disagree with the
-  compiler, a printer with a planted bug must give a harness error and not a disagreement, a stale
-  allowlist entry must fail the run, and the snapshot check must fail on a doctored section and
-  on a rule tag citing a section it does not hold.
-- Spec snapshot: `formal/spec-snapshot/` holds spec §5.1–5.6, §5.8, §7 and §10.10, cut by heading
-  (`scripts/lean_spec_snapshot.py`). Any change to them fails `lean-model` until the model has been
-  re-checked against the new text and `just lean-spec-snapshot` has refreshed the copy in the same
-  commit. A `-- spec §…` rule tag in `formal/SproutCore/` citing a section outside the snapshot
-  also fails it, so the list cannot fall behind the model. The `changes` job sets `run_lean` for
-  it, since a spec-only change is `docs_only` and would skip every other job.
+  compiler, a printer with a planted bug must give a harness error and not a disagreement, small
+  runs with other seeds must pass, an allowlist entry whose witness does not disagree must fail
+  the run, and the snapshot check must fail on a doctored section and on a rule tag citing a
+  section it does not hold.
+- Spec snapshot: `formal/spec-snapshot/` holds spec §5.1–5.5, the intro of §5.6 (up to
+  `### 5.6.1`), §5.8, §7 and §10.10, cut by heading (`scripts/lean_spec_snapshot.py`). Any change
+  to them fails `lean-model` until the model has been re-checked against the new text and
+  `just lean-spec-snapshot` has refreshed the copy in the same commit. A `-- spec §…` rule tag in
+  `formal/SproutCore/` citing a section outside the snapshot also fails it, so the list cannot fall
+  behind the model; the match is exact, so §5.6.1 is not covered by §5.6. The `changes` job sets
+  `run_lean` for it, since a spec-only change is `docs_only` and would skip every other job.
 
 The oracle compares verdicts, not messages, so two sides can reject one program for different
 reasons. Stage 1's effect model has no effect variables: the generator never solves a type
