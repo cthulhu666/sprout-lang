@@ -58,6 +58,11 @@ def blankQuoted (s : String) : String :=
 
 /-- Strip a compiler message down to its rule: no positions, names or types. -/
 def normMsg (msg : String) : String :=
+  -- the effect-slot rejection reads the same under any prefix (`If branches…`, `Call…`), and the
+  -- prefix alone would put an unrelated `If` mismatch under the same shape
+  if msg.contains "cannot be used where a pure one is required" then
+    "IO function where a pure one is required"
+  else
   let after := match msg.splitOn "ERROR: " with
     | _ :: rest => "ERROR: ".intercalate rest
     | [] => msg
@@ -69,7 +74,7 @@ def normMsg (msg : String) : String :=
 def shapeOf (m : Except String Unit) (c : CV) : Option String :=
   match m, c with
   | .ok _, .reject msg => some s!"model-accepts/compiler-rejects: {normMsg msg}"
-  | .error e, .accept => some s!"model-rejects/compiler-accepts: {(e.splitOn ":").head!}"
+  | .error e, .accept => some s!"model-rejects/compiler-accepts: {msgKey e}"
   | _, _ => none
 
 def verdictStr (m : Except String Unit) : String :=
@@ -88,11 +93,13 @@ structure Setup where
   popts : PrintOpts
   work : String
 
-def evalProg (s : Setup) (p : Program) : IO (Except String Unit × CV) := do
+def compileProg (s : Setup) (p : Program) : IO CV := do
   let file := s.work ++ "/p.spr"
   IO.FS.writeFile file (printProgram s.popts p)
-  let c ← runCompiler s.cfg file
-  return (checkProgram s.rules p, c)
+  runCompiler s.cfg file
+
+def evalProg (s : Setup) (p : Program) : IO (Except String Unit × CV) := do
+  return (checkProgram s.rules p, ← compileProg s p)
 
 /-- Greedy shrink: take the first smaller program with the same disagreement shape. `p` comes
 with its two verdicts, and the result does too. -/
@@ -103,7 +110,10 @@ partial def shrinkLoop (s : Setup) (shape : String) (p : Program) (m : Except St
   for cand in shrinkProgram p do
     if budget == 0 then break
     budget := budget - 1
-    let (m', c') ← evalProg s cand
+    -- the shape fixes the model verdict a candidate needs, so skip the compiler on a miss
+    let m' := checkProgram s.rules cand
+    if m'.toBool != shape.startsWith "model-accepts" then continue
+    let c' ← compileProg s cand
     if shapeOf m' c' == some shape then
       return (← shrinkLoop s shape cand m' c' budget)
   return (p, m, c)

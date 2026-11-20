@@ -35,7 +35,8 @@ partial def pTy (top : Bool) : Ty → String
   | .unit => "Unit"
   | .tup ts => "(" ++ ", ".intercalate (ts.map (pTy false)) ++ ")"
   | .arr ps r e =>
-    let ps' := " -> ".intercalate (ps.map (pTy false))
+    -- `()` is only an empty parameter list, spelled directly before `->` (spec §7 rule 9)
+    let ps' := if ps.isEmpty then "()" else " -> ".intercalate (ps.map (pTy false))
     let r' := match r with
       | .arr .. => pTy false r
       | _ => pTy true r

@@ -9,8 +9,9 @@ Implements the spec's rules, not textbook HM. Every rule carries a tag
 
 Scope of the effect model (stage 1, no effect variables): an arrow's effect is `pure` or `IO`.
 A type variable solved to an arrow keeps that arrow's effect, so the checker is faithful where no
-variable is solved to arrows of differing effects. The generator stays out of that region; stage 4
-replaces it with effect variables and bounds.
+variable is solved to arrows of differing effects. The generator aims to stay out of that region
+(`Gen.lean`), and the oracle reports a program that leaves it as a disagreement; stage 4 replaces
+the model with effect variables and bounds.
 -/
 
 namespace SproutCore
@@ -30,6 +31,9 @@ abbrev M := StateT CState (Except String)
 /-- Reject with `<key>: <detail>`; the key is what the oracle's allowlist names. -/
 def reject {α : Type} (key detail : String) : M α := throw s!"{key}: {detail}"
 
+/-- The key of a rejection message (the text before the first colon). -/
+def msgKey (e : String) : String := (e.splitOn ":").head!
+
 def fresh : M Ty := do
   let s ← get
   set { s with subst := s.subst.push none }
@@ -41,10 +45,12 @@ def freshSkolem : M Ty := do
   return .skolem s.nextSk
 
 /-- A function type. The effect sits on the innermost arrow, so a pure arrow whose result is an
-arrow is one longer arrow (spec §7 rule 9: "an annotation attaches to the innermost arrow"). -/
+arrow is one longer arrow (spec §7 rule 9: "an annotation attaches to the innermost arrow").
+An empty parameter list is an arrow of its own, never merged (spec §7 rule 9: "`fn f() -> T` has
+type `() -> T`", and `() -> T` is not `Unit -> T`). -/
 def mkArr (ps : List Ty) (r : Ty) (e : Eff) : Ty :=
   match r, e with
-  | .arr ps' r' e', .pure => .arr (ps ++ ps') r' e'
+  | .arr ps' r' e', .pure => if ps.isEmpty || ps'.isEmpty then .arr ps r e else .arr (ps ++ ps') r' e'
   | _, _ => .arr ps r e
 
 partial def shallow : Ty → M Ty
@@ -60,11 +66,13 @@ partial def zonk (t : Ty) : M Ty := do
   | .arr ps r e => return mkArr (← ps.mapM zonk) (← zonk r) e
   | t => return t
 
-partial def occursIn (n : Nat) : Ty → Bool
-  | .mv m => n == m
-  | .tup ts => ts.any (occursIn n)
-  | .arr ps r _ => ps.any (occursIn n) || occursIn n r
-  | _ => false
+partial def metasOf : Ty → List Nat
+  | .mv n => [n]
+  | .tup ts => ts.flatMap metasOf
+  | .arr ps r _ => ps.flatMap metasOf ++ metasOf r
+  | _ => []
+
+def occursIn (n : Nat) (t : Ty) : Bool := (metasOf t).contains n
 
 def bindMeta (n : Nat) (t : Ty) : M Unit := do
   let t ← zonk t
@@ -92,6 +100,8 @@ partial def flow (a e : Ty) : M Unit := do
       for (x, y) in as.zip es do flow x y
     else reject "mismatch" "tuple arity"
   | .arr aps ar ae, .arr eps er ee =>
+    -- spec §7 rule 9: `() -> T` and `Unit -> T` are distinct, and neither is assignable to the other
+    if aps.isEmpty != eps.isEmpty then reject "mismatch" "arrow arity" else
     let k := min aps.length eps.length
     for (ap, ep) in (aps.take k).zip (eps.take k) do flow ep ap
     if aps.length == eps.length then
@@ -131,8 +141,22 @@ partial def joinTy (pos : Bool) (a b : Ty) : M Ty := do
     if aps.length == bps.length then
       let ps ← (aps.zip bps).mapM fun (x, y) => joinTy (!pos) x y
       let r ← joinTy pos ar br
-      return .arr ps r (if pos then ae.join be else ae.meet be)
-    else reject "mismatch" "arrow arity"
+      return mkArr ps r (if pos then ae.join be else ae.meet be)
+    else if aps.isEmpty || bps.isEmpty then
+      -- spec §7 rule 9: `() -> T` is not `Unit -> T`
+      reject "mismatch" "arrow arity"
+    else
+      -- the stored arities differ when a result variable was later solved to an arrow: split the
+      -- longer arrow, as `flow` does. The shorter one's result joins the longer one's rest, which
+      -- is an arrow whose outer effect is pure.
+      let k := min aps.length bps.length
+      let ps ← ((aps.take k).zip (bps.take k)).mapM fun (x, y) => joinTy (!pos) x y
+      if aps.length > bps.length then
+        let r ← joinTy pos (.arr (aps.drop k) ar ae) br
+        return mkArr ps r (if pos then be else .pure)
+      else
+        let r ← joinTy pos ar (.arr (bps.drop k) br be)
+        return mkArr ps r (if pos then ae else .pure)
   | _, _ => reject "mismatch" "branch types differ"
 
 /-! ### Environments and schemes -/
@@ -184,12 +208,6 @@ def generalize (keep : List Nat) (t : Ty) : M (Nat × Ty) := do
   let (tab, t') := genGo keep #[] t
   return (tab.size, t')
 
-partial def metasOf : Ty → List Nat
-  | .mv n => [n]
-  | .tup ts => ts.flatMap metasOf
-  | .arr ps r _ => ps.flatMap metasOf ++ metasOf r
-  | _ => []
-
 def envMetas (env : Env) : M (List Nat) := do
   let mut acc := []
   for (_, b) in env do
@@ -200,17 +218,13 @@ def envMetas (env : Env) : M (List Nat) := do
 
 /-! ### Written types -/
 
-partial def hasNamed : Ty → Bool
-  | .named _ => true
-  | .tup ts => ts.any hasNamed
-  | .arr ps r _ => ps.any hasNamed || hasNamed r
-  | _ => false
-
 partial def namedIn : Ty → List String
   | .named s => [s]
   | .tup ts => ts.flatMap namedIn
   | .arr ps r _ => ps.flatMap namedIn ++ namedIn r
   | _ => []
+
+def hasNamed (t : Ty) : Bool := !(namedIn t).isEmpty
 
 /-- Read a written type, mapping each type variable through `f`, and normalise arrows. -/
 partial def elabTy (f : String → Ty) : Ty → M Ty
@@ -273,6 +287,8 @@ partial def peel (t : Ty) (n : Nat) : M (List Ty × Ty × Eff) := do
   match ← shallow t with
   | .arr ps r e =>
     if n == ps.length then pure (ps, r, e)
+    -- spec §7 rule 9: calling a `() -> T` requires the empty argument list
+    else if ps.isEmpty then reject "mismatch" "call of a function taking no arguments with some"
     else if n < ps.length then
       -- spec §5.3: applying a function-typed value is checked at run time; typed as the rest
       pure (ps.take n, mkArr (ps.drop n) r e, .pure)
@@ -405,7 +421,7 @@ def FnInfo.complete (f : FnInfo) : Bool :=
 def FnInfo.writtenVars (f : FnInfo) : List String :=
   let vs := (f.params.flatMap fun (_, t) => match t with | some t => namedIn t | none => []) ++
     (match f.sig with | some (t, _) => namedIn t | none => [])
-  vs.foldl (fun acc v => if acc.contains v then acc else acc ++ [v]) []
+  vs.eraseDups
 
 /-- The member's type under `f`: written variables map through `m`; omitted types are fresh. -/
 def FnInfo.build (f : FnInfo) (m : String → Ty) : M (List Ty × Ty × Eff × Ty) := do
@@ -477,8 +493,8 @@ def inferLet (rules : Rules) (base : Env) (name : String) (ann : Option Ty) (ini
   if let some a := ann then
     -- spec §5.2: the annotation is unified with the initialiser; its variables are ordinary
     let mut sks : List (String × Ty) := []
-    for v in namedIn a do
-      unless sks.any (·.1 == v) do sks := sks ++ [(v, ← fresh)]
+    for v in (namedIn a).eraseDups do
+      sks := sks ++ [(v, ← fresh)]
     let a' ← elabTy (fun s => (sks.lookup s).getD .unit) a
     flow t a'
   let (n, t') ← generalize [] t

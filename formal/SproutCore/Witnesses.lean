@@ -28,10 +28,31 @@ def witnessNonGenCall : Program :=
   ⟨[.letD "f" none (.letIn "v" (.int 0) (.lam "x" (some .bool) (.var "x"))),
     .letD "g" none (.app (.var "f") [.bool false])]⟩
 
+/-- `let l = let v = false in \(x: Int) -> v`, `fn use(p: Int -> Bool !{IO}) -> Bool = true`,
+`fn both() -> Bool = if use(l) then l(0) else false`: passing a non-generalised pure function value
+to an `!{IO}` slot, then calling it. -/
+def witnessNonGenSlot : Program :=
+  ⟨[.letD "l" none (.letIn "v" (.bool false) (.lam "x" (some .int) (.var "v"))),
+    .fn "use" [("p", some (.arr [.int] .bool .io))] (some (.bool, .pure)) (.bool true),
+    .fn "both" [] (some (.bool, .pure))
+      (.ite (.app (.var "use") [.var "l"]) (.app (.var "l") [.int 0]) (.bool false))]⟩
+
+/-- `fn use(p: String -> String !{IO}) -> Unit !{IO} = ()`, then in an `!{IO}` function
+`use(if c then (if c then (\x -> x) else (\y -> y)) else p)` with `p: String -> String !{IO}`:
+a peer join whose first branch is itself a join, against an `!{IO}` function. -/
+def witnessJoinOrder : Program :=
+  ⟨[.fn "use" [("p", some (.arr [.str] .str .io))] (some (.unit, .io)) .unit,
+    .fn "g" [("p", some (.arr [.str] .str .io))] (some (.unit, .io))
+      (.app (.var "use") [.ite (.bool false)
+        (.ite (.bool false) (.lam "x" none (.var "x")) (.lam "y" none (.var "y")))
+        (.var "p")])]⟩
+
 /-- Witness by allowlist id. -/
 def witnesses : List (String × Program) :=
   [("let-rhs-io", witnessLetRhsIO),
    ("value-restriction", witnessValueRestriction),
-   ("nongen-call", witnessNonGenCall)]
+   ("nongen-call", witnessNonGenCall),
+   ("nongen-slot", witnessNonGenSlot),
+   ("join-order", witnessJoinOrder)]
 
 end SproutCore
