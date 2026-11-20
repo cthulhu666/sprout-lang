@@ -1,5 +1,5 @@
-/* The young-only sweep (docs/gc-stage2-v0.md §5.3, §6), driven directly with minor collections
- * on and SPROUT_GC_GENCHECK=1, which adds the young-bitmap, free-count and region checks after
+/* The young-only sweep (docs/gc-stage2-v0.md §5.3, §6), driven directly with SPROUT_GC_HOLES=0,
+ * minor collections on and SPROUT_GC_GENCHECK=1, which adds the young-bitmap, free-count and region checks after
  * every sweep.
  *
  * An object is made old the real way: rooted across g_gen.promote_age collections, the first a
@@ -296,6 +296,7 @@ int main(int argc, char** argv) {
   for (size_t i = 0; i < sizeof k_cases / sizeof k_cases[0]; i++)
     if (strcmp(argv[1], k_cases[i].name) == 0) c = &k_cases[i];
   if (!c) return 2;
+  setenv("SPROUT_GC_HOLES", "0", 1);  /* the young-only slot sweep belongs to the free-list collector */
   setenv("SPROUT_GC_MINOR", "1", 1);
   setenv("SPROUT_GC_GENCHECK", "1", 1);
   setenv("SPROUT_GC_MAJOR_EVERY", "1000", 1);

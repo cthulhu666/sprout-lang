@@ -92,7 +92,7 @@ bench-vm base head:
   bash scripts/bench_vm.sh {{quote(base)}} {{quote(head)}}
 
 # GC A/B (bench/gc_minor/ab.sh) of ONE ref on the same kind of VM, with named env arms:
-# `just bench-vm-gc <ref> "s50:SPROUT_GC_NURSERY_SHARE=0.5;rl:SPROUT_GC_REGION_LISTS=1" -n 6 -w nqueens`.
+# `just bench-vm-gc <ref> "s50:SPROUT_GC_NURSERY_SHARE=0.5;fl:SPROUT_GC_HOLES=0" -n 6 -w nqueens`.
 # Extra args go to ab.sh. Same config and cleanup as bench-vm; docs/bench-vm.md.
 [group('dev')]
 bench-vm-gc ref arms *args:
@@ -3169,9 +3169,10 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/tcp_nul_payload.spr
   run_once "tcp-nul-payload" "nul-bytes-intact"
   run_once "tcp-nul-payload/decode" "nul-decode-refused"
-  SPROUT_GC_HDRCHECK=1 run_once "tcp-nul-payload/hdrcheck" "nul-bytes-intact"
-  # HDRCHECK under occupancy maps: the post-sweep walk by runs of `occ`, not the per-slot walk.
-  SPROUT_GC_HOLES=1 SPROUT_GC_HDRCHECK=1 run_once "tcp-nul-payload/holes-hdrcheck" "nul-bytes-intact"
+  # HDRCHECK under the default collector (occupancy maps): the post-sweep walk by runs of `occ`.
+  SPROUT_GC_HDRCHECK=1 run_once "tcp-nul-payload/holes-hdrcheck" "nul-bytes-intact"
+  # And under the free-list collector: the per-slot walk.
+  SPROUT_GC_HOLES=0 SPROUT_GC_HDRCHECK=1 run_once "tcp-nul-payload/freelist-hdrcheck" "nul-bytes-intact"
   # (30) The HTTP CLIENT must PARK, not block the OS thread. `http_request` ran on a blocking socket
   # bounded by SO_RCVTIMEO/SO_SNDTIMEO, so every call froze the pump for its whole duration: no
   # sibling task advanced and no timer fired. Measured on the unfixed runtime, a 2000 ms request
@@ -4039,7 +4040,8 @@ test-stress: bootstrap-from-seed
   echo "==> test-stress ✓"
 
 # Freelist oracle at the DEFAULT threshold (SPROUT_FL_VERIFY=1, no GC stress), and each file again
-# with SPROUT_GC_HOLES=1, where the switch checks the allocation cursors and the freed-tail lists.
+# with SPROUT_GC_HOLES=0, where the switch checks the free lists as a multiset. The default,
+# occupancy maps, checks the allocation cursors and the freed-tail lists.
 #
 # `test-stress` already runs the oracle, but only under SPROUT_GC_STRESS=1, which
 # forces small heaps — and a small heap barely makes Pass 2 release any region,
@@ -4078,15 +4080,15 @@ test-freelist-verify: bootstrap-from-seed
     if ! clang "$TMPD/$name.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$name.bin" 2>"$TMPD/$name.err"; then
       echo "test-freelist-verify: link failed: $f" >&2; cat "$TMPD/$name.err" >&2; failed=$((failed + 1)); continue
     fi
-    # The default allocator, then occupancy maps, whose FL_VERIFY form checks the cursors, the
-    # tail lists and each allocation's extent (docs/gc-stage2-v0.md §6 premise 12).
-    for mode in "" "SPROUT_GC_HOLES=1"; do
+    # The free-list collector, then the default, occupancy maps, whose FL_VERIFY form checks the
+    # cursors, the tail lists and each allocation's extent (docs/gc-stage2-v0.md §6 premise 12).
+    for mode in "SPROUT_GC_HOLES=0" ""; do
       # shellcheck disable=SC2086
       if out=$(env SPROUT_FL_VERIFY=1 $mode SPROUT_STDLIB_ROOT="{{stdlib_root}}" "$TMPD/$name.bin" 2>&1); then
         if ! suite_verdict <<<"$out"; then
           echo "test-freelist-verify: $f FAILED (or printed no verdict) under SPROUT_FL_VERIFY=1 $mode" >&2; echo "$out" >&2; failed=$((failed + 1))
         else
-          echo "  PASS (fl-verify${mode:+, $mode}): $f"
+          echo "  PASS (fl-verify, ${mode:-default collector}): $f"
         fi
       else
         echo "test-freelist-verify: $f aborted under SPROUT_FL_VERIFY=1 $mode" >&2
@@ -4110,8 +4112,8 @@ test-freelist-verify: bootstrap-from-seed
 #   retain_none -> marked_age_ge1 ratio LOW   (nothing survives a cycle)
 # A stuck, inverted, or live-vs-marked-confused counter fails here.  The runtime
 # separately aborts on internal inconsistency (histogram vs totals), so this gate
-# only has to check the separation. It runs on the default collector and again under
-# SPROUT_GC_HOLES=1, where the marker counts and no dead slot is visited, with the same bounds.
+# only has to check the separation. It runs on the default collector (occupancy maps, where the
+# marker counts and no dead slot is visited) and again under SPROUT_GC_HOLES=0, with the same bounds.
 [group('test')]
 gc-ageprof-check: bootstrap-from-seed
   #!/usr/bin/env bash
@@ -4174,10 +4176,10 @@ gc-ageprof-check: bootstrap-from-seed
         printf "%s %d %d %d %d %d %d %d\n", n, (100 * v["marked_age_ge1"]) / v["marked_total"], (100 * v["freed_age0"]) / v["freed_total"], v["marked_age_ge1"], v["cycles"], a[14], flat, v["marked_total"]
       }'
   }
-  # The same calibration, bounds and all, runs on the default collector and under
-  # SPROUT_GC_HOLES=1, where the marker counts and the sweep visits no dead object.
+  # The same calibration, bounds and all, runs on the default collector (occupancy maps, where
+  # the marker counts and the sweep visits no dead object) and under SPROUT_GC_HOLES=0.
   failed=0
-  for arm in "default|" "holes|SPROUT_GC_HOLES=1"; do
+  for arm in "holes|" "freelist|SPROUT_GC_HOLES=0"; do
   label="${arm%%|*}"
   # shellcheck disable=SC2086
   ALL=$(run_one test_gc_age_retain_all "$label" ${arm#*|})   || exit 1
@@ -4246,7 +4248,9 @@ gc-ageprof-check: bootstrap-from-seed
 #      PROVABLY INERT: cycles/marked/freed are bit-identical at F=2 and F=4.  This is
 #      the safety argument for raising the default at all (small programs cannot pay
 #      RSS for it), so it is asserted rather than assumed.
-#   3. With minors on, SPROUT_GC_NURSERY_SHARE=2 collects less often than =1 on the adversary.
+#   3. With minors on, the nursery after a minor is SPROUT_GC_NURSERY_SHARE x the heap it left:
+#      on the adversary, at share 1 and 2, under both collectors, the median ratio of the next
+#      cycle's alloc_since_gc to that heap is the share within 10%.
 # Reuses the age-instrument workloads: retain_all holds a 150k-node chain live (live
 # set >> floor, so the factor binds), retain_none retains nothing (floor-pinned).
 # Cycle counts come from SPROUT_GC_AGEPROF and are deterministic run to run, so the
@@ -4305,27 +4309,43 @@ gc-adapt-check: bootstrap-from-seed
   [ "$none_f2" = "$none_f4" ] \
     || { echo "gc-adapt-check: floor-pinned workload changed with the factor ('${none_f2}' vs '${none_f4}') — raising the default is NOT free for small-live-set programs" >&2; failed=1; }
   # --- Property 3: with minors on, the share (not the factor) sizes the nursery --
-  # Collections run at SPROUT_GC_NURSERY_SHARE=1 and =2 on the same program: a bigger share
-  # must collect less often, so the kept knob is wired up. The adversary allocates steadily, so
-  # the share binds; retain_all's count does not move with it.
+  # After a minor, the next cycle triggers at heap + max(s x heap, c x marked, floors), so its
+  # alloc_since_gc is s x the heap the minor left. A line's threshold= is the trigger set after
+  # that cycle. Read the ratio off every pair of consecutive minors where the first set a trigger
+  # above the base (the first cycle's), so the base floor did not size the nursery, and take
+  # the median: it must be s within 10%. The cycle COUNT is not the check: the share also moves
+  # where the majors fall, which sets the steady heap, so the count is not monotone in s
+  # (docs/gates.md). Both collectors run it.
   build_one test_gc_trigger_adversary || exit 1
-  # A crashed run has fewer cycles and would pass the comparison, so rc and the verdict are checked.
-  share_cycles() {
-    local rc
-    env -u SPROUT_GC_ADAPT_FACTOR -u SPROUT_GC_THRESHOLD SPROUT_GC_MINOR=1 SPROUT_GC_NURSERY_SHARE="$1" SPROUT_DEBUG_GC=1 \
-      "$TMPD/test_gc_trigger_adversary.bin" >"$TMPD/share$1.out" 2>"$TMPD/share$1.err"
+  # A crashed run has fewer cycles, so rc and the verdict are checked. Prints "<pairs> <median>".
+  share_ratio() {
+    local holes="$1" share="$2" rc tag="share$2.${1:-default}"
+    local henv=(-u SPROUT_GC_HOLES)
+    [ -n "$holes" ] && henv=(SPROUT_GC_HOLES="$holes")
+    env -u SPROUT_GC_ADAPT_FACTOR -u SPROUT_GC_THRESHOLD "${henv[@]}" SPROUT_GC_MINOR=1 SPROUT_GC_NURSERY_SHARE="$share" SPROUT_DEBUG_GC=1 \
+      "$TMPD/test_gc_trigger_adversary.bin" >"$TMPD/$tag.out" 2>"$TMPD/$tag.err"
     rc=$?
-    if [ "$rc" != 0 ] || ! grep -q "SUITE PASSED" "$TMPD/share$1.out"; then
-      echo "gc-adapt-check: adversary failed at SHARE=$1 (rc=$rc)" >&2; tail -5 "$TMPD/share$1.out" "$TMPD/share$1.err" >&2
+    if [ "$rc" != 0 ] || ! grep -q "SUITE PASSED" "$TMPD/$tag.out"; then
+      echo "gc-adapt-check: adversary failed at SHARE=$share HOLES='${holes:-default}' (rc=$rc)" >&2; tail -5 "$TMPD/$tag.out" "$TMPD/$tag.err" >&2
       return 1
     fi
-    grep -c '\[sprout gc\] cycle' "$TMPD/share$1.err"
+    awk '/\[sprout gc\] cycle=/ {
+           delete v
+           for (i = 1; i <= NF; i++) { n = split($i, kv, "="); if (n == 2) v[kv[1]] = kv[2] }
+           if (!base) base = v["threshold"]
+           if (v["kind"] == "minor" && pk == "minor" && ph > 0 && pt > base) printf "%.4f\n", v["alloc_since_gc"] / ph
+           pk = v["kind"]; ph = v["heap_after"]; pt = v["threshold"]
+         }' "$TMPD/$tag.err" | sort -g | awk '{ a[NR] = $1 } END { printf "%d %s\n", NR, a[int((NR + 1) / 2)] }'
   }
-  share1=$(share_cycles 1) || exit 1
-  share2=$(share_cycles 2) || exit 1
-  echo "  adversary, minors on: cycles at SHARE=1 ${share1} | SHARE=2 ${share2}"
-  (( share1 > 0 && share2 < share1 )) \
-    || { echo "gc-adapt-check: SPROUT_GC_NURSERY_SHARE=2 did not collect less often than =1 (${share2} vs ${share1})" >&2; failed=1; }
+  for arm in "holes|" "freelist|0"; do
+    label="${arm%%|*}"
+    for share in 1 2; do
+      read -r pairs med < <(share_ratio "${arm#*|}" "$share") || exit 1
+      echo "  adversary, minors on [$label] SHARE=${share}: alloc_since_gc / prior heap_after, median ${med} over ${pairs} pairs"
+      awk -v m="$med" -v s="$share" -v n="$pairs" 'BEGIN { exit !(n >= 8 && m >= 0.9 * s && m <= 1.1 * s) }' \
+        || { echo "gc-adapt-check[$label]: SHARE=${share}: median ${med} over ${pairs} pairs is not within 10% of ${share} (or under 8 pairs) — the nursery is not s x heap" >&2; failed=1; }
+    done
+  done
   (( failed == 0 )) || exit 1
   echo "==> gc-adapt-check ✓"
 
@@ -4334,11 +4354,12 @@ gc-adapt-check: bootstrap-from-seed
 # with SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1: every allocation collects, so a
 # store without its barrier is caught by the verifier within a few allocations. Each program must
 # print the exact stdout in its sidecar tests/gc_gen/<name>.out, and must have run minor
-# collections. The default arm is the shipped default (K=3, s=1, c=2) under GENCHECK. Also run
-# with SPROUT_FL_VERIFY=1 and with SPROUT_GC_LINEAGE=1 (same flags, same output), and with the
-# mode off, where the output must be the same, and with SPROUT_GC_HOLES=1 (occupancy maps, minors
-# on under GENCHECK, SPROUT_FL_VERIFY=1 and HDRCHECK, with SPROUT_GC_LINEAGE=1, and off;
-# docs/gc-stage2-v0.md §5.7). The nursery share is not varied here: under STRESS
+# collections. The default arm is the shipped default (K=3, s=1, c=2, occupancy maps, §5.7) under
+# GENCHECK. Also run on the default with SPROUT_FL_VERIFY=1 and HDRCHECK, with SPROUT_GC_LINEAGE=1
+# (same flags, same output) and with the mode off, where the output must be the same; and on the
+# free-list collector (SPROUT_GC_HOLES=0) with SPROUT_FL_VERIFY=1, with SPROUT_GC_LINEAGE=1, with
+# per-region lists (SPROUT_GC_REGION_LISTS=1, which needs SPROUT_GC_HOLES=0) and with the mode off.
+# The nursery share is not varied here: under STRESS
 # every allocation collects, and without it these programs run no minor at either share.
 # The two analysis helpers are static and need a live analysis service to reach from Sprout, so a C case covers
 # them (tests/c_runtime/analysis_strings.c).
@@ -4384,10 +4405,11 @@ gc-gen-check: bootstrap-from-seed
     echo "  $name: ok ($minors minor, $majors major collections)"
     (( minors >= min_minors )) \
       || { echo "gc-gen-check: $name ran only $minors minor collections; the barrier was not exercised" >&2; failed=1; }
-    # The young-only sweep keeps the free lists between minors: FL_VERIFY compares them with a
-    # full walk after every collection, and lineage poisons dead OBJs instead of listing them.
-    # Under HOLES a corpse is a `slotmap` start kept in `oldocc`, through majors too (§5.7).
-    for mode in SPROUT_FL_VERIFY=1 SPROUT_GC_LINEAGE=1 "SPROUT_GC_HOLES=1 SPROUT_GC_LINEAGE=1"; do
+    # With SPROUT_GC_HOLES=0 the young-only sweep keeps the free lists between minors: FL_VERIFY
+    # compares them with a full walk after every collection, and lineage poisons dead OBJs instead
+    # of listing them. On the default a corpse is a `slotmap` start kept in `oldocc`, through
+    # majors too (§5.7).
+    for mode in "SPROUT_GC_HOLES=0 SPROUT_FL_VERIFY=1" "SPROUT_GC_HOLES=0 SPROUT_GC_LINEAGE=1" SPROUT_GC_LINEAGE=1; do
       # shellcheck disable=SC2086
       env $mode SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 \
         "$TMPD/$name.bin" > "$TMPD/$name.mode.out" 2>"$TMPD/$name.mode.err"
@@ -4400,7 +4422,7 @@ gc-gen-check: bootstrap-from-seed
     done
     # Per-region free lists (docs/gc-stage2-v0.md §5.6): a minor walks everything only right before
     # a major (§5.4), so a `kind=minor sweep=full` line must be followed by `kind=major`.
-    mode="SPROUT_GC_REGION_LISTS=1 SPROUT_DEBUG_GC=1 SPROUT_FL_VERIFY=1"
+    mode="SPROUT_GC_HOLES=0 SPROUT_GC_REGION_LISTS=1 SPROUT_DEBUG_GC=1 SPROUT_FL_VERIFY=1"
     # shellcheck disable=SC2086
     env $mode SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 \
       "$TMPD/$name.bin" > "$TMPD/$name.mode.out" 2>"$TMPD/$name.mode.err"
@@ -4420,33 +4442,33 @@ gc-gen-check: bootstrap-from-seed
       [ -z "$bad" ] \
         || { echo "gc-gen-check: $name: $bad full-walk minors not followed by a major under $mode (cycle numbers)" >&2; failed=1; }
     fi
-    # Occupancy maps (docs/gc-stage2-v0.md §5.7): GENCHECK walks every region by slotmap and checks
-    # the maps, counts and buffer lists; FL_VERIFY checks the cursors, the tail lists and each
-    # allocation's extent (premise 12); HDRCHECK walks each run of `occ` by headers. Same stdout,
-    # same minor-count floor.
-    SPROUT_GC_HOLES=1 SPROUT_FL_VERIFY=1 SPROUT_GC_HDRCHECK=1 SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 SPROUT_DEBUG_GC=1 \
+    # Occupancy maps, the default (docs/gc-stage2-v0.md §5.7): GENCHECK walks every region by
+    # slotmap and checks the maps, counts and buffer lists; FL_VERIFY checks the cursors, the tail
+    # lists and each allocation's extent (premise 12); HDRCHECK walks each run of `occ` by headers.
+    # Same stdout, same minor-count floor.
+    SPROUT_FL_VERIFY=1 SPROUT_GC_HDRCHECK=1 SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 SPROUT_DEBUG_GC=1 \
       "$TMPD/$name.bin" > "$TMPD/$name.mode.out" 2>"$TMPD/$name.holes.gc"
     rc=$?
     if [ "$rc" != 0 ] || ! cmp -s "$want_file" "$TMPD/$name.mode.out"; then
-      report_mismatch "$name" "failed under SPROUT_GC_HOLES=1 FL_VERIFY=1 HDRCHECK=1 MINOR=1 GENCHECK=1 STRESS=1 (rc=$rc)" "$TMPD/$name.mode.out"
+      report_mismatch "$name" "failed under the default collector with FL_VERIFY=1 HDRCHECK=1 MINOR=1 GENCHECK=1 STRESS=1 (rc=$rc)" "$TMPD/$name.mode.out"
       grep -A4 'GENCHECK\|FL_VERIFY\|HDRCHECK' "$TMPD/$name.holes.gc" | head -8 >&2
       failed=1
     else
       hminors=$(grep -c 'kind=minor' "$TMPD/$name.holes.gc")
       (( hminors >= min_minors )) \
-        || { echo "gc-gen-check: $name ran only $hminors minor collections under SPROUT_GC_HOLES=1; the barrier was not exercised" >&2; failed=1; }
+        || { echo "gc-gen-check: $name ran only $hminors minor collections under the default collector; the barrier was not exercised" >&2; failed=1; }
     fi
-    SPROUT_GC_HOLES=1 SPROUT_GC_MINOR=0 SPROUT_GC_STRESS=1 "$TMPD/$name.bin" > "$TMPD/$name.off" 2>/dev/null
+    SPROUT_GC_MINOR=0 SPROUT_GC_STRESS=1 "$TMPD/$name.bin" > "$TMPD/$name.off" 2>/dev/null
     cmp -s "$want_file" "$TMPD/$name.off" \
-      || { report_mismatch "$name" "differs with SPROUT_GC_HOLES=1 SPROUT_GC_MINOR=0" "$TMPD/$name.off"; failed=1; }
-    SPROUT_GC_MINOR=0 "$TMPD/$name.bin" > "$TMPD/$name.off" 2>/dev/null
+      || { report_mismatch "$name" "differs with SPROUT_GC_MINOR=0 SPROUT_GC_STRESS=1" "$TMPD/$name.off"; failed=1; }
+    SPROUT_GC_HOLES=0 SPROUT_GC_MINOR=0 "$TMPD/$name.bin" > "$TMPD/$name.off" 2>/dev/null
     cmp -s "$want_file" "$TMPD/$name.off" \
-      || { report_mismatch "$name" "differs with SPROUT_GC_MINOR=0" "$TMPD/$name.off"; failed=1; }
+      || { report_mismatch "$name" "differs with SPROUT_GC_HOLES=0 SPROUT_GC_MINOR=0" "$TMPD/$name.off"; failed=1; }
     # Per-region lists with minors off: the same allocator under the other arm of the A/B.
-    SPROUT_GC_MINOR=0 SPROUT_GC_REGION_LISTS=1 SPROUT_FL_VERIFY=1 SPROUT_GC_STRESS=1 \
+    SPROUT_GC_HOLES=0 SPROUT_GC_MINOR=0 SPROUT_GC_REGION_LISTS=1 SPROUT_FL_VERIFY=1 SPROUT_GC_STRESS=1 \
       "$TMPD/$name.bin" > "$TMPD/$name.off" 2>/dev/null
     cmp -s "$want_file" "$TMPD/$name.off" \
-      || { report_mismatch "$name" "differs with SPROUT_GC_MINOR=0 SPROUT_GC_REGION_LISTS=1" "$TMPD/$name.off"; failed=1; }
+      || { report_mismatch "$name" "differs with SPROUT_GC_HOLES=0 SPROUT_GC_MINOR=0 SPROUT_GC_REGION_LISTS=1" "$TMPD/$name.off"; failed=1; }
   done
   # `*_nostress` programs build too large a live heap to collect on every allocation. They reach
   # what STRESS cannot: a push below a class cursor (premise 9, checked by FL_VERIFY at every
@@ -4460,9 +4482,10 @@ gc-gen-check: bootstrap-from-seed
     build_one "$f" "$name" || { failed=1; continue; }
     ok=1
     for mode in "SPROUT_GC_MINOR=1" \
-                "SPROUT_GC_HOLES=1 SPROUT_GC_MINOR=1 SPROUT_FL_VERIFY=1" \
-                "SPROUT_GC_MINOR=1 SPROUT_GC_REGION_LISTS=1 SPROUT_FL_VERIFY=1" \
-                "SPROUT_GC_MINOR=0 SPROUT_GC_REGION_LISTS=1 SPROUT_FL_VERIFY=1"; do
+                "SPROUT_GC_MINOR=1 SPROUT_FL_VERIFY=1" \
+                "SPROUT_GC_HOLES=0 SPROUT_GC_MINOR=1" \
+                "SPROUT_GC_HOLES=0 SPROUT_GC_MINOR=1 SPROUT_GC_REGION_LISTS=1 SPROUT_FL_VERIFY=1" \
+                "SPROUT_GC_HOLES=0 SPROUT_GC_MINOR=0 SPROUT_GC_REGION_LISTS=1 SPROUT_FL_VERIFY=1"; do
       # shellcheck disable=SC2086
       env $mode SPROUT_GC_GENCHECK=1 "$TMPD/$name.bin" > "$TMPD/$name.mode.out" 2>"$TMPD/$name.mode.err"
       rc=$?
@@ -4498,7 +4521,8 @@ gc-gen-check: bootstrap-from-seed
 # and buffer records are well formed). Each trace must end with the atexit collection's end
 # record, whose cycle is the run's last, and the program's stdout must be what it is without the
 # flag. Covers minors off, minors on, collect-every-allocation, per-region lists and large objects,
-# and the same under SPROUT_GC_HOLES=1, whose sweep writes the F records from the occupancy maps.
+# on the default collector (`holes` arms), whose sweep writes the F records from the occupancy
+# maps, and under SPROUT_GC_HOLES=0 (`freelist` arms; per-region lists need it).
 [group('test')]
 gc-alloctrace-check: bootstrap-from-seed
   #!/usr/bin/env bash
@@ -4541,10 +4565,10 @@ gc-alloctrace-check: bootstrap-from-seed
   }
   failed=0
   build_one tests/gc_gen/inline_tail_reuse.spr inline_tail_reuse || exit 1
-  for case in "default|" "minor0|SPROUT_GC_MINOR=0" "stress|SPROUT_GC_STRESS=1" \
-              "stress_rl|SPROUT_GC_STRESS=1 SPROUT_GC_REGION_LISTS=1" \
-              "holes|SPROUT_GC_HOLES=1" "holes_minor0|SPROUT_GC_HOLES=1 SPROUT_GC_MINOR=0" \
-              "holes_stress|SPROUT_GC_HOLES=1 SPROUT_GC_STRESS=1"; do
+  for case in "holes|" "holes_minor0|SPROUT_GC_MINOR=0" "holes_stress|SPROUT_GC_STRESS=1" \
+              "freelist|SPROUT_GC_HOLES=0" "freelist_minor0|SPROUT_GC_HOLES=0 SPROUT_GC_MINOR=0" \
+              "freelist_stress|SPROUT_GC_HOLES=0 SPROUT_GC_STRESS=1" \
+              "freelist_stress_rl|SPROUT_GC_HOLES=0 SPROUT_GC_STRESS=1 SPROUT_GC_REGION_LISTS=1"; do
     # shellcheck disable=SC2086
     run_case inline_tail_reuse "${case%%|*}" ${case#*|} || { failed=1; continue; }
     # This program grows inline vectors out of line: T and B records must appear.
@@ -4552,21 +4576,21 @@ gc-alloctrace-check: bootstrap-from-seed
       || { echo "gc-alloctrace-check: inline_tail_reuse.${case%%|*}: no T/B records, the inline-tail path was not traced" >&2; failed=1; }
   done
   build_one tests/gc_gen/vector_push.spr vector_push || exit 1
-  run_case vector_push stress SPROUT_GC_STRESS=1 || failed=1
-  run_case vector_push holes_stress SPROUT_GC_HOLES=1 SPROUT_GC_STRESS=1 || failed=1
+  run_case vector_push holes_stress SPROUT_GC_STRESS=1 || failed=1
+  run_case vector_push freelist_stress SPROUT_GC_HOLES=0 SPROUT_GC_STRESS=1 || failed=1
   build_one tests/gc_gen/region_empty_minor.spr region_empty_minor || exit 1
-  run_case region_empty_minor stress SPROUT_GC_STRESS=1 || failed=1
-  run_case region_empty_minor holes_stress SPROUT_GC_HOLES=1 SPROUT_GC_STRESS=1 || failed=1
+  run_case region_empty_minor holes_stress SPROUT_GC_STRESS=1 || failed=1
+  run_case region_empty_minor freelist_stress SPROUT_GC_HOLES=0 SPROUT_GC_STRESS=1 || failed=1
   # Minors and majors without STRESS, and objects past the large-slot threshold.
   build_one tests/stdlib/test_gc_large_object_arena.spr test_gc_large_object_arena || exit 1
-  for case in "default|" "minor0|SPROUT_GC_MINOR=0" "stress|SPROUT_GC_STRESS=1" \
-              "holes|SPROUT_GC_HOLES=1" "holes_minor0|SPROUT_GC_HOLES=1 SPROUT_GC_MINOR=0" \
-              "holes_stress|SPROUT_GC_HOLES=1 SPROUT_GC_STRESS=1"; do
+  for case in "holes|" "holes_minor0|SPROUT_GC_MINOR=0" "holes_stress|SPROUT_GC_STRESS=1" \
+              "freelist|SPROUT_GC_HOLES=0" "freelist_minor0|SPROUT_GC_HOLES=0 SPROUT_GC_MINOR=0" \
+              "freelist_stress|SPROUT_GC_HOLES=0 SPROUT_GC_STRESS=1"; do
     # shellcheck disable=SC2086
     run_case test_gc_large_object_arena "${case%%|*}" ${case#*|} || { failed=1; continue; }
     (( $(field large) > 0 )) \
       || { echo "gc-alloctrace-check: test_gc_large_object_arena.${case%%|*}: no large allocation in the trace" >&2; failed=1; }
-    if [ "${case%%|*}" = default ] || [ "${case%%|*}" = holes ]; then
+    if [ "${case%%|*}" = holes ] || [ "${case%%|*}" = freelist ]; then
       (( $(field major) > 0 && $(field minor_young) > 0 )) \
         || { echo "gc-alloctrace-check: test_gc_large_object_arena.${case%%|*}: expected both major and young-only minor collections" >&2; failed=1; }
     fi
@@ -4589,6 +4613,8 @@ gc-alloctrace-check: bootstrap-from-seed
 # SPROUT_GC_THRESHOLD at the default 4096, which turns the footprint floor off: the
 # floor removes the very walk this counter test needs (`gc-trigger-check` tests it).
 # SPROUT_GC_MINOR=0 is pinned too: a minor's sweep walks fewer slots, which the bounds do not model.
+# SPROUT_GC_HOLES=0 is pinned: the default collector's `walked` counts bitmap words read and its
+# sweep visits no dead slot, so these slot-walk bounds apply to the free-list sweep only.
 [group('test')]
 gc-walk-check: bootstrap-from-seed
   #!/usr/bin/env bash
@@ -4609,7 +4635,7 @@ gc-walk-check: bootstrap-from-seed
     clang "$TMPD/$name.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$name.bin" 2>"$TMPD/$name.err" \
       || { echo "gc-walk-check: link failed: $f" >&2; cat "$TMPD/$name.err" >&2; return 1; }
     env -u SPROUT_GC_ADAPT_FACTOR -u SPROUT_GC_ADAPT_RATIO -u SPROUT_GC_ADAPT_CAP \
-      -u SPROUT_GC_LINEAGE -u SPROUT_GC_STRESS SPROUT_GC_MINOR=0 SPROUT_GC_THRESHOLD=4096 SPROUT_DEBUG_GC=1 "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.log" \
+      -u SPROUT_GC_LINEAGE -u SPROUT_GC_STRESS SPROUT_GC_MINOR=0 SPROUT_GC_HOLES=0 SPROUT_GC_THRESHOLD=4096 SPROUT_DEBUG_GC=1 "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.log" \
       || { echo "gc-walk-check: $name failed" >&2; tail -5 "$TMPD/$name.log" >&2; return 1; }
     grep -q "SUITE PASSED" "$TMPD/$name.out" \
       || { echo "gc-walk-check: $name did not pass" >&2; tail -5 "$TMPD/$name.out" >&2; return 1; }
