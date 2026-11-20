@@ -33,6 +33,19 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   accepted. `f`'s open effect variable seems to count as IO; spec §7 rule 8 property 3 accepts an
   unresolved variable. Same with `f = if c then \… else \…`. Found by the Lean oracle
   (`formal/oracle/ALLOWLIST`); add a `run/` fixture with the fix.
+- [ ] `P2` **A non-generalised function value passed to an `!{IO}` slot is read back as IO.**
+  `let l = let v = false in \(x: Int) -> v`, `fn use(p: Int -> Bool !{IO})`, then
+  `fn both() -> Bool = if use(l) then l(0) else false` is rejected "performs IO but is declared
+  pure"; either use alone is accepted. `effect_slot_meet` (`unifier.sprout`) records the slot as a
+  ceiling, but `bind_open` also binds `l`'s open effect variable to IO, and every use shares it.
+  Spec §7 rule 8: a written slot is a ceiling; property 3 accepts an unresolved variable. Found by
+  the Lean oracle (`nongen-slot` in `formal/oracle/ALLOWLIST`); add a `run/` fixture with the fix.
+- [ ] `P2` **A peer join is order-dependent once a branch is itself a join.** With
+  `use(p: String -> String !{IO})`, `use(if c then (if c then \x -> x else \y -> y) else p)` is
+  rejected "a function that performs IO cannot be used where a pure one is required"; swapping
+  the branches is accepted. Spec §7 rule 8 and its property 2: branch order does not decide it.
+  Cause not traced; start at `infer_if_join` (`infer.sprout`). Found by the Lean oracle
+  (`join-order` in `formal/oracle/ALLOWLIST`); add a `type_error/` or `run/` fixture with the fix.
 - [ ] `P3` **A type argument is judged covariantly, which is wrong for a mutable container.**
   `Ref` should be invariant in its argument. No reaching program is known — four shapes that
   laundered before bounded effect variables now reject, but via a bound travelling through
