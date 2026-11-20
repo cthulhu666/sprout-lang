@@ -32,4 +32,4 @@ nongen-slot | model-accepts/compiler-rejects: _ performs IO but is declared pure
 # 8: "A peer join is covered too ... the verdict does not depend on which branch is written
 # first", and the note under rule 8 (property 2): branch order does not decide it. `if` joins
 # through `infer_if_join` and `unify_actual_expected` in infer.sprout/unifier.sprout.
-join-order | model-accepts/compiler-rejects: IO function where a pure one is required | compiler rejects a join of a nested join with an IO function, where the swapped order is accepted (spec §7 rule 8: branch order does not decide)
+join-order | model-accepts/compiler-rejects: If branches must have same type: IO function where a pure one is required | compiler rejects a join of a nested join with an IO function, where the swapped order is accepted (spec §7 rule 8: branch order does not decide)

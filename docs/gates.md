@@ -1462,9 +1462,10 @@ PATH. It installs on first use, so nothing changes for a contributor who never t
 
 The oracle compares verdicts, not messages, so two sides can reject one program for different
 reasons. An allowlist shape is the compiler message cut to its rule (`normMsg` in
-`formal/Oracle.lean`); the effect-slot rejection is one shape under any prefix, so an unrelated
-`If branches` mismatch is not hidden by it. Stage 1's effect model has no effect variables, so it is faithful only where no type
-variable is solved to arrows of differing effects. The generator aims to stay out of that region
+`formal/Oracle.lean`); an effect-slot rejection keeps its prefix and its reason, so an allowlisted
+`if`-join gap hides neither an unrelated `If branches` mismatch nor a call-site effect bug.
+Stage 1's effect model has no effect variables, so it is faithful only where no type variable is
+solved to arrows of differing effects. The generator aims to stay out of that region
 (`formal/SproutCore/Gen.lean`): the one place it solves a variable to an arrow is an `if` joining
 pure arrows. A program that leaves the region shows up as a disagreement, not a silent pass.
 

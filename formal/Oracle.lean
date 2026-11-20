@@ -58,18 +58,17 @@ def blankQuoted (s : String) : String :=
 
 /-- Strip a compiler message down to its rule: no positions, names or types. -/
 def normMsg (msg : String) : String :=
-  -- the effect-slot rejection reads the same under any prefix (`If branches…`, `Call…`), and the
-  -- prefix alone would put an unrelated `If` mismatch under the same shape
-  if msg.contains "cannot be used where a pure one is required" then
-    "IO function where a pure one is required"
-  else
   let after := match msg.splitOn "ERROR: " with
     | _ :: rest => "ERROR: ".intercalate rest
     | [] => msg
   let after := if after.startsWith "check: " then (after.drop 7).toString else after
   let cuts := [" in function", " in ", ":", " —", ";", " ("]
-  let cut := cuts.foldl (fun (s : String) c => (s.splitOn c).head!) (blankQuoted after)
-  cut.trimAscii.toString
+  let cut := (cuts.foldl (fun (s : String) c => (s.splitOn c).head!) (blankQuoted after)).trimAscii.toString
+  -- keep the effect-slot reason beside the prefix: the prefix alone puts an unrelated `If`
+  -- mismatch under the same shape, the reason alone puts call sites and joins together
+  if msg.contains "cannot be used where a pure one is required" then
+    cut ++ ": IO function where a pure one is required"
+  else cut
 
 def shapeOf (m : Except String Unit) (c : CV) : Option String :=
   match m, c with
