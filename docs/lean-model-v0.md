@@ -233,12 +233,19 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
      groups; `main`. The checker follows the spec, one `-- spec §…` tag per rule. The printer,
      the Plausible generator with mutations, the shrinker and the `sprout-oracle` executable are in;
      so are the three recipes, the spec snapshot and the `lean` CI job (`docs/gates.md` §Lean
-     model). No theorems, so the `sorry` count is 0. Not run on Linux before the first CI run.
-     The oracle's first findings are in `formal/oracle/ALLOWLIST`: one compiler gap (an effectful
-     `let` right-hand side, spec §5.2.1, already scheduled in `try-propagate-v0.md`), one spec
-     gap (the compiler's value restriction on a top-level `let`, which the spec does not state),
-     and one new compiler bug (a pure top-level `let` calling a non-generalised function value is
-     rejected as IO). The last two are `BACKLOG.md` entries.
+     model). No theorems, so the `sorry` count is 0. The `lean` CI job passes on Linux.
+     The generator also builds `() -> T` arrows (a zero-parameter `fn`, spec §7 rule 9), n-ary
+     arrows, a `fn` returning an arrow, and an `if` joining arrows of different stored arity.
+     Review found two model bugs there, both now `#guard` regressions in `Tests.lean`: a
+     zero-parameter `fn` returning an arrow lost its `()` arrow, and a join that rejected arrows whose
+     stored arity differs (a result variable solved to an arrow later).
+     The oracle's findings are in `formal/oracle/ALLOWLIST`, each with a witness: one compiler gap
+     (an effectful `let` right-hand side, spec §5.2.1, already scheduled in `try-propagate-v0.md`),
+     one spec gap (the compiler's value restriction on a top-level `let`, which the spec does not
+     state), and three compiler bugs, all `BACKLOG.md` entries: a pure top-level `let` calling a
+     non-generalised function value is rejected as IO; a non-generalised function value passed to
+     an `!{IO}` slot is then read back as IO at its other uses; and a peer join of a nested join
+     with an `!{IO}` function is order-dependent.
    - **1b: T2**, inference soundness, and the axiom check of §7.
 2. **ADTs and match.** T1, T4, the unreachable-branch rule. Exit: the per-column gap and the
    fallbacks are written up in this doc.

@@ -1461,8 +1461,12 @@ PATH. It installs on first use, so nothing changes for a contributor who never t
   `run_lean` for it, since a spec-only change is `docs_only` and would skip every other job.
 
 The oracle compares verdicts, not messages, so two sides can reject one program for different
-reasons. Stage 1's effect model has no effect variables: the generator never solves a type
-variable to an arrow, which is the region where it would not match the compiler's bounds.
+reasons. An allowlist shape is the compiler message cut to its rule (`normMsg` in
+`formal/Oracle.lean`); the effect-slot rejection is one shape under any prefix, so an unrelated
+`If branches` mismatch is not hidden by it. Stage 1's effect model has no effect variables, so it is faithful only where no type
+variable is solved to arrows of differing effects. The generator aims to stay out of that region
+(`formal/SproutCore/Gen.lean`): the one place it solves a variable to an arrow is an `if` joining
+pure arrows. A program that leaves the region shows up as a disagreement, not a silent pass.
 
 ## CI — the `changes` job, and what a 30-second green `test` means
 
