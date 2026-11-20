@@ -22,14 +22,17 @@ def genFnSig (name : String) : G FnSig := do
   for _ in [0:10] do
     let poly ← chance 30
     let tvs ← if poly then elem [["a"], ["a"], ["a", "b"]] else pure []
-    let n ← elem [1, 1, 1, 2, 2, 3]
+    -- a zero-parameter `fn` has type `() -> T` (spec §7 rule 9)
+    let n ← if poly then elem [1, 1, 1, 2, 2, 3] else elem [0, 1, 1, 1, 2, 2, 3]
     let mut ps : List Ty := []
     for _ in [0:n] do
       let t ← if poly then genTyWith tvs 1 true
-        else firstOf [(5, genClosedTy 1), (2, genArrTy false), (1, genArrTy true)]
+        else firstOf [(5, genClosedTy 1), (2, genArrTy false true), (1, genArrTy true)]
       ps := ps ++ [t]
-    let ret ← if poly then genTyWith tvs 1 false else genClosedTy 1
-    let eff ← genEff
+    -- a returned arrow carries its own effect, so the `fn` itself is pure then
+    let ret ← if poly then genTyWith tvs 1 false
+      else firstOf [(6, genClosedTy 1), (2, genArrTy false)]
+    let eff ← if isArr ret then pure .pure else genEff
     let sig : FnSig := ⟨name, tvs, ps, ret, eff⟩
     -- a body must exist from the parameters alone
     let xs := (List.range ps.length).map fun i => (s!"t{i}", ps[i]!)
@@ -46,7 +49,7 @@ def genFnDecl (info : Info) (sig : FnSig) : G Decl := do
   for t in sig.params do
     let a ← if poly || isArr t then pure true else chance 80
     anns := anns ++ [if a then some t else none]
-  let annR ← if poly || sig.eff == .io then pure true else chance 70
+  let annR ← if poly || sig.eff == .io || isArr sig.ret then pure true else chance 70
   let env : GEnv := {
     vars := info.letVars ++ pnames.zip sig.params
     fns := info.polyLets ++ info.sigs
@@ -104,11 +107,15 @@ def wrongLit (t : Ty) : G Expr := do
   let ok := cands.filter fun (c, _) => c != t
   pure (ok[(← below ok.length)]!).2
 
+def Decl.isMain : Decl → Bool
+  | .mainFn .. => true
+  | _ => false
+
 def mutate (info : Info) (decls : List Decl) : G (List Decl) := do
   let env : GEnv := { vars := info.letVars, fns := info.polyLets ++ info.sigs, canIO := true }
   let ioSigs := info.sigs.filter fun s => s.eff == .io && s.tvs.isEmpty
   let monoSigs := info.sigs.filter fun s => s.tvs.isEmpty
-  let k ← below 17
+  let k ← below 18
   let m ← freshName "m"
   match k with
   | 0 =>
@@ -206,8 +213,7 @@ def mutate (info : Info) (decls : List Decl) : G (List Decl) := do
     let body ← match sg with
       | some (t, _) => genExpr env 1 t
       | none => pure Expr.unit
-    let isMain : Decl → Bool := fun d => match d with | .mainFn .. => true | _ => false
-    pure (decls.filter (!isMain ·) ++ [.mainFn sg body])
+    pure (decls.filter (!·.isMain) ++ [.mainFn sg body])
   | 12 =>
     -- a name declared twice (spec §5.1)
     let names := info.sigs.map (·.name) ++ info.letVars.map (·.1)
@@ -226,10 +232,9 @@ def mutate (info : Info) (decls : List Decl) : G (List Decl) := do
     pure (decls ++ [.fn m [] (some (.int, .pure)) (.var "zz")])
   | 15 =>
     -- `main` above a top-level `let` it uses: `main` is a `fn` too (spec §7 rule 16)
-    let isMain : Decl → Bool := fun d => match d with | .mainFn .. => true | _ => false
-    pure (decls.filter (!isMain ·) ++ [.mainFn (some (.unit, .io)) (.app (.var "print_str") [.var m]),
+    pure (decls.filter (!·.isMain) ++ [.mainFn (some (.unit, .io)) (.app (.var "print_str") [.var m]),
       .letD m none (.str "m")])
-  | _ =>
+  | 16 =>
     -- a peer join under a parameter, and a second function value in a slot (spec §7 rule 8)
     let h ← freshName "h"
     let eff ← elem [Eff.pure, Eff.io]
@@ -237,6 +242,21 @@ def mutate (info : Info) (decls : List Decl) : G (List Decl) := do
     let helper := Decl.fn h [("g", some (.arr [cb] .unit .pure))] (some (.unit, .pure))
       (.app (.var "g") [.lam "u" none .unit])
     pure (decls ++ [helper])
+  | _ =>
+    -- a zero-parameter function used as a function of one argument (spec §7 rule 9): bound to a
+    -- local and called with an argument, or passed to a unary slot
+    let thunks := info.sigs.filter fun s => s.params.isEmpty && s.tvs.isEmpty
+    if thunks.isEmpty then pure decls else
+    let s ← elem thunks
+    let y ← freshName "y"
+    let g ← freshName "g"
+    let h ← freshName "h"
+    let body ← elem [
+      Expr.letIn g (.var s.name) (.app (.var g) [.var y]),
+      Expr.app (.var h) [.var s.name, .var y]]
+    let ap := Decl.fn h [("h", some (.arr [.int] .int .pure)), ("a", some .int)]
+      (some (.int, .pure)) (.app (.var "h") [.var "a"])
+    pure (decls ++ [ap, .fn m [(y, some .int)] (some (.int, .pure)) body])
 
 /-- A whole program: a base, with one or two mutations. -/
 def genProgram : G Program := do

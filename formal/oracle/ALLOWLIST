@@ -17,3 +17,19 @@ value-restriction | model-accepts/compiler-rejects: value restriction | the spec
 # when its module loads". The spec calls that `let` pure, and says an unresolved effect variable is
 # accepted (spec §7 rule 8, property 3). `let f = let v = 0 in \(x: Bool) -> x` then `let g = f(false)`.
 nongen-call | model-accepts/compiler-rejects: top-level _ performs IO when its module loads, but top-level bindings must be pure | compiler rejects a pure top-level let that calls a non-generalised function value (open effect variable counted as IO; spec §5.2, §7 rule 8 property 3)
+# Compiler bug: passing a pure function value bound by a non-generalised top-level `let` (so its
+# effect variable stays open) to an `!{IO}` slot, then calling it, makes the caller "perform IO".
+# `effect_slot_meet` in unifier.sprout records the slot as a ceiling, but `bind_open` also binds
+# the open variable to IO, and the variable is shared with every other use of the value. Spec §7
+# rule 8: a ceiling from a written slot is a bound, and property 3: an unresolved variable is
+# accepted. `let l = let v = false in \(x: Int) -> v`, `fn use(p: Int -> Bool !{IO})`, then
+# `fn both() = if use(l) then l(0) else false`. The shape also covers any other "performs IO but
+# is declared pure" the model does not see, so a model bug in IO tracking would hide here too.
+nongen-slot | model-accepts/compiler-rejects: _ performs IO but is declared pure | compiler binds an open effect variable to IO from a slot ceiling, so a shared non-generalised function value reads back as IO (spec §7 rule 8, property 3)
+# Compiler bug: a peer join (`if`) judges the verdict by branch order once a branch is itself a
+# join. `if c then (if c then L1 else L2) else p` is rejected for an `!{IO}` function `p` and a
+# slot that permits IO, while `if c then p else (if c then L1 else L2)` is accepted. Spec §7 rule
+# 8: "A peer join is covered too ... the verdict does not depend on which branch is written
+# first", and the note under rule 8 (property 2): branch order does not decide it. `if` joins
+# through `infer_if_join` and `unify_actual_expected` in infer.sprout/unifier.sprout.
+join-order | model-accepts/compiler-rejects: IO function where a pure one is required | compiler rejects a join of a nested join with an IO function, where the swapped order is accepted (spec §7 rule 8: branch order does not decide)
