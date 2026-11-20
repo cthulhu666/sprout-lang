@@ -223,7 +223,8 @@ The line also ends in `closure_apply=<n>` (older output lacks it): closure value
 counts allocations, and a capture-free closure is a static constant that never allocates.
 
 By default the marker counts the census, so it is printed at majors only; a minor's cycle line has
-no `types:` line. (With `SPROUT_GC_HOLES=0` the sweep counts it and every cycle prints it.)
+no `types:` line. (With `SPROUT_GC_HOLES=0` the sweep counts it and every cycle prints it.) Live
+large objects, which have a region of their own, are counted under both collectors.
 
 **With `SPROUT_GC_HOLES=0`, `walked` is what the sweep cost, `swept` is what it bought.** (By
 default `walked` counts bitmap words read and no dead slot is visited, so the split below does not

@@ -34,6 +34,8 @@
  *   holes_census   — under HOLES the marker counts the census at a major; a minor keeps the last
  *                    major's counts and leaves the `types:` line out.  holes_census_minors_off runs
  *                    census_age with every collection a major: the counts are exact each time.
+ *   census_large   — live large objects are in the census, under each collector
+ *                    (holes_census_large for the default).
  *
  * Every other case runs with SPROUT_GC_HOLES=0.
  * `k_cases` lists every case with its environment; main sets it before sprout_set_argv. */
@@ -194,7 +196,7 @@ static int set_before_major(void) {
   long long c = ref_new(42);
   ref_write(p, c);
   collect();                               /* minors_since_major reaches MAJOR_EVERY: a major is next */
-  check(g_gen.colorless == 1, "a major is next");
+  check(g_gen.next_major == 1, "a major is next");
   check(g_gen.remembered.len == 0, "the set is empty before the major's sweep");
   check(!is_remembered(p), "no header carries bit 13 before the major");
   check(!is_old(p), "the colour-clearing sweep left nothing old");
@@ -217,7 +219,7 @@ static int major_rule(void) {
   extend_chain(5000);
   collect();
   check(g_gen.n_minor == 1, "the second collection is a minor");
-  check(g_gen.colorless == 1, "the heap count triggers a major");
+  check(g_gen.next_major == 1, "the heap count triggers a major");
   collect();
   check(chain_length(g_chain) == 7000, "the chain is intact");
   return g_failed;
@@ -408,7 +410,7 @@ static int nursery_floor_before_major(void) {
   collect();
   extend_chain(1500);
   collect();                               /* minors_since_major reaches MAJOR_EVERY: a major is next */
-  check(g_gen.colorless == 1, "a major is next");
+  check(g_gen.next_major == 1, "a major is next");
   check(footprint_floor() < nursery_target(), "the floor is below heap + nursery here");
   check(g_thr == nursery_target(), "the collection before a major sizes the next one heap + nursery");
   collect();                               /* the major */
@@ -426,7 +428,7 @@ static int nursery_floor_binds(void) {
   collect();                               /* the major: the garbage becomes the free pool */
   extend_chain(10);
   collect();                               /* the minor before a major */
-  check(g_gen.colorless == 1, "a major is next");
+  check(g_gen.next_major == 1, "a major is next");
   check(footprint_floor() > nursery_target(), "the floor exceeds heap + nursery here");
   check(g_thr == footprint_floor(), "before a major the floor is the threshold");
   collect();                               /* the major */
@@ -488,6 +490,28 @@ static int holes_census(void) {
   return g_failed;
 }
 
+/* Live large objects are in the census.  A major counts them (the marker, or the full sweep); under
+ * the free-list collector a young-only sweep adds a new one and drops one that dies, and under
+ * HOLES a minor keeps the last major's counts. */
+static int census_large(void) {
+  register_roots();
+  g_debug_gc_enabled = 1;
+  extend_chain(1);                         /* keeps the ordinary region, so minors sweep young-only */
+  g_keep = (void*)(uintptr_t)make_str(10000);
+  collect();                               /* major */
+  check(g_gc_live_cstr == 1 && g_gc_live_cstr_bytes == 10000, "the major counts the large CSTR");
+  g_keep2 = (void*)(uintptr_t)make_str(20000);
+  collect();                               /* minor */
+  if (g_gen.holes) check(g_gc_live_cstr == 1 && g_gc_live_cstr_bytes == 10000, "a minor keeps the last major's counts");
+  else check(g_gc_live_cstr == 2 && g_gc_live_cstr_bytes == 30000, "a young sweep counts the new large CSTR");
+  g_keep2 = NULL;
+  collect();                               /* minor: the second dies at age 1 */
+  check(g_gc_live_cstr == 1 && g_gc_live_cstr_bytes == 10000, "the dead large CSTR is not counted");
+  sprout_gc_collect_with_reason("atexit"); /* major */
+  check(g_gc_live_cstr == 1 && g_gc_live_cstr_bytes == 10000, "the next major recounts only the live one");
+  return g_failed;
+}
+
 /* An old object whose store skipped the barrier, with a young child that stays young: premise 3. */
 static int bad_unremembered_edge(void) {
   register_roots();
@@ -512,7 +536,7 @@ static int bad_major_bit13(void) {
   g_keep = (void*)(uintptr_t)p;
   collect();
   collect();                               /* a major is next */
-  check(g_gen.colorless == 1, "a major is next");
+  check(g_gen.next_major == 1, "a major is next");
   uint64_t h = sprout_hdr_of((void*)(uintptr_t)p) | SPROUT_GC_REMEMBERED_BIT;
   memcpy((char*)(uintptr_t)p - 8, &h, 8);
   sprout_gc_check_sweep(0, 0);             /* what the collector runs after the sweep */
@@ -543,7 +567,7 @@ static int bad_major_set(void) {
   g_keep = (void*)(uintptr_t)p;
   collect();
   collect();                               /* a major is next */
-  check(g_gen.colorless == 1, "a major is next");
+  check(g_gen.next_major == 1, "a major is next");
   sprout_wl_push(&g_gen.remembered, (void*)(uintptr_t)p, "promote_age: out of memory");
   sprout_gc_check_sweep(0, 0);             /* what the collector runs after the sweep */
   fprintf(stderr, "bad_major_set: no abort\n");
@@ -592,6 +616,8 @@ static const AgeCase k_cases[] = {
   { "holes_remember_old_child",  remember_old_child,          2, 1, "1000", NULL, NULL, -1, 1 },
   { "holes_census",              holes_census,                0, 1, "2",    NULL, NULL, -1, 1 },
   { "holes_census_minors_off",   census_age,                  0, 0, "1000", NULL, NULL, -1, 1 },
+  { "census_large",              census_large,                0, 1, "1000", NULL, NULL, -1 },
+  { "holes_census_large",        census_large,                0, 1, "1000", NULL, NULL, -1, 1 },
   { "bad_unremembered_edge",     bad_unremembered_edge,       2, 1, "1000", NULL, NULL, -1 },
   { "bad_major_bit13",           bad_major_bit13,             2, 1, "1",    NULL, NULL, -1 },
   { "bad_major_set",             bad_major_set,               2, 1, "1",    NULL, NULL, -1 },
@@ -614,7 +640,7 @@ int main(int argc, char** argv) {
   unsetenv("SPROUT_GC_STRESS");
   unsetenv("SPROUT_GC_AGEPROF");
   unsetenv("SPROUT_GC_THRESHOLD");
-  setenv("SPROUT_GC_HOLES", "0", 1);
+  unsetenv("SPROUT_GC_HOLES");
   unsetenv("SPROUT_GC_PROMOTE_AGE");
   unsetenv("SPROUT_GC_NURSERY");
   unsetenv("SPROUT_GC_NURSERY_SHARE");

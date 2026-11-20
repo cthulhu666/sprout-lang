@@ -1081,7 +1081,9 @@ correction from absorbing the thing it exists to detect.
 Runs the write barrier under minor collections ([gc-generational-v0.md](gc-generational-v0.md)
 §14.4, §14.5). One program per barrier site Sprout can drive (`tests/gc_gen/`: `ref_write`,
 `vector_mutset`, `vector_push` growing out of an inline buffer while held by an old object,
-`linear_reuse`) runs with `SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1`. Its stdout
+`linear_reuse`) runs with `SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1` on the
+free-list collector (`SPROUT_GC_HOLES=0`; the default collector's run is the FL_VERIFY and HDRCHECK
+arm below, which includes it). Each run's stdout
 must equal its sidecar `tests/gc_gen/<name>.out` byte for byte (a missing sidecar is an error), it
 must run at least 20 minor collections, and it must print the same output with
 `SPROUT_GC_MINOR=0`, on the default collector with STRESS and on `SPROUT_GC_HOLES=0` without. It
@@ -1118,8 +1120,10 @@ Stdout only, no minor-count floor. The two static `sprout_analysis_*` helpers ca
 analysis service, so `tests/c_runtime/analysis_strings.c` covers them under the same switches and
 the same 20-minor floor. `just c-runtime-test`
 holds the verifier's own test (`tests/c_runtime/gen_check.c`): an unbarriered old-to-young store
-must abort with the owner and field named; its colour-clearing cases (`clear_before_major`,
-`doubling`) run with `SPROUT_GC_HOLES=0`, since no default sweep clears colour.
+must abort with the owner and field named; its colour-clearing case (`clear_before_major`) runs
+with `SPROUT_GC_HOLES=0`, since no default sweep clears colour. `doubling` runs on the default
+(the prediction, the chain after the major, the old `Ref` old; colour persists and the `Ref` stays
+remembered) and as `doubling_free_list` with `SPROUT_GC_HOLES=0` (the sweep clears colour and the set).
 `tests/c_runtime/young_sweep.c` holds the free-list collector's young-only
 sweep's (it sets `SPROUT_GC_HOLES=0`): a minor over a large old heap walks only the young slots, the free count equals a full
 walk's after reuse and inline-tail splits, no slot is listed twice, fresh empty regions are
@@ -1205,24 +1209,33 @@ reads and no dead slot is visited, so the per-slot bounds above (≥10 and ≤2 
 ## Trigger footprint floor — `just gc-trigger-check`
 
 Tests the floor [gc-trigger-v0.md](gc-trigger-v0.md) §6.2 adds to the threshold, under the default
-trigger. Two known answers: `test_gc_walk_sparse` walks fewer than 4 slots per object swept (2.77
-at landing, 25 with the floor off) with minor collections off, since with them on it passes
-without the floor (2.3), and `test_gc_trigger_adversary`'s footprint (`free=` plus
-`heap_after=` on the cycle line) grows by at most 2% over the second half of the run, with minor
-collections on (152,450 → 152,562) and off (152,435 → 152,557).
-The same probe runs with minors on at `SPROUT_GC_NURSERY_SHARE=0.5` (264,192 → 264,192): the
-nursery rule sizes every collection, so the floor must stay its lower bound before a major and at
-the major, or the free pool grows there too.
+trigger. Two known answers. `test_gc_walk_sparse` walks fewer than 4 slots per object swept
+(free-list collector: 2.77 at landing, 25 with the floor off) with minor collections off, since
+with them on it passes without the floor (2.3). The bound is the free-list sweep's per-slot walk,
+so the probe pins `SPROUT_GC_HOLES=0`: on the default collector `walked` counts bitmap words, and
+the check passed with the floor off (0.10 with it, 1.51 without). The second answer is
+`test_gc_trigger_adversary`'s footprint (`free=` plus `heap_after=` on the cycle line), which
+grows by at most 2% over the second half of the run, with minor collections on and off. Both
+collectors run it; `free=` is the freelist length under `SPROUT_GC_HOLES=0` and the free granules
+over the mean live slot size on the default:
+
+| footprint, middle → end | minors default | minors off | `SPROUT_GC_NURSERY_SHARE=0.5` |
+|---|---|---|---|
+| default collector | 247,610 → 247,604 | 210,720 → 210,714 | 364,432 → 364,423 |
+| `SPROUT_GC_HOLES=0` | 152,450 → 152,562 | 152,435 → 152,557 | 264,192 → 264,192 |
+
+The share probe is there because the nursery rule sizes every collection, so the floor must stay
+its lower bound before a major and at the major, or the free pool grows there too.
 
 **The second probe is there to fail the floor that looks right.** Counting free slots only in
 classes with allocation demand diverges on that fixture, and so does the floor without its `/ 3`.
-With the divisor at 1, the pool grew 210,570 → 718,250 and the gate went red; the first probe
-stayed green.
+With the divisor at 1, the free-list collector's pool grew 210,570 → 718,250 and the gate went
+red; the first probe stayed green.
 
 **Footprint, not `free=` alone.** Under minors, dead old objects stay in the heap count until a
-major, which moves them to the free pool: the adversary's `free=` steps 139,623 → 175,944 at its
-first major after the build while free plus heap stays at ~177,600. The divisor-1 floor still fails
-in both modes (212,145 → 720,005).
+major, which moves them to the free pool: the free-list collector's adversary `free=` steps
+139,623 → 175,944 at its first major after the build while free plus heap stays at ~177,600. The
+divisor-1 floor still fails in both modes (212,145 → 720,005; free-list collector).
 
 ## Adaptive threshold — `just gc-adapt-check`
 
@@ -1235,11 +1248,12 @@ checks the kept knob on `test_gc_trigger_adversary`, under both collectors (the 
 `SPROUT_GC_HOLES=0`), at `SPROUT_GC_NURSERY_SHARE=1` and `2`. After a minor the next cycle
 triggers at `heap + max(s × heap, 2 × marked, floors)`, so its `alloc_since_gc` is `s × heap_after`
 of the minor before it, unless a floor binds. The gate takes that ratio over every pair of
-consecutive `kind=minor` cycles where the first set a trigger above the base threshold (the first
-cycle's, so the base floor did not size the nursery; a line's `threshold=` is the trigger set after
-that cycle), and requires the median to be `s` within 10% over at least 8 pairs.
-It reads 1.00 over 29 (default) or 34 (`SPROUT_GC_HOLES=0`) pairs at `s=1` and 2.00 over 216 (default) or 256 (`SPROUT_GC_HOLES=0`) at
-`s=2`. At `s=1` most pairs sit above 1: once the heap settles near 1,600 the 4096 base sets the
+consecutive `kind=minor` cycles where the second's trigger is above the base threshold (the first
+cycle's, so the base floor did not size the nursery; a line's `threshold=` is the trigger that
+cycle hit, printed before the collection sets the next, so it sized that cycle's nursery), and
+requires the median to be `s` within 10% over at least 8 pairs.
+It reads 1.00 over 19 pairs (both collectors) at `s=1` and 2.00 over 216 (default) or 256
+(`SPROUT_GC_HOLES=0`) at `s=2`. At `s=1` most pairs sit above 1: once the heap settles near 1,600 the 4096 base sets the
 trigger (a nursery of ~2,500, ratio ~1.5). That is why the floored pairs are left out; a median
 over all pairs reads 1.47 on both collectors.
 

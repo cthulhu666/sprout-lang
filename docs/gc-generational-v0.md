@@ -846,7 +846,7 @@ one slot walk that clears the colour and `REMEMBERED` bits and empties the set.
 
 **Deciding the next kind early.** Each collection decides the kind of the NEXT one before its
 own sweep. When the next is a major, the sweep clears colour (`sprout_gc_sweep(0)`, which
-already touches every slot) and `colorless` is set. Until then nothing is old, so the
+already touches every slot) and `next_major` is set. Until then nothing is old, so the
 barrier's fast path never remembers anything. The decision needs the post-sweep heap count,
 which is known exactly beforehand: a minor frees no old object and every survivor ends up
 coloured, so the count is `last_live` plus the young objects marked this cycle (after a major,
@@ -860,7 +860,7 @@ every old object that has died since the last major. So minors run fewer, larger
 a default-settings A/B cannot isolate per-collection cost (§14.8 says how it is measured).
 
 A major runs:
-- on the first collection (`colorless` starts set);
+- on the first collection (`next_major` starts set);
 - when live after the previous collection exceeds 2 × live after the last major (CRuby's
   `GC_HEAP_OLDOBJECT_LIMIT_FACTOR`);
 - when `SPROUT_GC_MAJOR_EVERY` minors have run since the last major (Boehm's
