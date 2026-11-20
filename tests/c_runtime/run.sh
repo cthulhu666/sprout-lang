@@ -574,7 +574,7 @@ if grep -q "after-alloc" "$TMP_DIR/gen_check_bad_every_late.out"; then
 fi
 ABORT_NOTE="a bad SPROUT_GC_MINOR did not abort at startup" \
   abort_check "$GC" bad_minor "SPROUT_GC_MINOR: expected 0 or 1"
-for sel in barrier minor_keeps_old major_every clear_before_major doubling no_check bad_every_off default_on empty_on; do
+for sel in barrier minor_keeps_old major_every clear_before_major doubling doubling_free_list no_check bad_every_off default_on empty_on; do
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$GC" "$sel" > "$TMP_DIR/gc_$sel.out" 2> "$TMP_DIR/gc_$sel.err" || {
     echo "  gen_check '$sel' failed:" >&2
     cat "$TMP_DIR/gc_$sel.out" "$TMP_DIR/gc_$sel.err" >&2
@@ -672,7 +672,7 @@ SHARE_MSG="SPROUT_GC_NURSERY_SHARE: expected a number in (0, 4]"
 abort_check "$PA" bad_share_abc "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE abc
 abort_check "$PA" bad_share_0 "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE 0
 abort_check "$PA" bad_share_5 "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE 5
-for sel in age2 age3 age_large major_age remember set_before_major major_rule defaults nursery_sizing nursery_share_half nursery_small_heap nursery_min_binds nursery_pinned nursery_floor_before_major nursery_floor_binds nursery_survive nursery_survive_major nursery_survive_off minors_off share_read share_ignored_minors_off census_age holes_age2 holes_age3 holes_age_large holes_remember holes_remember_old_child holes_census holes_census_minors_off; do
+for sel in age2 age3 age_large major_age remember set_before_major major_rule defaults nursery_sizing nursery_share_half nursery_small_heap nursery_min_binds nursery_pinned nursery_floor_before_major nursery_floor_binds nursery_survive nursery_survive_major nursery_survive_off minors_off share_read share_ignored_minors_off census_age holes_age2 holes_age3 holes_age_large holes_remember holes_remember_old_child holes_census holes_census_minors_off census_large holes_census_large; do
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$PA" "$sel" > "$TMP_DIR/pa_$sel.out" 2> "$TMP_DIR/pa_$sel.err" || {
     echo "  promote_age '$sel' failed:" >&2
     cat "$TMP_DIR/pa_$sel.out" "$TMP_DIR/pa_$sel.err" >&2

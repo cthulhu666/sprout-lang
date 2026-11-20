@@ -970,7 +970,7 @@ typedef struct {
   long long baseline;            /* heap count after the last major */
   long long last_live;           /* heap count after the previous collection */
   long long old_count;           /* objects that kept their colour in the previous sweep */
-  int       colorless;           /* next is a major; with SPROUT_GC_HOLES=0 the last sweep also cleared every color bit */
+  int       next_major;          /* the next collection is a major */
   long long minors_since_major;
   long long n_minor, n_major;    /* collections run, by kind */
   /* Promotion age K and the nursery's share s and survivor floor c (docs/gc-stage2-v0.md §5).
@@ -982,13 +982,24 @@ typedef struct {
   int       region_lists;        /* SPROUT_GC_REGION_LISTS: 1 = per-region free lists (step 2c) */
   int       holes;               /* SPROUT_GC_HOLES: 1 = occupancy maps (docs/gc-stage2-v0.md §5.7) */
 } SproutGenState;
-static SproutGenState g_gen = { .major_every = 19, .colorless = 1, .promote_age = 3,
-                                .nursery_share = 1.0, .nursery_survive = 2.0 };
+static SproutGenState g_gen = { .major_every = 19, .next_major = 1, .promote_age = 3,
+                                .nursery_share = 1.0, .nursery_survive = 2.0, .holes = 1 };
 
 /* A switch removed when its value became fixed: a non-empty setting fails, so a stale one is seen. */
 static void sprout_gc_retired_switch(const char* name, const char* message) {
   const char* v = getenv(name);
   if (v != NULL && v[0] != '\0') sprout_fail(message);
+}
+
+static int g_holes_verify;   /* SPROUT_FL_VERIFY=1 under SPROUT_GC_HOLES, set in sprout_gc_gen_init */
+static int sprout_fl_verify_on(void);
+
+/* A 0-or-1 switch: unset or empty is `dflt`, and anything but `0` or `1` fails with `message`. */
+static int sprout_gc_env_01(const char* name, int dflt, const char* message) {
+  const char* v = getenv(name);
+  if (v == NULL || v[0] == '\0') return dflt;
+  if ((v[0] != '0' && v[0] != '1') || v[1] != '\0') sprout_fail(message);
+  return v[0] - '0';
 }
 
 /* Reads the generational switches at startup (sprout_set_argv), so a bad value fails before
@@ -1000,29 +1011,8 @@ static void sprout_gc_retired_switch(const char* name, const char* message) {
  * SPROUT_GC_REGION_LISTS (0 or 1; 1 selects per-region free lists, docs/gc-stage2-v0.md §5.6)
  * is read in both modes, so an A/B compares them under one allocator.
  * SPROUT_GC_HOLES (0 or 1, default 1; 1 selects the occupancy-map collector, §5.7) is read in
- * both modes. */
-static void sprout_gc_holes_refuse(const char* name) {
-  fprintf(stderr, "[sprout] %s=1 needs SPROUT_GC_HOLES=0\n", name);
-  exit(2);
-}
-
-static int g_holes_verify;   /* SPROUT_FL_VERIFY=1 under SPROUT_GC_HOLES, set in sprout_gc_gen_init */
-static int sprout_fl_verify_on(void);
-
-/* The maps replace the free lists, so the per-region lists are out.  SPROUT_FL_VERIFY,
- * SPROUT_GC_HDRCHECK and SPROUT_GC_LINEAGE have forms of their own under HOLES. */
-static void sprout_gc_holes_check_modes(void) {
-  if (g_gen.region_lists) sprout_gc_holes_refuse("SPROUT_GC_REGION_LISTS");
-}
-
-/* A 0-or-1 switch: unset or empty is `dflt`, and anything but `0` or `1` fails with `message`. */
-static int sprout_gc_env_01(const char* name, int dflt, const char* message) {
-  const char* v = getenv(name);
-  if (v == NULL || v[0] == '\0') return dflt;
-  if ((v[0] != '0' && v[0] != '1') || v[1] != '\0') sprout_fail(message);
-  return v[0] - '0';
-}
-
+ * both modes.  The maps replace the free lists, so the per-region lists are out under HOLES
+ * (exit 2); SPROUT_FL_VERIFY, SPROUT_GC_HDRCHECK and SPROUT_GC_LINEAGE have forms of their own. */
 static void sprout_gc_gen_init(void) {
   sprout_gc_retired_switch("SPROUT_GC_PROMOTE_AGE",
     "SPROUT_GC_PROMOTE_AGE was removed: promotion age is fixed at 3");
@@ -1038,7 +1028,10 @@ static void sprout_gc_gen_init(void) {
   g_gen.region_lists = sprout_gc_env_01("SPROUT_GC_REGION_LISTS", 0, "SPROUT_GC_REGION_LISTS: expected 0 or 1");
   g_gen.holes = sprout_gc_env_01("SPROUT_GC_HOLES", 1, "SPROUT_GC_HOLES: expected 0 or 1");
   if (g_gen.holes) {
-    sprout_gc_holes_check_modes();
+    if (g_gen.region_lists) {
+      fprintf(stderr, "[sprout] SPROUT_GC_REGION_LISTS=1 needs SPROUT_GC_HOLES=0\n");
+      exit(2);
+    }
     g_holes_verify = sprout_fl_verify_on();
   }
   if (!g_gen.on) return;
@@ -3095,17 +3088,15 @@ static long long* sprout_realloc_vector_data(long long* data, size_t count, cons
  * `oldocc`, joins the list of its exact class (sprout_holes_push_tail) and stays
  * in `occ` until the next sweep drops it.  With SPROUT_GC_HOLES=0 the remainder
  * becomes a slot of its own: a FREE header carrying its byte size in aux, with
- * its slotmap bit set.  That is what that sweep leaves behind for any dead slot,
- * so nothing new has to understand it.
- *
- * With SPROUT_GC_HOLES=0 the tail goes straight onto the live lists (fl_push_live, or its
- * region's under SPROUT_GC_REGION_LISTS, which lowers the class cursor to it).  The full sweep
- * memsets and rebuilds the lists, which re-lists it from the walk; a young-only
- * minor keeps them, so this push is the only one the tail gets.  Its youngmap
- * bit stays clear, so no minor frees it.  It must NOT go through fl_push_staged:
- * that marks the class touched for the per-region staging, and a flag set
- * outside a region walk is never cleared, which would disable the rollback the
- * freelist depends on.
+ * its slotmap bit set, which is what that sweep leaves behind for any dead slot,
+ * so nothing new has to understand it.  It goes straight onto the live lists
+ * (fl_push_live, or its region's under SPROUT_GC_REGION_LISTS, which lowers the
+ * class cursor to it).  The full sweep memsets and rebuilds the lists, which
+ * re-lists it from the walk; a young-only minor keeps them, so this push is the
+ * only one the tail gets.  Its youngmap bit stays clear, so no minor frees it.
+ * It must NOT go through fl_push_staged: that marks the class touched for the
+ * per-region staging, and a flag set outside a region walk is never cleared,
+ * which would disable the rollback the freelist depends on.
  *
  * The header is edited, not rewritten: sprout_hdr_write would reset the age and
  * clear the color bit, and this object is surviving, not being re-initialised.
@@ -3350,8 +3341,8 @@ static inline void gc_mark_wl_push(void* payload) {
   sprout_wl_push(&g_gc_mark_wl, payload, "GC mark: out of memory for worklist");
 }
 
-/* The census line counts live slots by kind: a survivor joins it (d = 1), and a counted slot
- * that dies in a young sweep leaves it (d = -1).  Under SPROUT_GC_HOLES the marker counts each
+/* The census line counts live objects by kind, large ones included: a survivor joins it (d = 1),
+ * and a counted one that dies in a young sweep leaves it (d = -1).  Under SPROUT_GC_HOLES the marker counts each
  * object it marks at a major (g_holes_census), and nothing subtracts. */
 static inline void sprout_gc_census_adjust(SproutHeapKind kind, unsigned long long aux,
                                            long long d) {
@@ -3429,8 +3420,7 @@ static void gc_mark_enqueue_holes(void* payload, SproutRegion* r) {
     g_ap_marked_total++;
     if (g_holes_major) g_ap_live_by_age[sprout_hdr_age(h)]++;   /* the age after the bump, as the sweep reads it */
   }
-  if (g_holes_census && !r->is_large)   /* slots only, as the sweeps' census counts */
-    sprout_gc_census_add(sprout_hdr_kind(h), sprout_hdr_aux(h));
+  if (g_holes_census) sprout_gc_census_add(sprout_hdr_kind(h), sprout_hdr_aux(h));
   g_gc_marked_count++;
   gc_mark_wl_push(payload);
 }
@@ -3566,10 +3556,9 @@ static inline void sprout_gc_mark_roots(SproutRootVisit visit) {
 
 /* ── Minor collections (on by default, docs/gc-generational-v0.md §14.4) ─────────
  *
- * Between collections the color bit means OLD, except when `colorless` is set (with
- * SPROUT_GC_HOLES=0 the sweep cleared it because the next collection is a major; by default
- * colour persists and `colorless` only marks a major).  gc_mark_enqueue stops at a set color
- * bit, so a minor marks only young objects.  An old object that was written to since the last
+ * Between collections the color bit means OLD, except that with SPROUT_GC_HOLES=0 the sweep
+ * before a major (`next_major`) clears it.  gc_mark_enqueue stops at a set color bit, so a
+ * minor marks only young objects.  An old object that was written to since the last
  * collection is in the remembered set: its children are traced regardless of its color. */
 
 /* Minor: trace the children of every remembered object, then empty the set.  Pushing the
@@ -3587,8 +3576,8 @@ static void sprout_gc_mark_remembered(void) {
 
 /* Major after a color-keeping sweep (atexit): clear color and REMEMBERED on every slot, so
  * the mark that follows re-marks the whole live heap.  Same slot walk as the sweep; FREE and
- * POISON slots carry neither bit.  Skipped when `colorless`.  Free-list collector only
- * (SPROUT_GC_HOLES=0). */
+ * POISON slots carry neither bit.  Skipped when `next_major` (the sweep already cleared them).
+ * Free-list collector only (SPROUT_GC_HOLES=0). */
 static inline size_t sprout_slot_step(uint64_t h);
 static void sprout_gc_clear_marks(void) {
   g_gen.remembered.len = 0;
@@ -3616,11 +3605,11 @@ static void sprout_gc_clear_marks(void) {
 }
 
 /* Which collection to run.  Major on any reason but the allocation trigger (atexit), and
- * whenever `colorless` is set: the first collection, or this one was predicted to be a major
- * (with SPROUT_GC_HOLES=0 the previous sweep then cleared the colors).  The size and count rules
- * live in sprout_gc_gen_record, which decides this collection's kind one sweep early. */
+ * whenever `next_major` is set: the first collection, or this one was predicted to be a major.
+ * The size and count rules live in sprout_gc_gen_record, which decides this collection's kind
+ * one sweep early. */
 static int sprout_gc_gen_choose_minor(const char* reason) {
-  return strcmp(reason, "threshold") == 0 && !g_gen.colorless;
+  return strcmp(reason, "threshold") == 0 && !g_gen.next_major;
 }
 
 /* Called after the mark, before the sweep: records this collection in g_gen and returns
@@ -3640,8 +3629,8 @@ static int sprout_gc_gen_record(int minor) {
     g_gen.minors_since_major = 0;
     g_gen.n_major++;
   }
-  g_gen.colorless = g_gen.last_live > 2 * g_gen.baseline || g_gen.minors_since_major >= g_gen.major_every;
-  return g_gen.colorless;
+  g_gen.next_major = g_gen.last_live > 2 * g_gen.baseline || g_gen.minors_since_major >= g_gen.major_every;
+  return g_gen.next_major;
 }
 
 /* ── SPROUT_GC_GENCHECK=1 — does a minor collection free anything reachable? ───
@@ -4309,13 +4298,18 @@ static inline void sprout_gc_free_large(SproutRegion* r, uint64_t h, int lineage
   r->live_count = 0;
 }
 
+/* `full`: the census was reset, so a survivor is counted; a young-only sweep keeps the counts and
+ * only an age-0 survivor is new to them (as for slots), while a dead one counted before leaves. */
 static inline int sprout_gc_sweep_large(SproutRegion* r, uint64_t clear, unsigned young_below,
-                                        int ageprof_on, int lineage_on) {
+                                        int ageprof_on, int lineage_on, int full) {
   g_debug_gc_walked++;
   /* OBJ (the only poisoned kind) is never large — max OBJ slot is 96 bytes
    * — so large entries need no poison handling. */
   uint64_t h; memcpy(&h, r->base, 8);
+  const SproutHeapKind kind = sprout_hdr_kind(h);
+  const unsigned long long aux = sprout_hdr_aux(h);
   if (h & SPROUT_GC_COLOR_BIT) {
+    if (g_debug_gc_enabled && (full || sprout_hdr_age(h) == 0)) sprout_gc_census_add(kind, aux);
     int young = sprout_gc_stays_young(h, young_below);
     h &= ~clear;
     if (young) h &= ~SPROUT_GC_COLOR_BIT;
@@ -4329,6 +4323,7 @@ static inline int sprout_gc_sweep_large(SproutRegion* r, uint64_t clear, unsigne
     g_ap_freed_total++;
     if (sprout_hdr_age(h) == 0) g_ap_freed_age0++;
   }
+  if (g_debug_gc_enabled && !full && sprout_hdr_age(h) >= 1) sprout_gc_census_sub(kind, aux);
   sprout_gc_free_large(r, h, lineage_on);
   return SWEEP_LARGE_FREED;
 }
@@ -4374,7 +4369,7 @@ static void sprout_gc_sweep(int keep_color) {
     SproutRegion* r = &g_regions[ri];
     if (r->is_large) {
       /* A freed one has base NULL: Pass 2 removes it. */
-      int survived = sprout_gc_sweep_large(r, clear, young_below, ageprof_on, lineage_on);
+      int survived = sprout_gc_sweep_large(r, clear, young_below, ageprof_on, lineage_on, 1);
       r->old_count = survived == SWEEP_LARGE_OLD && keep_color;
       r->young_count = survived == SWEEP_LARGE_YOUNG;
       old_total += r->old_count;
@@ -4607,9 +4602,9 @@ static void sprout_gc_sweep_young(void) {
       /* The colour stays set unless the object is under the promotion age (it then stays young);
          AGEPROF forces the full sweep.  A freed one has base NULL and is removed below, once
          the walk no longer indexes the table. */
-      int survived = sprout_gc_sweep_large(r, 0, young_below, 0, lineage_on);
+      int survived = sprout_gc_sweep_large(r, 0, young_below, 0, lineage_on, 0);
       if (survived == SWEEP_LARGE_OLD) {
-        r->old_count = 1;  /* the census leaves large objects out, as the full sweep does */
+        r->old_count = 1;
         r->young_count = 0;
         promoted++;
       } else if (survived == SWEEP_LARGE_FREED) {
@@ -5292,9 +5287,10 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   int gen_on = g_gen.on;
   int minor = gen_on && sprout_gc_gen_choose_minor(reason);
   const int holes = g_gen.holes;
-  /* Under HOLES `colorless` only says that this collection is a major: no sweep clears colour. */
+  /* Under HOLES no sweep clears colour.  With the free-list collector a sweep before a major
+     does, so only a major after a colour-keeping sweep (atexit) clears first. */
   if (holes) sprout_holes_begin(minor);
-  else if (gen_on && !minor && !g_gen.colorless) sprout_gc_clear_marks();
+  else if (gen_on && !minor && !g_gen.next_major) sprout_gc_clear_marks();
   if (gen_on && !holes)
     for (size_t ri = 0; ri < g_region_count; ri++) g_regions[ri].marked_young = 0;
   sprout_gc_mark_roots(sprout_gc_mark_ptr);

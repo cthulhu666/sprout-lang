@@ -879,10 +879,12 @@ and premise 6's free count changes unit.
    `SPROUT_GC_HOLES=0` and 142 to 265 by default), because s also moves where the majors fall,
    which sets the steady heap. What s fixes is the nursery after a minor, s × the heap it left;
    `just gc-adapt-check` reads that ratio off the cycle lines.
-6. Retire `SPROUT_GC_REGION_LISTS` once steps 4 and 5 settle it, and update
-   `compiler-internals.md` and `gates.md`. Retiring it removes the global lists with
-   `sprout_gc_young_sweep_ok` and the staged build (`g_fl_saved`, `fl_push_staged`,
-   `fl_region_commit`, `fl_region_rollback`).
+6. Retire `SPROUT_GC_REGION_LISTS` once steps 4 and 5 settle it, and `SPROUT_GC_HOLES=0` with it,
+   and update `compiler-internals.md` and `gates.md`. Retiring them removes the free-list
+   collector: `sprout_gc_sweep`, `sprout_gc_sweep_young`, `sprout_gc_clear_marks`, the global and
+   per-region lists, the staged build (`g_fl_saved`, `fl_push_staged`, `fl_region_commit`,
+   `fl_region_rollback`), `sprout_gc_young_sweep_ok`, the `SPROUT_GC_HOLES=0` gate arms and C cases,
+   and the old FL_VERIFY multiset oracle and HDRCHECK slot walk.
 
 ## 8. On landing
 
@@ -931,7 +933,7 @@ Step 5:
   `tests/c_runtime/promote_age.c` and `young_sweep.c` read the free count.
 - `gc-size-classes-v0.md` and `compiler-internals.md`'s note that coalescing needs a
   `slotmap_clear`: both stale once the sweep clears `slotmap`.
-- `SproutGenState.colorless` and the comment on `sprout_gc_gen_choose_minor`, with
+- `SproutGenState.colorless` (now `next_major`) and the comment on `sprout_gc_gen_choose_minor`, with
   `compiler-internals.md`'s colour-clearing sentences (bit 13 "cleared by minor collections and the
   major pre-pass", `sprout_gc_clear_marks`): the flag becomes "next is a major".
 - GENCHECK: `sprout_gc_check_reach`'s colour test and `sprout_gc_check_sweep`'s pre-major checks.
@@ -939,4 +941,8 @@ Step 5:
   its header, and lookups reject by start bit.
 
 Step 6, for step 4's switch: `sprout_gc_young_sweep_ok`, the staged build, and the
-`fl_push_staged` warning in the comment above `sprout_vec_release_inline_tail`.
+`fl_push_staged` warning in the comment above `sprout_vec_release_inline_tail`. For
+`SPROUT_GC_HOLES=0`: the free-list collector of §7 step 6, the `SPROUT_GC_HOLES=0` arms of the
+justfile gates and `tests/c_runtime` cases (`gen_check.c`'s `clear_before_major` and
+`doubling_free_list`, `young_sweep.c`, `promote_age.c`'s free-list cases), and the
+`SPROUT_GC_HOLES=0` text in `compiler-internals.md`, `development.md` and `gates.md`.

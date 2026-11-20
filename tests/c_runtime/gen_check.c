@@ -26,8 +26,11 @@
  *   clear_before_major — SPROUT_GC_HOLES=0, SPROUT_GC_MAJOR_EVERY=1: the minor's sweep clears
  *                     every colour bit because the next collection is a major; the barrier then
  *                     remembers nothing, and the major re-marks everything.
- *   doubling        — the same when the next collection is a major because the heap more than
- *                     doubled over the baseline.
+ *   doubling        — the next collection is a major because the heap more than doubled over the
+ *                     baseline: the prediction, the chain readable after the major, the old Ref old.
+ *                     Under the default collector colour persists and the Ref stays remembered;
+ *                     doubling_free_list (SPROUT_GC_HOLES=0) is the same with the sweep clearing
+ *                     every colour bit and the set.
  *
  * `k_cases` lists every case with its environment; main sets it before sprout_set_argv. */
 #include <stdio.h>
@@ -128,7 +131,8 @@ static int clear_before_major(void) {
   return g_failed;
 }
 
-/* A minor whose survivors more than double the baseline is followed by a major. */
+/* A minor whose survivors more than double the baseline is followed by a major.  Runs under both
+ * collectors; the colour and remembered-set expectations after the minor differ. */
 static int doubling(void) {
   long long r = make_old_ref();
   long long n = 2 * g_gen.baseline + 2;
@@ -143,15 +147,23 @@ static int doubling(void) {
   long long minors = g_gen.n_minor, majors = g_gen.n_major;
   collect();
   check(g_gen.n_minor == minors + 1 && g_gen.n_major == majors, "the next collection is a minor");
-  check(!is_old(r) && !is_old(head) && !is_old(tail), "the sweep before a major clears every colour bit");
-  check(g_gen.remembered.len == 0, "no object is remembered");
+  check(g_gen.next_major == 1, "a major is next");
+  if (g_gen.holes) {
+    /* No sweep clears colour: r stays old, the chain is young (age 1), and r, which points
+       at it, stays remembered until the chain is promoted. */
+    check(is_old(r) && !is_old(head) && !is_old(tail), "colour persists: r is old, the chain young");
+    check(is_remembered(r) && g_gen.remembered.len == 1, "r stays remembered while its child is young");
+  } else {
+    check(!is_old(r) && !is_old(head) && !is_old(tail), "the sweep before a major clears every colour bit");
+    check(g_gen.remembered.len == 0, "no object is remembered");
+  }
   collect();
   check(g_gen.n_major == majors + 1 && g_gen.n_minor == minors + 1, "the collection after it is a major");
   long long cur = ref_read(r);
   long long len = 0;
   while (cur != 0 && sprout_heap_lookup((void*)(uintptr_t)cur) != NULL) { len++; cur = ref_read(cur); }
   check(len == n, "the whole chain is readable after the major");
-  check(is_old(r), "the old Ref is old again");
+  check(is_old(r), "the old Ref is old after the major");
   return g_failed;
 }
 
@@ -215,7 +227,8 @@ static const GenCase k_cases[] = {
   { "minor_keeps_old", minor_keeps_old, "1", 1, NULL },
   { "major_every",     major_every,     "1", 1, "3" },
   { "clear_before_major", clear_before_major, "1", 1, "1", 1 },
-  { "doubling",        doubling,        "1", 1, NULL, 1 },
+  { "doubling",        doubling,        "1", 1, NULL },
+  { "doubling_free_list", doubling,     "1", 1, NULL, 1 },
   { "no_check",        no_check,        "1", 0, NULL },
   { "bad_every_off",   bad_every_off,   "0", 1, "abc" },
   { "bad_every_on",    bad_every_on,    "1", 1, "abc" },

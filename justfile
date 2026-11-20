@@ -4310,37 +4310,39 @@ gc-adapt-check: bootstrap-from-seed
     || { echo "gc-adapt-check: floor-pinned workload changed with the factor ('${none_f2}' vs '${none_f4}') — raising the default is NOT free for small-live-set programs" >&2; failed=1; }
   # --- Property 3: with minors on, the share (not the factor) sizes the nursery --
   # After a minor, the next cycle triggers at heap + max(s x heap, c x marked, floors), so its
-  # alloc_since_gc is s x the heap the minor left. A line's threshold= is the trigger set after
-  # that cycle. Read the ratio off every pair of consecutive minors where the first set a trigger
+  # alloc_since_gc is s x the heap the minor left. A line's threshold= is the trigger THAT cycle
+  # hit (printed before the collection sets the next), so it is the one that sized this cycle's
+  # nursery. Read the ratio off every pair of consecutive minors where the second's trigger is
   # above the base (the first cycle's), so the base floor did not size the nursery, and take
   # the median: it must be s within 10%. The cycle COUNT is not the check: the share also moves
   # where the majors fall, which sets the steady heap, so the count is not monotone in s
   # (docs/gates.md). Both collectors run it.
   build_one test_gc_trigger_adversary || exit 1
   # A crashed run has fewer cycles, so rc and the verdict are checked. Prints "<pairs> <median>".
+  # share_ratio <label> <share> [ENV=V ...]: the label names the arm's output files.
   share_ratio() {
-    local holes="$1" share="$2" rc tag="share$2.${1:-default}"
-    local henv=(-u SPROUT_GC_HOLES)
-    [ -n "$holes" ] && henv=(SPROUT_GC_HOLES="$holes")
-    env -u SPROUT_GC_ADAPT_FACTOR -u SPROUT_GC_THRESHOLD "${henv[@]}" SPROUT_GC_MINOR=1 SPROUT_GC_NURSERY_SHARE="$share" SPROUT_DEBUG_GC=1 \
+    local label="$1" share="$2" rc tag="share$2.$1"
+    shift 2
+    env -u SPROUT_GC_ADAPT_FACTOR -u SPROUT_GC_THRESHOLD -u SPROUT_GC_HOLES "$@" SPROUT_GC_MINOR=1 SPROUT_GC_NURSERY_SHARE="$share" SPROUT_DEBUG_GC=1 \
       "$TMPD/test_gc_trigger_adversary.bin" >"$TMPD/$tag.out" 2>"$TMPD/$tag.err"
     rc=$?
     if [ "$rc" != 0 ] || ! grep -q "SUITE PASSED" "$TMPD/$tag.out"; then
-      echo "gc-adapt-check: adversary failed at SHARE=$share HOLES='${holes:-default}' (rc=$rc)" >&2; tail -5 "$TMPD/$tag.out" "$TMPD/$tag.err" >&2
+      echo "gc-adapt-check: adversary failed at SHARE=$share [$label] (rc=$rc)" >&2; tail -5 "$TMPD/$tag.out" "$TMPD/$tag.err" >&2
       return 1
     fi
     awk '/\[sprout gc\] cycle=/ {
            delete v
            for (i = 1; i <= NF; i++) { n = split($i, kv, "="); if (n == 2) v[kv[1]] = kv[2] }
            if (!base) base = v["threshold"]
-           if (v["kind"] == "minor" && pk == "minor" && ph > 0 && pt > base) printf "%.4f\n", v["alloc_since_gc"] / ph
-           pk = v["kind"]; ph = v["heap_after"]; pt = v["threshold"]
+           if (v["kind"] == "minor" && pk == "minor" && ph > 0 && v["threshold"] > base) printf "%.4f\n", v["alloc_since_gc"] / ph
+           pk = v["kind"]; ph = v["heap_after"]
          }' "$TMPD/$tag.err" | sort -g | awk '{ a[NR] = $1 } END { printf "%d %s\n", NR, a[int((NR + 1) / 2)] }'
   }
-  for arm in "holes|" "freelist|0"; do
+  for arm in "holes|" "freelist|SPROUT_GC_HOLES=0"; do
     label="${arm%%|*}"
     for share in 1 2; do
-      read -r pairs med < <(share_ratio "${arm#*|}" "$share") || exit 1
+      # shellcheck disable=SC2086
+      read -r pairs med < <(share_ratio "$label" "$share" ${arm#*|}) || exit 1
       echo "  adversary, minors on [$label] SHARE=${share}: alloc_since_gc / prior heap_after, median ${med} over ${pairs} pairs"
       awk -v m="$med" -v s="$share" -v n="$pairs" 'BEGIN { exit !(n >= 8 && m >= 0.9 * s && m <= 1.1 * s) }' \
         || { echo "gc-adapt-check[$label]: SHARE=${share}: median ${med} over ${pairs} pairs is not within 10% of ${share} (or under 8 pairs) — the nursery is not s x heap" >&2; failed=1; }
@@ -4392,11 +4394,13 @@ gc-gen-check: bootstrap-from-seed
     want_file="tests/gc_gen/$name.out"
     [ -f "$want_file" ] || { echo "gc-gen-check: missing $want_file (the expected stdout of $f)" >&2; failed=1; continue; }
     build_one "$f" "$name" || { failed=1; continue; }
-    SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 SPROUT_DEBUG_GC=1 \
+    # The free-list collector's plain GENCHECK+STRESS run, with the minor-count floor; the default
+    # collector's is the FL_VERIFY+HDRCHECK arm below, which includes it.
+    SPROUT_GC_HOLES=0 SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 SPROUT_DEBUG_GC=1 \
       "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.gc"
     rc=$?
     if [ "$rc" != 0 ] || ! cmp -s "$want_file" "$TMPD/$name.out"; then
-      report_mismatch "$name" "failed under MINOR=1 GENCHECK=1 STRESS=1 (rc=$rc)" "$TMPD/$name.out"
+      report_mismatch "$name" "failed under SPROUT_GC_HOLES=0 MINOR=1 GENCHECK=1 STRESS=1 (rc=$rc)" "$TMPD/$name.out"
       grep -A4 'GENCHECK' "$TMPD/$name.gc" | head -8 >&2
       failed=1; continue
     fi
@@ -4672,10 +4676,13 @@ gc-walk-check: bootstrap-from-seed
   echo "==> gc-walk-check ✓"
 
 # The trigger's footprint floor (docs/gc-trigger-v0.md §6.2): after each sweep the next threshold
-# is at least `live + (live + free) / 3`, where `free` is the freelist length (`free=` on the
-# SPROUT_DEBUG_GC cycle line). Two known answers, under the DEFAULT trigger:
+# is at least `live + (live + free) / 3`, where `free` is the free slots (`free=` on the
+# SPROUT_DEBUG_GC cycle line): the freelist length under SPROUT_GC_HOLES=0, the free granules
+# below the bump marks over the mean live slot size on the default. Known answers, under the
+# DEFAULT trigger; 2 and 3 run on both collectors:
 #   1. It is ON: test_gc_walk_sparse walks < 4 slots per object swept (25 with no floor, 2.8 with),
-#      with minor collections off: with them on it passes without the floor too.
+#      with minor collections off: with them on it passes without the floor too. The walk bound
+#      is the free-list sweep's, so the probe pins SPROUT_GC_HOLES=0.
 #   2. It SETTLES: test_gc_trigger_adversary's footprint (free + heap_after) stops growing, with
 #      minor collections on and off. A floor that counts free slots by class demand grows it
 #      ~100,000 slots a cycle there instead. Free alone is not the footprint under minors: a major
@@ -4694,10 +4701,12 @@ gc-trigger-check: bootstrap-from-seed
     clang -c "$rtsrc" -O2 {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
       || { echo "gc-trigger-check: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
   done
-  # run <test> [default|0|1|share]: SPROUT_GC_MINOR unset (the default) or set; `share` is minors
-  # on with SPROUT_GC_NURSERY_SHARE=0.5. Log: <test>.<mode>.log.
+  # run <test> [default|0|1|share] [holes|freelist]: SPROUT_GC_MINOR unset (the default) or set;
+  # `share` is minors on with SPROUT_GC_NURSERY_SHARE=0.5. `freelist` is SPROUT_GC_HOLES=0, `holes`
+  # the default collector. Log: <test>.<mode>.<collector>.log.
   run() {
-    local name="$1" mode="${2:-default}" f="tests/stdlib/$1.spr" menv=(-u SPROUT_GC_MINOR)
+    local name="$1" mode="${2:-default}" coll="${3:-holes}" f="tests/stdlib/$1.spr" menv=(-u SPROUT_GC_MINOR) hset=
+    [ "$coll" = freelist ] && hset=SPROUT_GC_HOLES=0
     case "$mode" in
       default) ;;
       share)      menv=(SPROUT_GC_MINOR=1 SPROUT_GC_NURSERY_SHARE=0.5) ;;
@@ -4708,25 +4717,27 @@ gc-trigger-check: bootstrap-from-seed
       || { echo "gc-trigger-check: compile failed: $f" >&2; cat "$TMPD/$name.err" >&2; return 1; }
     clang "$TMPD/$name.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$name.bin" 2>"$TMPD/$name.err" \
       || { echo "gc-trigger-check: link failed: $f" >&2; cat "$TMPD/$name.err" >&2; return 1; }
+    # shellcheck disable=SC2086
     env -u SPROUT_GC_THRESHOLD -u SPROUT_GC_ADAPT_FACTOR -u SPROUT_GC_ADAPT_RATIO -u SPROUT_GC_ADAPT_CAP \
-      -u SPROUT_GC_LINEAGE -u SPROUT_GC_STRESS -u SPROUT_GC_NURSERY_SHARE "${menv[@]}" SPROUT_DEBUG_GC=1 "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.$mode.log" \
-      || { echo "gc-trigger-check: $name ($mode) failed" >&2; tail -5 "$TMPD/$name.$mode.log" >&2; return 1; }
+      -u SPROUT_GC_LINEAGE -u SPROUT_GC_STRESS -u SPROUT_GC_NURSERY_SHARE -u SPROUT_GC_HOLES "${menv[@]}" $hset SPROUT_DEBUG_GC=1 "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.$mode.$coll.log" \
+      || { echo "gc-trigger-check: $name ($mode, $coll) failed" >&2; tail -5 "$TMPD/$name.$mode.$coll.log" >&2; return 1; }
     grep -q "SUITE PASSED" "$TMPD/$name.out" \
       || { echo "gc-trigger-check: $name did not pass" >&2; tail -5 "$TMPD/$name.out" >&2; return 1; }
   }
-  # Emits "<cycles> <walked_total> <swept_total>".
+  # Emits "<cycles> <walked_total> <swept_total>". SPROUT_GC_HOLES=0: on the default collector
+  # `walked` counts bitmap words, so the per-slot bound below applies to the free-list sweep only.
   walk() {
-    run "$1" 0 || return 1
+    run "$1" 0 freelist || return 1
     awk '/^\[sprout gc\] cycle=/ {
            for (i = 1; i <= NF; i++) { split($i, kv, "="); v[kv[1]] = kv[2] }
            c++; w += v["walked"]; s += v["swept"]
          }
-         END { printf "%d %d %d\n", c, w, s }' "$TMPD/$1.0.log"
+         END { printf "%d %d %d\n", c, w, s }' "$TMPD/$1.0.freelist.log"
   }
-  # pool <test> <mode>: "<cycles> <footprint at the middle cycle> <at the last>", atexit excluded.
-  # The footprint is free + heap_after.
+  # pool <test> <mode> <collector>: "<cycles> <footprint at the middle cycle> <at the last>", atexit
+  # excluded. The footprint is free + heap_after.
   pool() {
-    run "$1" "$2" || return 1
+    run "$1" "$2" "$3" || return 1
     awk -v n="$1" '/^\[sprout gc\] cycle=/ && !/reason=atexit/ {
            delete v
            for (i = 1; i <= NF; i++) { split($i, kv, "="); v[kv[1]] = kv[2] }
@@ -4737,7 +4748,7 @@ gc-trigger-check: bootstrap-from-seed
            if (bad) exit 1
            if (c < 10) { print "gc-trigger-check: " n ": " c " cycles, too few to see a trend" > "/dev/stderr"; exit 1 }
            printf "%d %d %d\n", c, f[int(c / 2)], f[c]
-         }' "$TMPD/$1.$2.log"
+         }' "$TMPD/$1.$2.$3.log"
   }
   failed=0
   if read -r sp_c sp_w sp_s < <(walk test_gc_walk_sparse); then
@@ -4745,12 +4756,14 @@ gc-trigger-check: bootstrap-from-seed
     (( sp_w < 4 * sp_s )) \
       || { echo "gc-trigger-check: walk_sparse walked ${sp_w} >= 4x swept ${sp_s} — the footprint floor is not raising the threshold" >&2; failed=1; }
   else failed=1; fi
-  for mode in default 0 share; do
-    if read -r ad_c ad_mid ad_end < <(pool test_gc_trigger_adversary "$mode"); then
-      echo "  adversary   : minor=${mode} cycles=${ad_c} free+heap at middle=${ad_mid} at end=${ad_end}"
-      (( ad_end - ad_mid <= ad_mid / 50 )) \
-        || { echo "gc-trigger-check: adversary footprint grew ${ad_mid} -> ${ad_end} over the second half (minor=${mode}) — the floor does not settle" >&2; failed=1; }
-    else failed=1; fi
+  for coll in holes freelist; do
+    for mode in default 0 share; do
+      if read -r ad_c ad_mid ad_end < <(pool test_gc_trigger_adversary "$mode" "$coll"); then
+        echo "  adversary   : [$coll] minor=${mode} cycles=${ad_c} free+heap at middle=${ad_mid} at end=${ad_end}"
+        (( ad_end - ad_mid <= ad_mid / 50 )) \
+          || { echo "gc-trigger-check: adversary footprint grew ${ad_mid} -> ${ad_end} over the second half ([$coll] minor=${mode}) — the floor does not settle" >&2; failed=1; }
+      else failed=1; fi
+    done
   done
   (( failed == 0 )) || exit 1
   echo "==> gc-trigger-check ✓"
