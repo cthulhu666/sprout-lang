@@ -263,6 +263,44 @@ The built-in `/code-review` already runs cleanup angles at `high` — three clea
 one conventions, inline in one context. The conventions angle (quote a CLAUDE.md rule, quote the line
 that breaks it) is not in this track.
 
+## The first A/B against the built-in (2026-11-20)
+
+One diff: PR #893, the GC collector's default flip (19 files, ~270 lines changed: runtime,
+justfile gates, C tests, docs). `/code-review high 893` and `/sprout-review high 893` ran in
+parallel on the same head. Ledger run `1795213504-11761`.
+
+| | `/code-review` | `/sprout-review` |
+|---|---|---|
+| tokens | 138,042 | 624,431 (4.5×) |
+| tool calls | 33 | 157 |
+| wall time | 289 s | 354 s |
+| agents | 1 | 6 (3 bug passes, 1 cleanup pass, 2 skeptics) |
+| reports → issues | 8 → 8 | 4 bug → 2, plus 4 cleanups |
+| verified | no skeptic | each finding, with measurements |
+
+| issue | `/code-review` | `/sprout-review` |
+|---|---|---|
+| `gc-trigger-check` not pinned to the old collector; its floor check passes with the floor off | 1 report | 3 reports, re-measured |
+| `gc-adapt-check` filter reads the wrong cycle's `threshold=` | yes | yes |
+| `g_gen`'s static initializer leaves the new default off for C tests that skip `sprout_set_argv` | yes | — |
+| `gen_check.c` `doubling` pinned whole to the old collector, dropping its collector-independent checks | yes | — |
+| the design doc names a step that does not remove the old collector; nothing tracks it | yes | — |
+| a BACKLOG entry's trigger fired in the PR and was moved instead of met | yes | — |
+| cleanups: a `gc-gen-check` arm that is a subset of another; a dead `setenv` | yes | — |
+| cleanups: rename `colorless`; a third arm convention; a split docblock; one-caller helpers | — | yes |
+
+Every `/code-review` finding held when checked against source after the run.
+
+**What it says.** The three bug passes converged: three of four reports were one issue, and
+the skeptic then re-measured it. The built-in found four bugs the ensemble missed, among them the
+one that mattered most, at about a fifth of the tokens. That bug sits outside the diff's hunks, in
+code the change should have touched and did not; copies of one prompt do not fan out to that
+question. By the P1 entry's own rule in `BACKLOG.md`, these are design defects, not tuning. The
+ensemble's own gains here were four cleanups, confirmations backed by numbers, and the ledger,
+which the built-in does not write.
+
+One diff is not a measurement. Issue #894 runs two more and decides what the skill keeps.
+
 ## Reading it
 
 ```sh
