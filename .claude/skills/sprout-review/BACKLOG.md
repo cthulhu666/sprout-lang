@@ -8,12 +8,12 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
 
 ## Backlog
 
-- [ ] `P1` **The ensemble has never been A/B'd against the built-in, so 4 agents may find less than
-  one does.** Only the reviewer *prompt* is close to a port; the fan-out and the verify pass around
-  it are this skill's own design (`README.md` §What the original actually does). Run both on one
-  non-trivial diff and compare finding sets. Anything the built-in catches and this misses is a
-  design defect, not a tuning question — and if a single careful agent matches three plus a verify
-  pass, the ensemble is not worth its cost and should go.
+- [ ] `P1` **One A/B against the built-in says one agent found more than six.** On PR #893
+  (`README.md` §The first A/B against the built-in) `/code-review` found 6 bugs at 138k tokens;
+  this skill found 2 at 624k, both among the 6, plus 4 cleanups. Anything the built-in catches and
+  this misses is a design defect, not a tuning question — and if a single careful agent matches
+  three plus a verify pass, the ensemble is not worth its cost and should go. Two more diffs from
+  other areas, then decide: issue #894.
 
 - [ ] `P1` **The whole effort ladder is a cost choice, not a measured one.** `low|medium|high|xhigh
   |max` buy 1/2/3/5/8 passes, and nobody has checked what the 4th or the 8th adds — the one
