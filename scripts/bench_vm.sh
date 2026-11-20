@@ -9,7 +9,7 @@
 # the VM (EXIT/INT/TERM/HUP trap), then checks it is gone. Each ref's committed seed must be
 # current: the VM builds each tree's compiler from its own seed.
 # --gc runs the ref's bench/gc_minor/ab.sh there with `-a "<arms>"` (e.g.
-# "s50:SPROUT_GC_NURSERY_SHARE=0.5,SPROUT_GC_REGION_LISTS=1;rl:SPROUT_GC_REGION_LISTS=1") and the extra
+# "s50:SPROUT_GC_NURSERY_SHARE=0.5,SPROUT_GC_HOLES=0;fl:SPROUT_GC_HOLES=0") and the extra
 # args, then copies the results directory back and summarizes results.tsv locally.
 # Config: BENCH_PROJECT, BENCH_ACCOUNT, BENCH_ZONE (env, or the file named by BENCH_VM_CONFIG,
 # default ~/.config/sprout/bench-vm.env). The active gcloud config is never read. See docs/bench-vm.md.

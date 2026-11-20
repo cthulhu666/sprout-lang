@@ -970,7 +970,7 @@ typedef struct {
   long long baseline;            /* heap count after the last major */
   long long last_live;           /* heap count after the previous collection */
   long long old_count;           /* objects that kept their colour in the previous sweep */
-  int       colorless;           /* no object is old: the last sweep cleared every color bit */
+  int       colorless;           /* next is a major; with SPROUT_GC_HOLES=0 the last sweep also cleared every color bit */
   long long minors_since_major;
   long long n_minor, n_major;    /* collections run, by kind */
   /* Promotion age K and the nursery's share s and survivor floor c (docs/gc-stage2-v0.md §5).
@@ -999,9 +999,10 @@ static void sprout_gc_retired_switch(const char* name, const char* message) {
  * collection a major.  The retired switches fail with the mode on or off.
  * SPROUT_GC_REGION_LISTS (0 or 1; 1 selects per-region free lists, docs/gc-stage2-v0.md §5.6)
  * is read in both modes, so an A/B compares them under one allocator.
- * SPROUT_GC_HOLES (0 or 1; 1 selects the occupancy-map collector, §5.7) is read in both modes. */
+ * SPROUT_GC_HOLES (0 or 1, default 1; 1 selects the occupancy-map collector, §5.7) is read in
+ * both modes. */
 static void sprout_gc_holes_refuse(const char* name) {
-  fprintf(stderr, "[sprout] SPROUT_GC_HOLES=1 cannot be combined with %s\n", name);
+  fprintf(stderr, "[sprout] %s=1 needs SPROUT_GC_HOLES=0\n", name);
   exit(2);
 }
 
@@ -1014,10 +1015,10 @@ static void sprout_gc_holes_check_modes(void) {
   if (g_gen.region_lists) sprout_gc_holes_refuse("SPROUT_GC_REGION_LISTS");
 }
 
-/* A 0-or-1 switch: unset or empty is 0, and anything but `0` or `1` fails with `message`. */
-static int sprout_gc_env_01(const char* name, const char* message) {
+/* A 0-or-1 switch: unset or empty is `dflt`, and anything but `0` or `1` fails with `message`. */
+static int sprout_gc_env_01(const char* name, int dflt, const char* message) {
   const char* v = getenv(name);
-  if (v == NULL || v[0] == '\0') return 0;
+  if (v == NULL || v[0] == '\0') return dflt;
   if ((v[0] != '0' && v[0] != '1') || v[1] != '\0') sprout_fail(message);
   return v[0] - '0';
 }
@@ -1034,8 +1035,8 @@ static void sprout_gc_gen_init(void) {
   if (m == NULL || m[0] == '\0' || strcmp(m, "1") == 0) g_gen.on = 1;
   else if (strcmp(m, "0") == 0) g_gen.on = 0;
   else sprout_fail("SPROUT_GC_MINOR: expected 0 or 1");
-  g_gen.region_lists = sprout_gc_env_01("SPROUT_GC_REGION_LISTS", "SPROUT_GC_REGION_LISTS: expected 0 or 1");
-  g_gen.holes = sprout_gc_env_01("SPROUT_GC_HOLES", "SPROUT_GC_HOLES: expected 0 or 1");
+  g_gen.region_lists = sprout_gc_env_01("SPROUT_GC_REGION_LISTS", 0, "SPROUT_GC_REGION_LISTS: expected 0 or 1");
+  g_gen.holes = sprout_gc_env_01("SPROUT_GC_HOLES", 1, "SPROUT_GC_HOLES: expected 0 or 1");
   if (g_gen.holes) {
     sprout_gc_holes_check_modes();
     g_holes_verify = sprout_fl_verify_on();
@@ -3090,14 +3091,14 @@ static long long* sprout_realloc_vector_data(long long* data, size_t count, cons
  * be dead for the object's lifetime — 4064 bytes of it for `mutvec_new(508, v)`
  * followed by a push.
  *
- * Under SPROUT_GC_HOLES the tail gets no header or slotmap bit: it leaves
+ * By default (occupancy maps) the tail gets no header or slotmap bit: it leaves
  * `oldocc`, joins the list of its exact class (sprout_holes_push_tail) and stays
- * in `occ` until the next sweep drops it.  Otherwise the remainder becomes a slot
- * of its own: a FREE header carrying its byte size in aux, with its slotmap bit
- * set.  That is what the sweep leaves behind for any dead slot, so nothing new
- * has to understand it.
+ * in `occ` until the next sweep drops it.  With SPROUT_GC_HOLES=0 the remainder
+ * becomes a slot of its own: a FREE header carrying its byte size in aux, with
+ * its slotmap bit set.  That is what that sweep leaves behind for any dead slot,
+ * so nothing new has to understand it.
  *
- * Without HOLES the tail goes straight onto the live lists (fl_push_live, or its
+ * With SPROUT_GC_HOLES=0 the tail goes straight onto the live lists (fl_push_live, or its
  * region's under SPROUT_GC_REGION_LISTS, which lowers the class cursor to it).  The full sweep
  * memsets and rebuilds the lists, which re-lists it from the walk; a young-only
  * minor keeps them, so this push is the only one the tail gets.  Its youngmap
@@ -3565,8 +3566,9 @@ static inline void sprout_gc_mark_roots(SproutRootVisit visit) {
 
 /* ── Minor collections (on by default, docs/gc-generational-v0.md §14.4) ─────────
  *
- * Between collections the color bit means OLD, except when `colorless` is set (the sweep
- * cleared it because the next collection is a major).  gc_mark_enqueue stops at a set color
+ * Between collections the color bit means OLD, except when `colorless` is set (with
+ * SPROUT_GC_HOLES=0 the sweep cleared it because the next collection is a major; by default
+ * colour persists and `colorless` only marks a major).  gc_mark_enqueue stops at a set color
  * bit, so a minor marks only young objects.  An old object that was written to since the last
  * collection is in the remembered set: its children are traced regardless of its color. */
 
@@ -3585,7 +3587,8 @@ static void sprout_gc_mark_remembered(void) {
 
 /* Major after a color-keeping sweep (atexit): clear color and REMEMBERED on every slot, so
  * the mark that follows re-marks the whole live heap.  Same slot walk as the sweep; FREE and
- * POISON slots carry neither bit.  Skipped when `colorless`. */
+ * POISON slots carry neither bit.  Skipped when `colorless`.  Free-list collector only
+ * (SPROUT_GC_HOLES=0). */
 static inline size_t sprout_slot_step(uint64_t h);
 static void sprout_gc_clear_marks(void) {
   g_gen.remembered.len = 0;
@@ -3613,9 +3616,9 @@ static void sprout_gc_clear_marks(void) {
 }
 
 /* Which collection to run.  Major on any reason but the allocation trigger (atexit), and
- * whenever no object is old (`colorless`: the first collection, or the previous sweep cleared
- * the colors because this one was predicted to be a major).  The size and count rules live in
- * sprout_gc_gen_record, which decides this collection's kind one sweep early. */
+ * whenever `colorless` is set: the first collection, or this one was predicted to be a major
+ * (with SPROUT_GC_HOLES=0 the previous sweep then cleared the colors).  The size and count rules
+ * live in sprout_gc_gen_record, which decides this collection's kind one sweep early. */
 static int sprout_gc_gen_choose_minor(const char* reason) {
   return strcmp(reason, "threshold") == 0 && !g_gen.colorless;
 }
@@ -3827,9 +3830,9 @@ static inline int sprout_slot_kind_known(uint64_t kind_bits) {
  * kind byte nor the bump bound sees it.  The slotmap does: it records where slots start, is
  * never cleared or re-carved, and so must agree with the walk in BOTH directions — a bit where
  * the walk stops, no bit strictly inside a step.  Shared by the full sweep's walk and the
- * young-only sweep's visits.  Under SPROUT_GC_HOLES the sweep clears dead objects' `slotmap`
- * bits and visits no slot, so none of this holds there: sprout_holes_hdrcheck_walk checks each
- * run of `occ` instead. */
+ * young-only sweep's visits, which run with SPROUT_GC_HOLES=0.  The default sweep clears dead
+ * objects' `slotmap` bits and visits no slot, so none of this holds there:
+ * sprout_holes_hdrcheck_walk checks each run of `occ` instead. */
 static inline void sprout_hdrcheck_slot(const SproutRegion* r, size_t off, size_t ssize, uint64_t kind_bits) {
   size_t walk_slot = off / SPROUT_SLOT_GRAN;
   int start_ok = slotmap_test(r, walk_slot);
@@ -11549,8 +11552,8 @@ long long vector_mutset(long long vec, long long index, long long value) {
  *
  * Growth out of an INLINE buffer must copy, not realloc: that memory is part of
  * the VectorVal's own slot and was never handed out by malloc.  The vacated area
- * is then handed back to the arena (sprout_vec_release_inline_tail: a FREE slot
- * of its own, or under SPROUT_GC_HOLES an exact-class tail list entry); left in
+ * is then handed back to the arena (sprout_vec_release_inline_tail: an exact-class
+ * tail list entry, or with SPROUT_GC_HOLES=0 a FREE slot of its own); left in
  * place it would be dead for the object's lifetime, up to 4064 bytes of it for
  * a vector born at the inline ceiling.  `mutvec_new(n, v)` reaches this path: it fills through
  * vec_make_filled, so it IS inline for any n <= SPROUT_VEC_INLINE_MAX, and only
@@ -11573,9 +11576,9 @@ long long vector_push(long long vec, long long value) {
        * is which object owns them.  Truncate's stay inside a LIVE vector as
        * spare capacity, where a future scanner sizing by ->cap would read them;
        * these leave the object entirely and become the tail's payload, which
-       * every sweep in the heap already leaves dirty: a FREE slot is stepped over
-       * by its header and rejected by sprout_heap_lookup by kind, and under
-       * SPROUT_GC_HOLES a hole is never visited.  Zeroing here would buy nothing
+       * every sweep in the heap already leaves dirty: with SPROUT_GC_HOLES=0 a FREE
+       * slot is stepped over by its header and rejected by sprout_heap_lookup by
+       * kind, and by default a hole is never visited.  Zeroing here would buy nothing
        * the rest of the heap does not already decline to buy. */
       sprout_vec_release_inline_tail(v);
     } else {

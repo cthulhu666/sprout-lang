@@ -1,7 +1,8 @@
 # GC stage 2 — promotion age, nursery size, a young-only sweep (v0, 2026-11-04)
 
-Status: steps 1, 2, 2b and 3 of §7 are implemented; the defaults are K = 3, s = 1, c = 2. Step 4
-is implemented behind `SPROUT_GC_REGION_LISTS=1`. Stage 1
+Status: steps 1, 2, 2b, 3 and 5 of §7 are implemented; the defaults are K = 3, s = 1, c = 2 and
+the occupancy-map collector (`SPROUT_GC_HOLES=0` keeps the free-list one until step 6). Step 4
+is implemented behind `SPROUT_GC_REGION_LISTS=1`, which needs `SPROUT_GC_HOLES=0`. Stage 1
 is [gc-generational-v0.md §14](gc-generational-v0.md); this doc replaces its §14.6.
 
 ## 1. Problem
@@ -498,9 +499,9 @@ before free ones (PLDI 2008 §3.1), and Go's page allocator is address-ordered f
 
 ### 5.7 The sweep's cost per dead slot (step 5)
 
-**Where the time goes.** On the default, the sweep is 56–98% of GC time and 17–47% of CPU on the
-GC-heavy workloads ([results](../bench/results-2026-11-13-gc-sweep-split.md); the cycle line's
-`sweep_us=`). A minor marks its survivors, which are few, and sweeps its young set, all of it:
+**Where the time goes.** On the free-list collector, the sweep is 56–98% of GC time and 17–47%
+of CPU on the GC-heavy workloads ([results](../bench/results-2026-11-13-gc-sweep-split.md); the
+cycle line's `sweep_us=`). A minor marks its survivors, which are few, and sweeps its young set, all of it:
 nqueens' young-only minors walk ~4,065 slots each and spend 95% of their time sweeping. Marking
 passes a quarter of GC time only on the self-compile (44%) and mutvec_int (28–29%). So the lever
 is the work per dead slot, five steps today: read the header, size it (`slot_bytes`), release
@@ -864,15 +865,20 @@ and premise 6's free count changes unit.
    load_spike, gated as §5.7 says; else option A. Then premises 10–16 with their checks, behind a
    switch for the A/B. Option D is part of C.
 
-   **Implemented behind `SPROUT_GC_HOLES=1`** ([results](../bench/results-2026-11-15-gc-holes-proto.md)).
-   On the VM, against the default, GC time falls 49–96% on every workload that collects and no
+   **Implemented, default on** ([results](../bench/results-2026-11-15-gc-holes-proto.md)).
+   `SPROUT_GC_HOLES=0` keeps the free-list collector until step 6.
+   On the VM, against the free-list collector, GC time falls 49–96% on every workload that collects and no
    workload's CPU or RSS rises outside its spread: the self-compile's CPU is 0.95, load_spike's
    0.63, rotate_classes' 0.73 with 0.12 of its RSS, mutvec_push's RSS 0.76. The free count's unit
    makes rotate_classes collect 1.93× as often and mutvec_int 1.33×. With the trigger pinned, peak
    ordinary regions at a collection's start equal the replay's on all 14 runs. GENCHECK,
-   FL_VERIFY's successor, HDRCHECK, lineage, AGEPROF, the census and ALLOCTRACE work under the
-   switch; `tests/c_runtime/holes_check.c` and the HOLES arms of `just gc-gen-check` check
-   premises 10–16.
+   FL_VERIFY's successor, HDRCHECK, lineage, AGEPROF, the census and ALLOCTRACE work under it;
+   `tests/c_runtime/holes_check.c` and the default arms of `just gc-gen-check` check premises
+   10–16. On `test_gc_trigger_adversary` the cycle count is not monotone in the share s (§5.5)
+   on either collector (s = 0.5 to 4 gives 163 to 327 cycles with
+   `SPROUT_GC_HOLES=0` and 142 to 265 by default), because s also moves where the majors fall,
+   which sets the steady heap. What s fixes is the nursery after a minor, s × the heap it left;
+   `just gc-adapt-check` reads that ratio off the cycle lines.
 6. Retire `SPROUT_GC_REGION_LISTS` once steps 4 and 5 settle it, and update
    `compiler-internals.md` and `gates.md`. Retiring it removes the global lists with
    `sprout_gc_young_sweep_ok` and the staged build (`g_fl_saved`, `fl_push_staged`,

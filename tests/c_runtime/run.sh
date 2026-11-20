@@ -603,7 +603,7 @@ for sel in walked_young free_count no_double_list region_release large_young lin
   test "$(cat "$TMP_DIR/ys_$sel.out")" = "young-sweep-$sel"
 done
 
-echo "==> c runtime: GENCHECK, SPROUT_FL_VERIFY, HDRCHECK and SPROUT_GC_LINEAGE under SPROUT_GC_HOLES=1 pass on a real heap, walk holes by slotmap, keep lineage corpses, and abort on each corrupted map, count, buffer list, cursor, tail list, header and corpse"
+echo "==> c runtime: GENCHECK, SPROUT_FL_VERIFY, HDRCHECK and SPROUT_GC_LINEAGE under the default collector (SPROUT_GC_HOLES=1) pass on a real heap, walk holes by slotmap, keep lineage corpses, and abort on each corrupted map, count, buffer list, cursor, tail list, header and corpse"
 # holes_check.c includes sprout_runtime.c (like young_sweep.c). Each corrupting case must abort
 # with its own message: a check that tests nothing fails here.
 HC="$TMP_DIR/holes_check"

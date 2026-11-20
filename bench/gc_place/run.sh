@@ -12,8 +12,9 @@
 #                        "policy cycle regions" at a start, "E policy cycle regions" at an end
 #
 
-# Each workload runs at the default GC settings with SPROUT_GC_REGION_LISTS=1, so the trace's
-# region counts are comparable with the `base` policy. The runtime is built with
+# Each workload runs at the default GC settings with SPROUT_GC_HOLES=0 SPROUT_GC_REGION_LISTS=1
+# (per-region lists need the free-list collector), so the trace's region counts are comparable
+# with the `base` policy. The runtime is built with
 # -DSPROUT_GC_ALLOCTRACE and linked per workload with a plain clang -O2 link (not the
 # whole-program link of `just compile-native`: placement does not depend on inlining).
 # <dir>/<workload>.txt holds the check line, the program's stdout, the tables (calibration line
@@ -143,7 +144,7 @@ for w in $WORKLOADS; do
   echo "==> recording $w" >&2
   rc=0
   # The alarm survives perl's exec, so a livelock ends the run instead of hanging.
-  (cd "$W_DIR" && exec env "${W_ENV[@]}" ${EXTRA[@]+"${EXTRA[@]}"} SPROUT_GC_ALLOCTRACE="$trace" SPROUT_GC_REGION_LISTS=1 \
+  (cd "$W_DIR" && exec env "${W_ENV[@]}" ${EXTRA[@]+"${EXTRA[@]}"} SPROUT_GC_ALLOCTRACE="$trace" SPROUT_GC_HOLES=0 SPROUT_GC_REGION_LISTS=1 \
     perl -e 'alarm shift; exec @ARGV' "$RUN_TIMEOUT" "${W_CMD[@]}") > "$OUT/$w.out" 2> "$OUT/$w.err" || rc=$?
   if [[ $rc != 0 ]]; then
     echo "ERROR: $w exited $rc (see $OUT/$w.err)" >&2

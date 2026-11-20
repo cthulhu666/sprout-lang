@@ -222,10 +222,12 @@ but the first is verbatim — the cycle line is elided at each `...`, since its 
 The line also ends in `closure_apply=<n>` (older output lacks it): closure values applied. `closure=`
 counts allocations, and a capture-free closure is a static constant that never allocates.
 
-Under `SPROUT_GC_HOLES=1` the marker counts the census, so it is printed at majors only; a minor's
-cycle line has no `types:` line.
+By default the marker counts the census, so it is printed at majors only; a minor's cycle line has
+no `types:` line. (With `SPROUT_GC_HOLES=0` the sweep counts it and every cycle prints it.)
 
-**`walked` is what the sweep cost, `swept` is what it bought.** Every slot walked was kept, freed
+**With `SPROUT_GC_HOLES=0`, `walked` is what the sweep cost, `swept` is what it bought.** (By
+default `walked` counts bitmap words read and no dead slot is visited, so the split below does not
+apply.) Every slot walked was kept, freed
 this cycle, or already FREE, so `walked - live - swept` is the FREE slots stepped over for nothing:
 116,666 above, 1.19 per object freed. The trigger reads `live` and nothing else, so this part of a
 collection's cost is invisible to it. A FREE count that dwarfs `swept` means regions are pinned by
@@ -529,7 +531,7 @@ payloads (tag → sentinel) and stashes the free backtrace in the corpse; the ne
 read of a poisoned pointer aborts and dumps that backtrace — the alloc that
 triggered the fatal collection, i.e. the unrooted-live-across site. In-process,
 exact keying, no `lldb` needed. Build the runtime `-O1 -g` for readable frames. It also works
-under `SPROUT_GC_HOLES=1`, where a corpse is a `slotmap` start kept in `oldocc` through majors.
+on the default collector, where a corpse is a `slotmap` start kept in `oldocc` through majors.
 This supersedes `just gc-trace`'s `lldb`-based free-trace below for most cases (its
 history-keying is unreliable); `just gc-trace` remains for cases `SPROUT_GC_LINEAGE`
 doesn't cover (it only poisons `SPROUT_HEAP_OBJ`; closures/vectors free via
@@ -562,7 +564,8 @@ earlier gaps.
 
 ## String-invariant oracle (`SPROUT_GC_HDRCHECK`) — and why local green ≠ CI green
 
-`SPROUT_GC_HDRCHECK=1` also asserts the sweep's **slot walk** against the slotmap — a
+With `SPROUT_GC_HOLES=0`, `SPROUT_GC_HDRCHECK=1` also asserts the sweep's **slot walk** against the
+slotmap (by default the sweep visits no slot, and it walks each run of `occ` by headers) — a
 step that skips a recorded slot start, or lands on an offset that is not one, aborts with
 `HDRCHECK: slot walk desync at region … skipped_start=…`, and a VECTOR whose header aux
 disagrees with where `->data` points aborts with `VECTOR aux/data disagree`. Those are the

@@ -35,6 +35,7 @@
  *                    major's counts and leaves the `types:` line out.  holes_census_minors_off runs
  *                    census_age with every collection a major: the counts are exact each time.
  *
+ * Every other case runs with SPROUT_GC_HOLES=0.
  * `k_cases` lists every case with its environment; main sets it before sprout_set_argv. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -613,7 +614,7 @@ int main(int argc, char** argv) {
   unsetenv("SPROUT_GC_STRESS");
   unsetenv("SPROUT_GC_AGEPROF");
   unsetenv("SPROUT_GC_THRESHOLD");
-  unsetenv("SPROUT_GC_HOLES");
+  setenv("SPROUT_GC_HOLES", "0", 1);
   unsetenv("SPROUT_GC_PROMOTE_AGE");
   unsetenv("SPROUT_GC_NURSERY");
   unsetenv("SPROUT_GC_NURSERY_SHARE");
@@ -625,7 +626,7 @@ int main(int argc, char** argv) {
     return 1;
   }
   setenv("SPROUT_GC_MINOR", c->minor ? "1" : "0", 1);
-  if (c->holes) setenv("SPROUT_GC_HOLES", "1", 1);
+  setenv("SPROUT_GC_HOLES", c->holes ? "1" : "0", 1);
   if (c->share) setenv("SPROUT_GC_NURSERY_SHARE", c->share, 1);
   setenv("SPROUT_GC_MAJOR_EVERY", c->every, 1);
   if (c->thr) setenv("SPROUT_GC_THRESHOLD", c->thr, 1);

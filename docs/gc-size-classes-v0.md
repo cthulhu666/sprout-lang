@@ -80,8 +80,9 @@ things about the design that look odd:
 - **Why coalescing is harder here than in the prior art.** The others never face it:
   merging inside a uniform span is meaningless. Sprout's version must clear a slotmap
   bit, and that bit is load-bearing for pointer-vs-integer exactness — which is why the
-  `BACKLOG` entry warns that coalescing without a `slotmap_clear` trips HDRCHECK's "no
-  start bit strictly inside a step" assertion.
+  `BACKLOG` entry warns that, with `SPROUT_GC_HOLES=0`, coalescing without a `slotmap_clear`
+  trips HDRCHECK's "no start bit strictly inside a step" assertion. The default sweep clears
+  every dead object's start bit (`slotmap &= live`), and its HDRCHECK walks runs of `occ`.
 
 **Sprout also lacks the lower layer.** TCMalloc coalesces pages in its pageheap; GHC's
 block allocator coalesces bgroups under the nonmoving heap — "when a bgroup is freed

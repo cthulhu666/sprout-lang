@@ -1050,7 +1050,8 @@ counters' build flag: a default runtime reports them as `off`, and one built wit
 like the other gates that read whole-heap marks or exact cycle counts: a minor does not re-mark
 old objects, so `marked_total` stops measuring the live set (rule:
 [compiler-internals.md §Non-moving GC](compiler-internals.md)). The calibration runs twice, on the
-default collector and under `SPROUT_GC_HOLES=1`, with the same bounds and the same numbers.
+default collector (occupancy maps; arm `holes`) and under `SPROUT_GC_HOLES=0` (arm `freelist`),
+with the same bounds and the same numbers.
 
 ### An absolute ratio tracked the number of rooted globals, not what the gate measured
 
@@ -1083,28 +1084,33 @@ Runs the write barrier under minor collections ([gc-generational-v0.md](gc-gener
 `linear_reuse`) runs with `SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1`. Its stdout
 must equal its sidecar `tests/gc_gen/<name>.out` byte for byte (a missing sidecar is an error), it
 must run at least 20 minor collections, and it must print the same output with
-`SPROUT_GC_MINOR=0`. It also runs each program with `SPROUT_FL_VERIFY=1` and with
-`SPROUT_GC_LINEAGE=1` (same switches, same output): the young-only sweep keeps the free lists
-between minors, FL_VERIFY compares them with a full walk after every collection, and lineage mode
-poisons dead OBJs instead of listing them, which is the case the incremental free count has to
-get right. Under `SPROUT_GC_HOLES=1` ([gc-stage2-v0.md](gc-stage2-v0.md) §5.7) it runs again
-with `SPROUT_FL_VERIFY=1` and HDRCHECK, and with `SPROUT_GC_LINEAGE=1`: a corpse is a `slotmap`
-start kept in `oldocc`, so GENCHECK's map walk must accept it and every major must keep it.
+`SPROUT_GC_MINOR=0`, on the default collector with STRESS and on `SPROUT_GC_HOLES=0` without. It
+also runs each program with `SPROUT_GC_HOLES=0 SPROUT_FL_VERIFY=1` and
+with `SPROUT_GC_HOLES=0 SPROUT_GC_LINEAGE=1` (same switches, same output): the free-list
+collector's young-only sweep keeps the free lists between minors, FL_VERIFY compares them with a
+full walk after every collection, and lineage mode poisons dead OBJs instead of listing them,
+which is the case the incremental free count has to get right. On the default collector
+(occupancy maps, [gc-stage2-v0.md](gc-stage2-v0.md) §5.7) it runs again with `SPROUT_FL_VERIFY=1`
+and HDRCHECK, and with `SPROUT_GC_LINEAGE=1`: a corpse is a `slotmap` start kept in `oldocc`, so
+GENCHECK's map walk must accept it and every major must keep it.
 The default arm is the shipped default, K=3, s=1, c=2 ([gc-stage2-v0.md](gc-stage2-v0.md)
 §5), so it reaches young survivors, the remembered rule and the premise-3 check (an old,
 unremembered object points at no young one; before a major the set is empty and no header has
 bit 13). The nursery share is not varied: under `SPROUT_GC_STRESS` every allocation collects, so
 the share is never read, and without it these programs run no minor at any share.
 `gc-adapt-check` covers the share. K and c have no switch; `tests/c_runtime/promote_age.c`
-sets them directly. One more run, with `SPROUT_GC_REGION_LISTS=1` and `SPROUT_FL_VERIFY=1`,
-reads the `SPROUT_DEBUG_GC` cycle lines: every `kind=minor sweep=full`
+sets them directly. One more run, with `SPROUT_GC_HOLES=0 SPROUT_GC_REGION_LISTS=1` and
+`SPROUT_FL_VERIFY=1` (region lists need the free-list collector), reads the `SPROUT_DEBUG_GC`
+cycle lines: every `kind=minor sweep=full`
 line must be followed by a `kind=major` one, because a minor walks everything only before a
 major ([gc-stage2-v0.md](gc-stage2-v0.md) §5.4, §5.6). Without per-region lists it would fail on
 `region_empty_minor` and `all_regions_empty_minor`, whose minors empty a region and so take the
-full sweep. Every program also runs with `SPROUT_GC_MINOR=0 SPROUT_GC_REGION_LISTS=1
-SPROUT_FL_VERIFY=1 SPROUT_GC_STRESS=1`, the other arm of the A/B. A program named `*_nostress`
-(`cursor_lower_nostress`) is excluded from the STRESS runs and runs with `SPROUT_GC_GENCHECK=1`
-only: default, region lists with `SPROUT_FL_VERIFY=1`, and the same with minors off. It frees a
+full sweep. Every program also runs with `SPROUT_GC_HOLES=0 SPROUT_GC_MINOR=0
+SPROUT_GC_REGION_LISTS=1 SPROUT_FL_VERIFY=1 SPROUT_GC_STRESS=1`, the other arm of the A/B. A
+program named `*_nostress` (`cursor_lower_nostress`) is excluded from the STRESS runs and runs
+with `SPROUT_GC_GENCHECK=1` only: the default collector (plain and with `SPROUT_FL_VERIFY=1`),
+`SPROUT_GC_HOLES=0`, region lists with `SPROUT_FL_VERIFY=1` (they need `SPROUT_GC_HOLES=0`), and
+the same with minors off. It frees a
 slot below a class cursor and allocates that class again, which a collection per allocation
 (resetting the cursors) cannot reach; with `SPROUT_FL_VERIFY=1` the reuse path aborts
 (`FL_VERIFY ... holds a free slot below the cursor`) if the push did not lower the cursor.
@@ -1112,12 +1118,14 @@ Stdout only, no minor-count floor. The two static `sprout_analysis_*` helpers ca
 analysis service, so `tests/c_runtime/analysis_strings.c` covers them under the same switches and
 the same 20-minor floor. `just c-runtime-test`
 holds the verifier's own test (`tests/c_runtime/gen_check.c`): an unbarriered old-to-young store
-must abort with the owner and field named. `tests/c_runtime/young_sweep.c` holds the young-only
-sweep's: a minor over a large old heap walks only the young slots, the free count equals a full
+must abort with the owner and field named; its colour-clearing cases (`clear_before_major`,
+`doubling`) run with `SPROUT_GC_HOLES=0`, since no default sweep clears colour.
+`tests/c_runtime/young_sweep.c` holds the free-list collector's young-only
+sweep's (it sets `SPROUT_GC_HOLES=0`): a minor over a large old heap walks only the young slots, the free count equals a full
 walk's after reuse and inline-tail splits, no slot is listed twice, fresh empty regions are
 released, large young objects are freed or promoted, lineage mode agrees, and three corrupting
 cases (a cleared young bit, a stale bit on a FREE slot, a perturbed free count) must abort with
-the `GENCHECK:` message. `tests/c_runtime/holes_check.c` holds the same for `SPROUT_GC_HOLES=1`,
+the `GENCHECK:` message. `tests/c_runtime/holes_check.c` holds the same for the default collector,
 including lineage: dead OBJs become corpses in a minor and stay through minors and majors, nothing
 is allocated over one, a marker that reaches one leaves it alone, a region of corpses is kept, and
 a corpse missing from `oldocc`, a wrong poison count and a POISON header without lineage abort.
@@ -1151,24 +1159,25 @@ followed by a minor, not a major, which is why the program grows eight.
 ## Allocation trace — `just gc-alloctrace-check`
 
 Builds the runtime with `-DSPROUT_GC_ALLOCTRACE` and runs `tests/gc_gen/inline_tail_reuse`
-(default, `SPROUT_GC_MINOR=0`, `SPROUT_GC_STRESS=1`, with and without
-`SPROUT_GC_REGION_LISTS=1`), `vector_push` and `region_empty_minor` (STRESS), and
-`tests/stdlib/test_gc_large_object_arena` (default, minors off, STRESS), each with
-`SPROUT_GC_ALLOCTRACE=<path>`, and again under `SPROUT_GC_HOLES=1` (default, minors off, STRESS;
-the sweep writes each `F` from `slotmap & ~live` before it clears them). Every trace goes through `bench/gc_place/replay --check`:
+(default, `SPROUT_GC_MINOR=0`, `SPROUT_GC_STRESS=1`), `vector_push` and `region_empty_minor`
+(STRESS), and `tests/stdlib/test_gc_large_object_arena` (default, minors off, STRESS), each with
+`SPROUT_GC_ALLOCTRACE=<path>` on the default collector (arms `holes`, `holes_minor0`,
+`holes_stress`; its sweep writes each `F` from `slotmap & ~live` before it clears them) and again
+under `SPROUT_GC_HOLES=0` (arms `freelist`, `freelist_minor0`, `freelist_stress`; `inline_tail_reuse`
+adds `freelist_stress_rl` with `SPROUT_GC_REGION_LISTS=1`). Every trace goes through `bench/gc_place/replay --check`:
 every `F`, `T` and `B` names an allocated object; no object is freed twice; `F` falls between a
 `G` and its `E`; `allocs − frees` equals `heap_after` at each `E`; `T` hits a vector at most once.
 The trace must end with the atexit collection's `E`, whose cycle is the last `cycle=` line of
 `SPROUT_DEBUG_GC`, and stdout must match the program's expected output. The inline-tail program
 must record `T` and `B`; the large-object one must record a large allocation, and in its default
-run both majors and young-only minors. About 12 s. The format is in `bench/gc_place/replay.c`;
+run (`holes`, `freelist`) both majors and young-only minors. About 12 s. The format is in `bench/gc_place/replay.c`;
 the recorder is described in [compiler-internals.md](compiler-internals.md) (Allocation trace).
 Also built as a fourth variant by `just runtime-warnings`.
 
 ## Sweep-walk counter — `just gc-walk-check`
 
-Calibrates `walked=` on the `SPROUT_DEBUG_GC` cycle line: slots the sweep stepped over, FREE
-included. Over `swept` it is the work spent per object reclaimed, the quantity
+Calibrates `walked=` on the `SPROUT_DEBUG_GC` cycle line under `SPROUT_GC_HOLES=0`: slots the sweep
+stepped over, FREE included. Over `swept` it is the work spent per object reclaimed, the quantity
 [gc-trigger-v0.md](gc-trigger-v0.md) §3.1 says the trigger cannot see. Two known answers —
 `test_gc_walk_sparse` (regions pinned full of FREE slots no allocation can refill) must read
 ≥10 slots per object swept, and `test_gc_age_retain_none` (dense churn) ≤2 — plus, on every cycle
@@ -1186,6 +1195,12 @@ default, so the readings are the ones above. `gc-trigger-check` tests the floor 
 **It pins `SPROUT_GC_MINOR=0`.** With minor collections on, the sparse probe collects 8 times, not
 88: a minor keeps dead old objects in the heap count, so the adaptive target outruns the pinned
 threshold. It walked 873,028 slots for 373,592 swept (2.3 per object), under the ≥10 bound.
+
+**It pins `SPROUT_GC_HOLES=0`.** On the default collector `walked` counts bitmap words the sweep
+reads and no dead slot is visited, so the per-slot bounds above (≥10 and ≤2 slots per object swept,
+`walked ≥ live + swept`) describe the free-list sweep only. Without the pin the sparse probe reads
+562,688 walked for 373,592 swept (1.5 per object, under the ≥10 bound) and four cycles break
+`walked ≥ live + swept`.
 
 ## Trigger footprint floor — `just gc-trigger-check`
 
@@ -1216,10 +1231,32 @@ run with `SPROUT_GC_MINOR=0`, where the factor governs: on `test_gc_age_retain_a
 collects exactly as often as `SPROUT_GC_ADAPT_FACTOR=3` and less often than `2`, with under 70% of
 the mark work; on `test_gc_age_retain_none` (floor-pinned) `2` and `4` give identical cycle,
 marked and freed counts. With minors on the factor only floors the nursery, so a third assertion
-checks the kept knob: on `test_gc_trigger_adversary`, `SPROUT_GC_NURSERY_SHARE=2` must collect
-fewer times than `=1` (289 against 323 at landing). That workload is used because the share binds
-there; `test_gc_age_retain_all`'s count does not move with it (6 and 6), and the count is not
-monotone in s on every workload.
+checks the kept knob on `test_gc_trigger_adversary`, under both collectors (the default and
+`SPROUT_GC_HOLES=0`), at `SPROUT_GC_NURSERY_SHARE=1` and `2`. After a minor the next cycle
+triggers at `heap + max(s × heap, 2 × marked, floors)`, so its `alloc_since_gc` is `s × heap_after`
+of the minor before it, unless a floor binds. The gate takes that ratio over every pair of
+consecutive `kind=minor` cycles where the first set a trigger above the base threshold (the first
+cycle's, so the base floor did not size the nursery; a line's `threshold=` is the trigger set after
+that cycle), and requires the median to be `s` within 10% over at least 8 pairs.
+It reads 1.00 over 29 (default) or 34 (`SPROUT_GC_HOLES=0`) pairs at `s=1` and 2.00 over 216 (default) or 256 (`SPROUT_GC_HOLES=0`) at
+`s=2`. At `s=1` most pairs sit above 1: once the heap settles near 1,600 the 4096 base sets the
+trigger (a nursery of ~2,500, ratio ~1.5). That is why the floored pairs are left out; a median
+over all pairs reads 1.47 on both collectors.
+
+**It does not compare cycle counts.** The first form asserted that `s=2` collects less often than
+`s=1`. That is false on this program for both collectors: the share also moves where the majors
+fall, which sets the steady heap, so the count is not monotone in s (IR -O0, runtime -O2, minors
+on):
+
+| share | 0.5 | 0.75 | 1 | 1.25 | 1.5 | 2 | 3 | 4 |
+|---|---|---|---|---|---|---|---|---|
+| `SPROUT_GC_HOLES=0` | 205 | 327 | 323 | 246 | 221 | 289 | 163 | 223 |
+| default | 164 | 265 | 225 | 206 | 185 | 243 | 142 | 193 |
+
+The share is wired: on each steady minor the next `alloc_since_gc` equals `s ×` the heap it left
+(`s=1`: 9,633 after a heap of 9,633; `s=2`: ~11,200 after ~5,600). Red-verified by fixing the share
+at 1.0 in the runtime's nursery rule: `s=2` then reads 1.00 over 19 pairs and the gate fails under
+both collectors. `test_gc_age_retain_all`'s count does not move with the share (6 and 6).
 
 ## Optimisation-pass harness — `just opt-harness-check`
 
