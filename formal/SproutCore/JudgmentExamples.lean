@@ -5,18 +5,20 @@ import SproutCore.Tests
 # What the typing judgment accepts and rejects (docs/lean-model-v0.md §9 1b)
 
 A permissive judgment makes T2 empty, so the judgment has to refuse what the spec refuses. Each
-`*_rejected` theorem is `¬ p.Typed` for a concrete program `p`: no partition into groups, no order of
-the groups, no choice of types derives it. Each rejected program has an accepted twin
+`*_rejected` theorem is `¬ p.Typed` for a concrete program `p`: no partition into groups, no order
+of the groups, no choice of types derives it. Each rejected program has an accepted twin
 (`*_typed`, the "controls") that differs in the one feature the rule is about, so a rejection
 cannot come from the judgment being empty.
 
 | theorem | program | spec |
 |---|---|---|
-| `r15a/b/c_rejected` | `fn f(x: a) -> Int = x`; `fn f(x: a, g: b -> c) -> a = g`; `fn f(x: a, y: b) -> a = y` | §7 rule 15 |
+| `r15a/b/c_rejected` | `fn f(x: a) -> Int = x`; `fn f(x: a, g: b -> c) -> a = g`;
+  `fn f(x: a, y: b) -> a = y` | §7 rule 15 |
 | `r56_rejected` | a local `let id = \x -> x` used at `Int` and at `Bool` | §5.6 |
-| `r9a/b/c_rejected` | `() -> T` into `Unit -> T`, `Unit -> T` into `() -> T`, `k(1)` for `k: () -> T` | §7 rule 9 |
-| `r8arg/ret/contra_rejected` | an `!{IO}` value in a pure argument slot, a pure return, under a parameter | §7 rule 8 |
-| `joinPure_rejected` | `if c then pure_fn else io_fn` into a pure slot, either branch order | §7 rule 8 |
+| `r9a/b/c_rejected` | `() -> T` into `Unit -> T`, the reverse, `k(1)` for `k: () -> T` | §7 r9 |
+| `r8arg/ret/contra_rejected` | an `!{IO}` value in a pure argument slot, a pure return, under a
+  parameter | §7 rule 8 |
+| `joinPure_rejected` | `if c then pure_fn else io_fn` into a pure slot, either order | §7 rule 8 |
 | `r11param/print_rejected` | an `!{IO}` call in a pure `fn` body | §7 rules 8, 11 |
 | `r5let_rejected` | `let boom = print_str("x")` | §5.2 |
 | `r5arity_rejected` | `print_str()`: a named `fn` is called with exactly its arity | §5.3 |
@@ -71,7 +73,8 @@ theorem r15b_rejected : ¬ r15b.Typed := by
   intro h
   obtain ⟨σ, τ, sc, hsk, hnd, ps, r, e, tb, eb, hps, hret, hτ, hbody, hflow, heff⟩ :=
     single_fn_inv h
-  have hvars : (FnD.mk "f" [("x", some (.named "a")), ("g", some (.arr [.named "b"] (.named "c") .pure))]
+  have hvars : (FnD.mk "f" [("x", some (.named "a")),
+      ("g", some (.arr [.named "b"] (.named "c") .pure))]
     (some (.named "a", .pure)) (.var "g")).vars = ["a", "b", "c"] := by decide
   rw [hvars] at hsk
   obtain ⟨ka, hka⟩ := hsk "a" (by simp)
@@ -138,7 +141,8 @@ theorem r15c_rejected : ¬ r15c.Typed := by
 
 /-- `fn f(k: () -> Int) -> Unit -> Int = k`. -/
 def r9a : Program :=
-  ⟨[.fn "f" [("k", some (.arr [] .int .pure))] (some (.arr [.unit] .int .pure, .pure)) (.var "k")]⟩
+  ⟨[.fn "f" [("k", some (.arr [] .int .pure))] (some (.arr [.unit] .int .pure, .pure))
+    (.var "k")]⟩
 
 theorem r9a_rejected : ¬ r9a.Typed := by
   intro h
@@ -167,7 +171,8 @@ theorem r9a_rejected : ¬ r9a.Typed := by
 
 /-- `fn f(u: Unit -> Int) -> () -> Int = u`. -/
 def r9b : Program :=
-  ⟨[.fn "f" [("u", some (.arr [.unit] .int .pure))] (some (.arr [] .int .pure, .pure)) (.var "u")]⟩
+  ⟨[.fn "f" [("u", some (.arr [.unit] .int .pure))] (some (.arr [] .int .pure, .pure))
+    (.var "u")]⟩
 
 theorem r9b_rejected : ¬ r9b.Typed := by
   intro h
@@ -353,7 +358,8 @@ theorem r8contra_rejected : ¬ r8contra.Typed := by
 def joinPure (io? : Bool) : Program :=
   ⟨[.fn "j" [("c", some .bool), ("f", some (.arr [.str] .unit .pure)),
       ("g", some (.arr [.str] .unit .io))] (some (.arr [.str] .unit .pure, .pure))
-    (if io? then .ite (.var "c") (.var "g") (.var "f") else .ite (.var "c") (.var "f") (.var "g"))]⟩
+    (if io? then .ite (.var "c") (.var "g") (.var "f")
+      else .ite (.var "c") (.var "f") (.var "g"))]⟩
 
 /-- No upper bound of an `!{IO}` arrow flows into a pure arrow. -/
 theorem io_arrow_not_below_pure {A B C D r : Ty}
@@ -416,7 +422,8 @@ theorem joinPure_rejected (io? : Bool) : ¬ (joinPure io?).Typed := by
 
 /-- `fn f(g: String -> Unit !{IO}) -> Unit = g("x")`: the callee is a parameter. -/
 def r11param : Program :=
-  ⟨[.fn "f" [("g", some (.arr [.str] .unit .io))] (some (.unit, .pure)) (.app (.var "g") [.str "x"])]⟩
+  ⟨[.fn "f" [("g", some (.arr [.str] .unit .io))] (some (.unit, .pure))
+    (.app (.var "g") [.str "x"])]⟩
 
 theorem r11param_rejected : ¬ r11param.Typed := by
   intro h
@@ -569,7 +576,8 @@ theorem okLetGen_typed : okLetGen.Typed := by
   case pair =>
     have hs : ∀ t : Ty, t.Solved → mkArr [t] t .pure = .arr [t] t .pure →
         (Binding.val ⟨1, .arr [.gen 0] (.gen 0) .pure⟩).Inst (.arr [t] t .pure) :=
-      fun t h1 h2 => ⟨[t], rfl, by simpa using h1, by simpa [Ty.inst, Ty.instList] using h2.symm⟩
+      fun t h1 h2 =>
+        ⟨[t], rfl, by simpa using h1, by simpa [Ty.inst, Ty.instList] using h2.symm⟩
     exact HasType.tup _ _ [.int, .bool] .pure
       (HasExprs.cons _ _ _ _ _ _ _
         (idCall (b := .val ⟨1, .arr [.gen 0] (.gen 0) .pure⟩) rfl (by simp) (hs .int rfl rfl)
@@ -600,7 +608,8 @@ theorem okFnGen_typed : okFnGen.Typed := by
         (GroupTy.fn1_novars (Γ := [idWit.entryOut] ++ Ctx.prelude)
           ⟨⟨"f", [], some (.tup [.int, .bool], .pure),
             .tup [.app (.var "id") [.int 1], .app (.var "id") [.bool true]]⟩,
-            fun _ => .unit, .arr [] (.tup [.int, .bool]) .pure, ⟨0, .arr [] (.tup [.int, .bool]) .pure⟩⟩
+            fun _ => .unit, .arr [] (.tup [.int, .bool]) .pure,
+            ⟨0, .arr [] (.tup [.int, .bool]) .pure⟩⟩
           (by decide)
           ⟨rfl, rfl, [], rfl, by decide, rfl⟩ ?f)
         (Groups.nil _)))
@@ -611,7 +620,8 @@ theorem okFnGen_typed : okFnGen.Typed := by
   case f =>
     have hs : ∀ t : Ty, t.Solved → mkArr [t] t .pure = .arr [t] t .pure →
         (Binding.fn 1 ⟨1, .arr [.gen 0] (.gen 0) .pure⟩).Inst (.arr [t] t .pure) :=
-      fun t h1 h2 => ⟨[t], rfl, by simpa using h1, by simpa [Ty.inst, Ty.instList] using h2.symm⟩
+      fun t h1 h2 =>
+        ⟨[t], rfl, by simpa using h1, by simpa [Ty.inst, Ty.instList] using h2.symm⟩
     refine ⟨[], .tup [.int, .bool], .pure, .tup [.int, .bool], .pure, ParamsTy.nil,
       RetTy.written _ _ _ rfl (by simp), rfl, ?_, ?_, rfl⟩
     · exact HasType.tup _ _ [.int, .bool] .pure
@@ -619,10 +629,12 @@ theorem okFnGen_typed : okFnGen.Typed := by
           (idCall (b := .fn 1 ⟨1, .arr [.gen 0] (.gen 0) .pure⟩) rfl (by simp) (hs .int rfl rfl)
             (HasType.int _ 1) Flows.int)
           (HasExprs.cons _ _ _ _ _ _ _
-            (idCall (b := .fn 1 ⟨1, .arr [.gen 0] (.gen 0) .pure⟩) rfl (by simp) (hs .bool rfl rfl)
+            (idCall (b := .fn 1 ⟨1, .arr [.gen 0] (.gen 0) .pure⟩) rfl (by simp)
+              (hs .bool rfl rfl)
               (HasType.bool _ true) Flows.bool)
             (HasExprs.nil _)))
-    · exact Flows.tup _ _ (FlowsAll.cons _ _ _ _ Flows.int (FlowsAll.cons _ _ _ _ Flows.bool FlowsAll.nil))
+    · exact Flows.tup _ _
+        (FlowsAll.cons _ _ _ _ Flows.int (FlowsAll.cons _ _ _ _ Flows.bool FlowsAll.nil))
 
 /-- A call `print_str(a)`. -/
 theorem printCall {Γ : Ctx} {a : Expr}
@@ -655,7 +667,8 @@ def pickWit : FnWit :=
       ("g", some (.arr [.str] .unit .io))], some (.arr [.str] .unit .io, .pure),
       .ite (.var "c") (.var "f") (.var "g")⟩, fun _ => .unit,
     mkArr [.bool, .arr [.str] .unit .pure, .arr [.str] .unit .io] (.arr [.str] .unit .io) .pure,
-    ⟨0, mkArr [.bool, .arr [.str] .unit .pure, .arr [.str] .unit .io] (.arr [.str] .unit .io) .pure⟩⟩
+    ⟨0, mkArr [.bool, .arr [.str] .unit .pure, .arr [.str] .unit .io] (.arr [.str] .unit .io)
+      .pure⟩⟩
 
 theorem okJoin_typed : okJoin.Typed := by
   refine ⟨[pickWit.entryOut] ++ Ctx.prelude, ?_, ?_⟩
@@ -667,7 +680,8 @@ theorem okJoin_typed : okJoin.Typed := by
       .arr [.str] .unit .io, .pure,
       ParamsTy.written _ _ _ _ _ rfl (ParamsTy.written _ _ _ _ _ rfl
         (ParamsTy.written _ _ _ _ _ rfl ParamsTy.nil)),
-      RetTy.written _ _ _ rfl (by simp), rfl, ?_, Flows.arr _ _ _ _ _ _ _ _ rfl rfl Flows.str rfl Flows.unit, rfl⟩
+      RetTy.written _ _ _ rfl (by simp), rfl, ?_,
+      Flows.arr _ _ _ _ _ _ _ _ rfl rfl Flows.str rfl Flows.unit, rfl⟩
     have flowFG : Flows (.arr [.str] .unit .pure) (.arr [.str] .unit .io) :=
       Flows.arr _ _ _ _ _ _ _ _ rfl rfl Flows.str rfl Flows.unit
     have flowGG : Flows (.arr [.str] .unit .io) (.arr [.str] .unit .io) :=
@@ -691,8 +705,10 @@ def okContra : Program :=
 def contraWit : FnWit :=
   ⟨⟨"c", [("k", some (.arr [.arr [.str] .unit .io] .unit .pure))],
       some (.arr [.arr [.str] .unit .pure] .unit .pure, .pure), .var "k"⟩, fun _ => .unit,
-    mkArr [.arr [.arr [.str] .unit .io] .unit .pure] (.arr [.arr [.str] .unit .pure] .unit .pure) .pure,
-    ⟨0, mkArr [.arr [.arr [.str] .unit .io] .unit .pure] (.arr [.arr [.str] .unit .pure] .unit .pure) .pure⟩⟩
+    mkArr [.arr [.arr [.str] .unit .io] .unit .pure] (.arr [.arr [.str] .unit .pure] .unit .pure)
+      .pure,
+    ⟨0, mkArr [.arr [.arr [.str] .unit .io] .unit .pure]
+      (.arr [.arr [.str] .unit .pure] .unit .pure) .pure⟩⟩
 
 theorem okContra_typed : okContra.Typed := by
   refine ⟨[contraWit.entryOut] ++ Ctx.prelude, ?_, fun sg body hm => by simp [okContra] at hm⟩
@@ -748,7 +764,8 @@ theorem okFnGenW_typed : okFnGenW.Typed := by
         (GroupTy.fn1_novars (Γ := [idWitW.entryOut] ++ Ctx.prelude)
           ⟨⟨"f", [], some (.tup [.int, .bool], .pure),
             .tup [.app (.var "id") [.int 1], .app (.var "id") [.bool true]]⟩,
-            fun _ => .unit, .arr [] (.tup [.int, .bool]) .pure, ⟨0, .arr [] (.tup [.int, .bool]) .pure⟩⟩
+            fun _ => .unit, .arr [] (.tup [.int, .bool]) .pure,
+            ⟨0, .arr [] (.tup [.int, .bool]) .pure⟩⟩
           (by decide) ⟨rfl, rfl, [], rfl, by decide, rfl⟩ ?f)
         (Groups.nil _)))
   case id =>
@@ -758,7 +775,8 @@ theorem okFnGenW_typed : okFnGenW.Typed := by
   case f =>
     have hs : ∀ t : Ty, t.Solved → mkArr [t] t .pure = .arr [t] t .pure →
         (Binding.fn 1 ⟨1, .arr [.gen 0] (.gen 0) .pure⟩).Inst (.arr [t] t .pure) :=
-      fun t h1 h2 => ⟨[t], rfl, by simpa using h1, by simpa [Ty.inst, Ty.instList] using h2.symm⟩
+      fun t h1 h2 =>
+        ⟨[t], rfl, by simpa using h1, by simpa [Ty.inst, Ty.instList] using h2.symm⟩
     refine ⟨[], .tup [.int, .bool], .pure, .tup [.int, .bool], .pure, ParamsTy.nil,
       RetTy.written _ _ _ rfl (by simp), rfl, ?_, ?_, rfl⟩
     · exact HasType.tup _ _ [.int, .bool] .pure
@@ -766,10 +784,12 @@ theorem okFnGenW_typed : okFnGenW.Typed := by
           (idCall (b := .fn 1 ⟨1, .arr [.gen 0] (.gen 0) .pure⟩) rfl (by simp) (hs .int rfl rfl)
             (HasType.int _ 1) Flows.int)
           (HasExprs.cons _ _ _ _ _ _ _
-            (idCall (b := .fn 1 ⟨1, .arr [.gen 0] (.gen 0) .pure⟩) rfl (by simp) (hs .bool rfl rfl)
+            (idCall (b := .fn 1 ⟨1, .arr [.gen 0] (.gen 0) .pure⟩) rfl (by simp)
+              (hs .bool rfl rfl)
               (HasType.bool _ true) Flows.bool)
             (HasExprs.nil _)))
-    · exact Flows.tup _ _ (FlowsAll.cons _ _ _ _ Flows.int (FlowsAll.cons _ _ _ _ Flows.bool FlowsAll.nil))
+    · exact Flows.tup _ _
+        (FlowsAll.cons _ _ _ _ Flows.int (FlowsAll.cons _ _ _ _ Flows.bool FlowsAll.nil))
 
 /-! ### Spec §5.3: a named `fn` is called with exactly its arity -/
 
@@ -861,12 +881,13 @@ theorem okRetIO_typed : okRetIO.Typed := by
 /-! ### Controls: each rejected program above has a near twin the judgment accepts -/
 
 /-- A call of a local at one type: the callee is a `local`, so no arity is declared. -/
-theorem localCall {Γ : Ctx} {f : Expr} {x : String} {args : List Expr} {ts ss : List Ty} {tf res : Ty}
-    {ce εa : Eff} (hx : f = .var x) (hl : Γ.lookup x = some (.local tf))
+theorem localCall {Γ : Ctx} {f : Expr} {x : String} {args : List Expr} {ts ss : List Ty}
+    {tf res : Ty} {ce εa : Eff} (hx : f = .var x) (hl : Γ.lookup x = some (.local tf))
     (hp : Peel tf args.length ss res ce) (ha : HasExprs Γ args ts εa) (hf : FlowsAll ts ss) :
     HasType Γ (.app f args) res (Eff.pure.join (ce.join εa)) := by
   subst hx
-  refine HasType.app Γ _ args tf .pure ts ss res ce εa (HasType.var _ _ (.local tf) _ hl rfl) ?_ hp ha hf
+  refine HasType.app Γ _ args tf .pure ts ss res ce εa (HasType.var _ _ (.local tf) _ hl rfl) ?_
+    hp ha hf
   intro y k s hy hk
   injection hy with hy
   subst hy
@@ -878,7 +899,8 @@ def c9 : Program :=
   ⟨[.fn "f" [("k", some (.arr [] .int .pure))] (some (.int, .pure)) (.app (.var "k") [])]⟩
 
 def c9Wit : FnWit :=
-  ⟨⟨"f", [("k", some (.arr [] .int .pure))], some (.int, .pure), .app (.var "k") []⟩, fun _ => .unit,
+  ⟨⟨"f", [("k", some (.arr [] .int .pure))], some (.int, .pure), .app (.var "k") []⟩,
+    fun _ => .unit,
     mkArr [.arr [] .int .pure] .int .pure, ⟨0, mkArr [.arr [] .int .pure] .int .pure⟩⟩
 
 theorem c9_typed : c9.Typed := by
@@ -894,11 +916,14 @@ theorem c9_typed : c9.Typed := by
 
 /-- `fn f(g: String -> Unit !{IO}) -> Unit !{IO} = g("x")`: the twin of `r11param`. -/
 def c11 : Program :=
-  ⟨[.fn "f" [("g", some (.arr [.str] .unit .io))] (some (.unit, .io)) (.app (.var "g") [.str "x"])]⟩
+  ⟨[.fn "f" [("g", some (.arr [.str] .unit .io))] (some (.unit, .io))
+    (.app (.var "g") [.str "x"])]⟩
 
 def c11Wit : FnWit :=
-  ⟨⟨"f", [("g", some (.arr [.str] .unit .io))], some (.unit, .io), .app (.var "g") [.str "x"]⟩,
-    fun _ => .unit, mkArr [.arr [.str] .unit .io] .unit .io, ⟨0, mkArr [.arr [.str] .unit .io] .unit .io⟩⟩
+  ⟨⟨"f", [("g", some (.arr [.str] .unit .io))], some (.unit, .io),
+      .app (.var "g") [.str "x"]⟩,
+    fun _ => .unit, mkArr [.arr [.str] .unit .io] .unit .io,
+    ⟨0, mkArr [.arr [.str] .unit .io] .unit .io⟩⟩
 
 theorem c11_typed : c11.Typed := by
   refine ⟨[c11Wit.entryOut] ++ Ctx.prelude, ?_, fun sg body hm => by simp [c11] at hm⟩
@@ -907,7 +932,8 @@ theorem c11_typed : c11.Typed := by
   refine Groups.cons1 (GroupTy.fn1_novars (Γ := Ctx.prelude) c11Wit (by decide)
     ⟨by decide, by decide, [], rfl, by decide, rfl⟩ ?_) (Groups.nil _)
   exact ⟨[.arr [.str] .unit .io], .unit, .io, .unit, .io,
-    ParamsTy.written _ _ _ _ _ rfl ParamsTy.nil, RetTy.written _ _ _ rfl (fun h => by simp [Ty.isArr] at h), rfl,
+    ParamsTy.written _ _ _ _ _ rfl ParamsTy.nil,
+    RetTy.written _ _ _ rfl (fun h => by simp [Ty.isArr] at h), rfl,
     localCall (x := "g") rfl rfl (Peel.exact [.str] .unit .io)
       (HasExprs.cons _ _ _ _ _ _ _ (HasType.str _ _) (HasExprs.nil _))
       (FlowsAll.cons _ _ _ _ Flows.str FlowsAll.nil),
@@ -928,7 +954,8 @@ theorem c15_typed : c15.Typed := by
   refine Groups.cons1 (GroupTy.fn1_novars (Γ := Ctx.prelude) c15Wit (by decide)
     ⟨by decide, by decide, [], rfl, by decide, rfl⟩ ?_) (Groups.nil _)
   exact ⟨[.int], .int, .pure, .int, .pure, ParamsTy.omitted _ _ _ _ rfl ParamsTy.nil,
-    RetTy.written _ _ _ rfl (by simp), rfl, HasType.var _ _ (.local .int) _ rfl rfl, Flows.int, rfl⟩
+    RetTy.written _ _ _ rfl (by simp), rfl, HasType.var _ _ (.local .int) _ rfl rfl, Flows.int,
+    rfl⟩
 
 /-- `fn q(p: (String -> Unit) -> Unit, f: String -> Unit) -> Unit = p(f)`: the twin of `r8arg`. -/
 def c8 : Program :=
@@ -940,7 +967,8 @@ def c8Wit : FnWit :=
       ("f", some (.arr [.str] .unit .pure))], some (.unit, .pure), .app (.var "p") [.var "f"]⟩,
     fun _ => .unit,
     mkArr [.arr [.arr [.str] .unit .pure] .unit .pure, .arr [.str] .unit .pure] .unit .pure,
-    ⟨0, mkArr [.arr [.arr [.str] .unit .pure] .unit .pure, .arr [.str] .unit .pure] .unit .pure⟩⟩
+    ⟨0, mkArr [.arr [.arr [.str] .unit .pure] .unit .pure, .arr [.str] .unit .pure] .unit
+      .pure⟩⟩
 
 theorem c8_typed : c8.Typed := by
   refine ⟨[c8Wit.entryOut] ++ Ctx.prelude, ?_, fun sg body hm => by simp [c8] at hm⟩
@@ -948,12 +976,14 @@ theorem c8_typed : c8.Typed := by
   rw [hn]
   refine Groups.cons1 (GroupTy.fn1_novars (Γ := Ctx.prelude) c8Wit (by decide)
     ⟨by decide, by decide, [], rfl, by decide, rfl⟩ ?_) (Groups.nil _)
-  exact ⟨[.arr [.arr [.str] .unit .pure] .unit .pure, .arr [.str] .unit .pure], .unit, .pure, .unit,
+  exact ⟨[.arr [.arr [.str] .unit .pure] .unit .pure, .arr [.str] .unit .pure], .unit, .pure,
+    .unit,
     .pure, ParamsTy.written _ _ _ _ _ rfl (ParamsTy.written _ _ _ _ _ rfl ParamsTy.nil),
     RetTy.written _ _ _ rfl (by simp), rfl,
     localCall (x := "p") rfl rfl (Peel.exact [.arr [.str] .unit .pure] .unit .pure)
       (HasExprs.cons _ _ _ _ _ _ _ (HasType.var _ _ (.local _) _ rfl rfl) (HasExprs.nil _))
-      (FlowsAll.cons _ _ _ _ (Flows.arr _ _ _ _ _ _ _ _ rfl rfl Flows.str rfl Flows.unit) FlowsAll.nil),
+      (FlowsAll.cons _ _ _ _ (Flows.arr _ _ _ _ _ _ _ _ rfl rfl Flows.str rfl Flows.unit)
+        FlowsAll.nil),
     Flows.unit, rfl⟩
 
 /-- `fn f() -> (Int, Int) = let id = \x -> x in (id(1), id(2))`: the twin of `r56`. -/
@@ -974,7 +1004,8 @@ theorem c56_typed : c56.Typed := by
   rw [hn]
   refine Groups.cons1 (GroupTy.fn1_novars (Γ := Ctx.prelude) c56Wit (by decide)
     ⟨by decide, by decide, [], rfl, by decide, rfl⟩ ?_) (Groups.nil _)
-  have call : ∀ n : Nat, HasType (("id", Binding.local (.arr [.int] .int .pure)) :: [c56Wit.entryIn] ++ Ctx.prelude)
+  have call : ∀ n : Nat,
+      HasType (("id", Binding.local (.arr [.int] .int .pure)) :: [c56Wit.entryIn] ++ Ctx.prelude)
       (.app (.var "id") [.int n]) .int .pure := fun n =>
     localCall (x := "id") rfl rfl (Peel.exact [.int] .int .pure)
       (HasExprs.cons _ _ _ _ _ _ _ (HasType.int _ n) (HasExprs.nil _))
@@ -984,8 +1015,10 @@ theorem c56_typed : c56.Typed := by
   · exact HasType.letIn _ _ _ _ (.arr [.int] .int .pure) _ _
       (HasType.lam _ "x" none _ .int .int .pure rfl (HasType.var _ _ (.local .int) _ rfl rfl))
       (HasType.tup _ _ [.int, .int] .pure
-        (HasExprs.cons _ _ _ _ _ _ _ (call 1) (HasExprs.cons _ _ _ _ _ _ _ (call 2) (HasExprs.nil _))))
-  · exact Flows.tup _ _ (FlowsAll.cons _ _ _ _ Flows.int (FlowsAll.cons _ _ _ _ Flows.int FlowsAll.nil))
+        (HasExprs.cons _ _ _ _ _ _ _ (call 1)
+          (HasExprs.cons _ _ _ _ _ _ _ (call 2) (HasExprs.nil _))))
+  · exact Flows.tup _ _
+      (FlowsAll.cons _ _ _ _ Flows.int (FlowsAll.cons _ _ _ _ Flows.int FlowsAll.nil))
 
 /-- `let shout = \s -> print_str(s)`: binding a function that performs IO is pure; the effect
 stays on its arrow (spec §5.2). The twin of `r5let`. -/
@@ -995,7 +1028,8 @@ def c5 : Program :=
 theorem c5_typed : c5.Typed := by
   refine Program.typed_nomain (hm := by simp [c5])
     (Groups.cons1
-      (GroupTy.letG _ "shout" none _ (mkArr [.str] .unit .io) ⟨0, mkArr [.str] .unit .io⟩ ?lam trivial
+      (GroupTy.letG _ "shout" none _ (mkArr [.str] .unit .io) ⟨0, mkArr [.str] .unit .io⟩ ?lam
+        trivial
         ⟨rfl, rfl, [], rfl, by decide, rfl⟩)
       (Groups.nil _))
   exact HasType.lam _ "s" none _ .str .unit .io rfl
@@ -1038,8 +1072,8 @@ open SproutCore.Tests
 #guard !accepts r9ret
 
 -- The two divergences. The checker accepts `print_str()` (it types `print_str` as a value), the
--- judgment does not (BACKLOG). And the judgment accepts `-> Int -> Int !{IO}` (spec §7 rule 9, and the
--- compiler), `Check.FnInfo.build` rejects it as ill-formed.
+-- judgment does not (BACKLOG). And the judgment accepts `-> Int -> Int !{IO}` (spec §7 rule 9,
+-- and the compiler), `Check.FnInfo.build` rejects it as ill-formed.
 #guard !accepts okRetIO
 #guard accepts r5arity
 
