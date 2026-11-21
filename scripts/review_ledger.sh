@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Ledger for `/sprout-review`: how many reviews have run on this branch.
 #
+# Rows from 2026-11-21 on come from the `/code-review` wrapper: `found` is one review's
+# reports (refuted ones already dropped); `confirmed` is `-` when no verify pass ran.
+#
 # Append-only TSV rather than JSON: two sessions can write at once, and an append
 # needs no read-modify-write.
 #
@@ -18,7 +21,6 @@
 #   review_ledger.sh done <id> <found> <confirmed> [effort] [cleanups] [cleanups-confirmed]
 #     branch, head and target are copied from the id's start row; no start row is an error
 #   review_ledger.sh findings <id> [--write]   path of that run's findings file
-#   review_ledger.sh raw <id> [--write]        path for the findings as each pass worded them
 #   review_ledger.sh items <id> [--write]      path of that run's grouped issues (JSON)
 #     --write: read stdin into that file (atomically), then print the path; `items` also
 #     validates it: an array of {ns:[n,..] (positive ints), track:bug|cleanup, severity:low|medium|high,
@@ -166,10 +168,16 @@ cmd_open() {
 }
 
 cmd_done() {
-  local file branch head target start id found confirmed effort cleanups cleanups_confirmed
+  local file branch head target start id found confirmed effort cleanups cleanups_confirmed a
   id="${1:?usage: review_ledger.sh done <id> <found> <confirmed> [effort] [cleanups] [cleanups-confirmed]}"
   found="${2:--}"
   confirmed="${3:--}"
+  # A bad count is an error, not a silent "-": the caller's number would be lost.
+  # Digits or "-" only, so no argument can carry a tab into the row.
+  for a in "$found" "$confirmed"; do
+    [ "$(count_or_dash "$a")" = "$a" ] \
+      || { echo "review_ledger.sh done: counts are digits or '-' (got '${a}')" >&2; return 2; }
+  done
   # The level arrives from an argument the skill parsed, so only the known
   # vocabulary is stored: a tab in it would split the row, and every reader here
   # and in the pr-tracker plugin addresses columns by number.
@@ -269,14 +277,6 @@ ledger_sibling_cmd() {
 }
 
 cmd_findings() { ledger_sibling_cmd findings findings md "$@"; }
-
-# The findings as each pass worded them. The report next to it is judged and grouped
-# by a reader, so it cannot answer what the passes actually said: `OVERLAP_MIN` sat
-# at 0.5 for three runs on adjectives ("synonyms, ~0.3 overlap") because the
-# summaries it scored were never written down. Writing them down is what let the
-# threshold be measured, and measuring it is what removed it. JSON, not prose — this
-# one is for replaying a decision over the raw claims, not for reading.
-cmd_raw() { ledger_sibling_cmd raw raw json "$@"; }
 
 # The same findings as the markdown file, grouped into issues, as data. A panel reads
 # this and the status file instead of parsing prose. `ns` are the run's `n` numbers
@@ -434,6 +434,9 @@ cmd_show() {
   # Sum only a run's FIRST `done` row. Counting distinct ids while summing every
   # row would let one re-reported run inflate the totals but not the run count.
   #
+  # A row whose `confirmed` is "-" was not verified: its `found` is shown apart
+  # as "+K unverified" so it does not read as false alarms.
+  #
   # The level is the latest counted run's, not an aggregate — averaging or
   # listing levels answers nothing, and "how hard was the last look" is the
   # question a bare `review:3` leaves open. Assigned on every counted row, so a
@@ -442,13 +445,14 @@ cmd_show() {
   read_rows | awk -F'\t' -v b="$branch" '
     $3==b && $2=="done"&& !($5 in seen) {
                           seen[$5]=1
-                          if ($6 != "-") found += $6
-                          if ($7 != "-") confirmed += $7
+                          if ($7 == "-") { unv++; if ($6 != "-") ufound += $6 }
+                          else { nconf++; if ($6 != "-") found += $6; confirmed += $7 }
                           level = (NF >= 8 && $8 != "-") ? $8 : "" }
     END { n = length(seen)
           if (n == 0) exit
           printf "review:%d", n
-          if (confirmed != "") printf " %d found %d real", found, confirmed
+          if (nconf > 0) printf " %d found %d real", found, confirmed
+          if (unv > 0) printf " +%d unverified", ufound
           if (level != "") printf " @%s", level
           printf "\n" }'
 }
@@ -474,7 +478,6 @@ case "${1:-show}" in
   open)  shift; cmd_open "$@" ;;
   done)  shift; cmd_done "$@" ;;
   findings) shift; cmd_findings "$@" ;;
-  raw) shift; cmd_raw "$@" ;;
   items) shift; cmd_items "$@" ;;
   status) shift; cmd_status "$@" ;;
   issues) shift; cmd_issues "$@" ;;
@@ -482,6 +485,6 @@ case "${1:-show}" in
   runs)  cmd_runs ;;
   dir)   cmd_dir ;;
   show)  cmd_show ;;
-  *) echo "usage: review_ledger.sh {open [--pr <n>|--branch <name>]|done <id> <found> <confirmed> [effort] [cleanups] [cleanups-confirmed]|findings <id> [--write]|raw <id> [--write]|items <id> [--write]|status <id> <n> <open|fixed|skipped|wontfix> [sha]|issues <id>|count [--branch <name>]|runs|dir|show}" >&2
+  *) echo "usage: review_ledger.sh {open [--pr <n>|--branch <name>]|done <id> <found> <confirmed> [effort] [cleanups] [cleanups-confirmed]|findings <id> [--write]|items <id> [--write]|status <id> <n> <open|fixed|skipped|wontfix> [sha]|issues <id>|count [--branch <name>]|runs|dir|show}" >&2
      exit 2 ;;
 esac

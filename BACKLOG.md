@@ -6,10 +6,6 @@ Legend:
 - Priority: `P0` (critical), `P1` (important), `P2` (later)
 - Status: `[ ]` todo, `[~]` in progress, `[x]` done
 
-One backlog lives outside this file: `.claude/skills/sprout-review/BACKLOG.md`, because that
-skill is meant to be liftable into another repository whole. It is held to the same shape rules
-by `just backlog-shape`. Nothing else may split off without the same justification.
-
 ## Backlog
 
 ### 1) Language Core and Safety
@@ -1392,6 +1388,25 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   the failing check one call deeper. Fix at the call site, not per builtin: pass the caller's
   position to the trap, or print a symbolised backtrace as the stack-overflow handler does.
 
+**Review tooling**
+
+- [ ] `P2` **`/sprout-review` has no Sprout-specific review dimensions.** `/code-review` runs
+  forked and takes no guidance, so a review cannot know GC rooting for `stdlib/compiler/` and
+  `runtime/`, seed staleness, idiomatic Sprout, or the golden-IR trap. It also has no angle for
+  doc and comment drift (14 of the old ensemble's 67 raw findings over 11 runs). Proposal: the
+  wrapper runs one extra Sprout-only agent, its prompt built from the path-matched rows of
+  `scripts/review_gate.py`'s `CHECKLIST`; findings go into the same items file with
+  `category: sprout`. Measure it against plain wrapper runs before keeping it.
+- [ ] `P2` **Nothing says whether the code changed since the last review.** "2 reviews" on a
+  branch reviewed two commits ago reads like one reviewed just now. The `done` row stores the head
+  SHA; comparing it to the current tree would give a staleness marker in the `/prs` pane.
+  `scripts/review_gate.py` already computes a per-path tree digest that could be reused.
+- [ ] `P3` **A review diffed against a stale `@{upstream}` or local `master` counts merged code.**
+  Without a fetch, the base is behind `origin/master`, so the review diff includes commits
+  already merged and reports them as the branch's. Seen in this worktree on 2026-11-21 and in run
+  1793356017-7260 (2 of 6 cleanups were about merged #781). Fix: the wrapper fetches, then passes
+  an explicit base/target to `/code-review`.
+
 ### 7.5) Type Classes
 
 - [ ] `P2` **Default method bodies.** A class method is a signature only (spec §8.5), so adding a
@@ -2156,7 +2171,7 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   `docs/concurrency-channels-design-2026-07-16.md` §4 and the M4.4 entry above (a linear `Scope`).
 - [ ] `P3` **Linearity-bound retro: deferred items.** From
   `docs/linearity-bound-retro-2026-10-20.md` §5–6: C2, one group-boundary check deciding bound
-  obligations and marks under the final substitution; T3, a `/sprout-review` pass that writes
+  obligations and marks under the final substitution; T3, a review pass that writes
   linear misuse programs and runs them on master and head; X3, check the spec's `sprout` blocks
   that mention `linear`, expected-error where the text says so. Also park bound obligations
   unconditionally: drop the whole gate in `park_bound_obligations` (retro §3.3 measured it free).

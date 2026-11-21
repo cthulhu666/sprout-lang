@@ -69,26 +69,11 @@ so a reseed or a golden snapshot never trips it. A turn whose last tool call is
 and it records nothing, so the change is still gated once you reply. Test with
 `just test-review-gate`.
 
-**`/sprout-review`** — `.claude/skills/sprout-review/SKILL.md`, an ensemble diff review that also
-records the run. `/code-review` leaves nothing on disk, so nothing can say how many reviews a branch
-has had; this one opens and closes a row in `claude-review/runs.tsv` under the common git dir (one
-ledger for all worktrees, invisible to `git status`) and writes the findings beside it, through
-`review_ledger.sh findings <id> --write` — a count says a review happened, the file says what it
-said. Each pass's findings, in its own words, go to `review_ledger.sh raw <id> --write`: the report
-is judged and grouped by the reader, so it cannot say what the passes said. Writing them down is what let
-`OVERLAP_MIN` be measured — it had been carried for three runs on recollection — and the measurement
-retired the clustering it belonged to, so the script now groups nothing and gates nothing.
-A run is filed under the reviewed PR's or branch's name, not the checked-out one (`open --pr`), and
-the reader's grouped issues (`items`) and their fixed/skipped status (`status`, `issues`) sit beside
-the rows. `.claude/skills/pr-tracker/` (`/prs`) shows each PR's runs and issues from that ledger.
-It takes an effort level like `/code-review` does — `/sprout-review [low|medium|high|xhigh|max]
-[<pr#>|<branch>|<path>]`, defaulting to `high` so runs on one branch stay comparable — which buys
-1/2/3/5/8 reviewer passes and is recorded in the ledger beside the counts. Beside them run
-1/1/1/4/4 report-only cleanup passes — `/simplify`'s angles — judged by their own skeptic and kept
-out of the bug counts.
-**It reports and stops**: fixing a finding in the same turn leaves the reader a changelog instead of
-a decision, and that has happened. `scripts/review_ledger.sh count` reads the ledger; test with
-`just test-review-ledger` and `just test-review-script`.
+**`/sprout-review`** — `.claude/skills/sprout-review/SKILL.md`, a wrapper around `/code-review` that
+records each run in `claude-review/runs.tsv` under the common git dir (one ledger for all worktrees,
+invisible to `git status`), with findings and items files beside it. `.claude/skills/pr-tracker/`
+(`/prs`) shows each PR's runs and issues. `/sprout-review [low|medium|high|xhigh|max]
+[<pr#>|<branch>|<path>]`, default `high`. It reports and stops. Test with `just test-review-ledger`.
 
 **Seed gate** — `scripts/seed_gate.sh`, a PreToolUse Bash hook. Intercepts `git commit` and blocks if
 `stdlib/compiler/*.sprout` or `stdlib/*.sprout` is staged without a refreshed

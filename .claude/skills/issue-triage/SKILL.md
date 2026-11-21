@@ -86,7 +86,7 @@ open every file and symbol it cites and check the claim actually holds.
 
 Group the issues by **subsystem** and give one agent each group — `crypto`/`bytes`, `http_server`,
 `net`, `json`, the compiler, `task`. One agent reading one area's source once beats one agent per
-issue re-reading the same files, the same argument the review skill makes for a single skeptic.
+issue re-reading the same files.
 State the group count before spawning; it should be about four to six, not one per issue.
 
 Each group reports, per issue: does the cited code say what the body says; are the cited locations

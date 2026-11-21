@@ -338,7 +338,7 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
   error, not a disagreement.
 - **Docs.** `docs/gates.md` gets an entry for both recipes when they land. No spec change. No
   Definition of Done change until the CI job is promoted (§7).
-- **Backlog.** The retro's deferred T3 ("a `/sprout-review` pass that writes linear misuse
+- **Backlog.** The retro's deferred T3 ("a review pass that writes linear misuse
   programs") is partly automated by stage 3, inside Core only; the entry stays for the rest. X3
   (compile the spec's `linear` examples) and C2 (one group-boundary check) are unaffected. One
   `BACKLOG.md` entry tracks the stages and links here.
