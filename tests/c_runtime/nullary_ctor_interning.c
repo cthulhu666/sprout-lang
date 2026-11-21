@@ -19,13 +19,15 @@
  *              and when a sweep reclaims it the cache slot must be cleared. If
  *              it is not, the next construction hands back freed memory.
  *
- * TAG 7, NOT TAG 0, IN case_weak, AND THAT IS THE WHOLE POINT. A freed slot's
- * header is rewritten to SPROUT_HEAP_FREE | (ssize << 14) with ssize == 16, so
- * sprout_tag on a stale pointer reads 16 >> 8 == 0. An earlier version of this
- * case registered tag 0 and asserted the readback was 0 — which freed-slot
- * garbage satisfies, so the whole file passed with the invalidation deleted.
- * A short CSTR reusing the slot reads 0 too (aux = strlen, strlen >> 8 == 0).
- * No reachable garbage reads as 7.
+ * TAG 7, NOT TAG 0, IN case_weak, AND THAT IS THE WHOLE POINT. The sweep
+ * writes no header into a dead slot; it only clears the slot's `occ` bits, so
+ * the stale header stays until a new object reuses the slot. An earlier
+ * version of this case registered tag 0 and asserted the readback was 0 — which
+ * freed-slot garbage satisfies, so the whole file passed with the invalidation
+ * deleted. A short CSTR reusing the slot reads 0 too (aux = strlen,
+ * strlen >> 8 == 0). A stale cache is caught only once the slot is reused or
+ * poisoned (below); a dead slot nothing has touched still reads 7, so the
+ * plain run is weaker than it was. Not re-checked since the FREE header went away.
  *
  * Under SPROUT_GC_LINEAGE=1 the reclaimed slot is POISONED rather than reused,
  * and sprout_tag aborts on it — a discriminator that does not depend on what the
@@ -147,8 +149,8 @@ static int case_weak(void) {
   (void)sprout_alloc_obj(7, 0);   /* caches the singleton, then drops every reference */
   churn();                        /* the sweep reclaims it and must clear the cache */
   g_a = sprout_alloc_obj(7, 0);
-  /* A stale cache returns the freed slot, whose header reads back as tag 0
-   * (or aborts outright under SPROUT_GC_LINEAGE=1). */
+  /* A stale cache returns the dead slot: a reused one reads back as another
+   * tag, a poisoned one aborts (SPROUT_GC_LINEAGE=1). */
   if (sprout_tag(g_a) != 7) {
     fprintf(stderr, "weak: tag readback %lld after collection, expected 7 — "
                     "the cache was not cleared when the singleton was swept\n",

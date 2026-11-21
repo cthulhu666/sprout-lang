@@ -4,6 +4,12 @@
 here. Normative GC behaviour remains
 [docs/compiler-internals.md §Non-moving GC](compiler-internals.md).
 
+**Since written:** the free-list collector this note describes (§1, §6) has been removed.
+Allocation now bumps through the holes of each region's `occ` map
+([gc-stage2-v0.md](gc-stage2-v0.md) §5.7) and reuses only a freed inline tail, by exact class.
+The prior-art survey (§2–§5) and the mixed-class analysis (§4) still stand; §1 records the rules
+as they were.
+
 Written because commit 4535204c (inline Vec elements) moved vector element storage out
 of `malloc` and onto these rules, and the two `BACKLOG` entries it produced
 (retained-by-class bytes; exact-fit remainders) both ask "is this shape normal?"
@@ -12,13 +18,13 @@ differs, and it is not where it looks.
 
 ## 1. The two rules
 
-**Rule 1 — exact-size reuse.** `g_freelist` is indexed by `slot_bytes / 16`
+**Rule 1 — exact-size reuse.** `g_freelist` (removed) was indexed by `slot_bytes / 16`
 (`SPROUT_FREELIST_CLASSES` = 257, covering 16 B up to `SPROUT_LARGE_THRESHOLD` = 4096 B),
-and `sprout_gc_alloc_block` pops only the requested class. A free 4064-byte slot is
+and `sprout_gc_alloc_block` popped only the requested class. A free 4064-byte slot is
 invisible to a 4080-byte request beside it and to every 32-byte one.
 
-**Rule 2 — no merging of adjacent free slots.** The sweep rebuilds the freelists from
-its slot walk; two neighbouring FREE slots stay two slots of their own classes. Memory
+**Rule 2 — no merging of adjacent free slots.** The sweep rebuilt the freelists from
+its slot walk; two neighbouring FREE slots stayed two slots of their own classes. Memory
 leaves a class only when a whole 1 MiB region has no live and no poison slot, at which
 point the sweep recycles the arena chunk (`arena_chunk_release`, which `madvise`s, so
 RSS falls) or `free`s a malloc'd region.
@@ -79,10 +85,10 @@ things about the design that look odd:
   rests on that record.
 - **Why coalescing is harder here than in the prior art.** The others never face it:
   merging inside a uniform span is meaningless. Sprout's version must clear a slotmap
-  bit, and that bit is load-bearing for pointer-vs-integer exactness — which is why the
-  `BACKLOG` entry warns that, with `SPROUT_GC_HOLES=0`, coalescing without a `slotmap_clear`
-  trips HDRCHECK's "no start bit strictly inside a step" assertion. The default sweep clears
-  every dead object's start bit (`slotmap &= live`), and its HDRCHECK walks runs of `occ`.
+  bit, and that bit is load-bearing for pointer-vs-integer exactness — on the free-list
+  collector, coalescing without a `slotmap_clear` tripped HDRCHECK's "no start bit strictly
+  inside a step" assertion. The sweep now clears every dead object's start bit
+  (`slotmap &= live`), and HDRCHECK walks runs of `occ`.
 
 **Sprout also lacks the lower layer.** TCMalloc coalesces pages in its pageheap; GHC's
 block allocator coalesces bgroups under the nonmoving heap — "when a bgroup is freed

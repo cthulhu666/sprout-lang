@@ -131,14 +131,13 @@ Go's model, and the closest fit to what Sprout already does:
 > concurrently in a background goroutine… when a goroutine needs another span, it first
 > attempts to reclaim that much memory by sweeping."
 
-Sprout's sweep is **already staged per region** — `fl_push_staged` /
-`fl_region_commit` / `fl_region_rollback` exist so that a region released in pass 2
-drops exactly its own freelist entries. Sweeping a region at a time is closer than it
+Sprout's sweep is **already per region** — `sprout_holes_sweep_region` works one region's
+bitmaps at a time and keeps no heap-wide list. Sweeping a region at a time is closer than it
 looks.
 
-The blocker was that every sweep wiped and rebuilt the whole heap's freelists, which
-cannot be resumed halfway. A young-only minor now keeps them ([gc-stage2-v0.md](gc-stage2-v0.md)
-§5.3); a full sweep, the one this section would split, still rebuilds them.
+The blocker was that every full sweep wiped and rebuilt the whole heap's freelists, which
+cannot be resumed halfway. The free-list collector is gone ([gc-stage2-v0.md](gc-stage2-v0.md)
+§5.7): the sweep now works on each region's maps and builds no list.
 
 ## 7. What Sprout cannot do yet
 

@@ -87,7 +87,7 @@ Runs `bench/gc_minor/ab.sh` of **one** ref on the VM. `<arms>` is ab.sh's `-a` s
 other args go to ab.sh as they are (`-n 6 -w selfcompile,mutvec_int`, `-s`, `-e`). Example:
 
 ```
-just bench-vm-gc HEAD "s50:SPROUT_GC_NURSERY_SHARE=0.5;fl:SPROUT_GC_HOLES=0" -n 6
+just bench-vm-gc HEAD "s50:SPROUT_GC_NURSERY_SHARE=0.5;m0:SPROUT_GC_MINOR=0" -n 6
 ```
 
 Config, VM flags, TTL, trap and leftover check are the compiler mode's. Differences:

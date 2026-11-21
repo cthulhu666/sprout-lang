@@ -19,13 +19,13 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_empty, mutvec_push, mutvec_at,
 #
 # None of the element counts here is arbitrary. 508 is the inline ceiling: the
 # slot is 8 + 24 + 508*8 == 4096 bytes, at once the largest inline slot, the top
-# freelist class and one byte from the large-object path, which is taken on
+# freed-tail class (`g_hole_tails`) and one byte from the large-object path, taken on
 # `slot > 4096`. 509 is the first vector whose elements are out of line at birth.
 # 504 is the size whose slot (4064 bytes) is exactly the tail a grown ceiling
 # vector hands back, so allocating one re-uses that tail; 506 (4080 bytes) is the
 # class above it, which must NOT be satisfied from that tail. 2 is the other end:
 # growing it frees 16 bytes, the smallest slot there is, whose payload is exactly
-# the 8 bytes the free-list next-pointer needs.
+# the 8 bytes the `g_hole_tails` next-pointer needs.
 #
 # A `_Static_assert` beside SPROUT_VEC_INLINE_MAX fails the build if that ceiling
 # ever moves, naming this file — widening VectorVal would otherwise slide all
@@ -33,7 +33,8 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_empty, mutvec_push, mutvec_at,
 #
 # Like test_gc_freelist_reuse.spr, the heap-internal half of this file is DRIVEN
 # here and CHECKED by the runtime. Measured against four broken versions of the
-# inline-tail release, each run four ways (2026-09-26):
+# inline-tail release, each run four ways (2026-09-26, under the removed free-list
+# collector, so "freelist class" below means the tail's size class; not re-measured):
 #
 #   mutation                        plain  HDRCHECK  FL_VERIFY  GC_STRESS
 #   tail header 16 bytes too long   pass   abort     pass       crash
@@ -100,8 +101,8 @@ fn main() -> Unit !{IO} =
     _ <- push_labels(ceiling_grown, 0, 2)
 
     # ── And the SMALLEST tail: 2 elements is a 48-byte slot, so growing it frees
-    # 16 bytes — one slot, freelist class 1, whose payload is exactly the 8 bytes
-    # the free-list next-pointer needs. Any off-by-one in the remainder writes
+    # 16 bytes — one slot, tail class 1, whose payload is exactly the 8 bytes
+    # the `g_hole_tails` next-pointer needs. Any off-by-one in the remainder writes
     # that pointer past the tail and into the following slot.
     tiny_grown <- mutvec_new(2, "t")
     _ <- push_labels(tiny_grown, 0, 1)

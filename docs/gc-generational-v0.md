@@ -1043,7 +1043,7 @@ barrier never sees an old object. Nothing goes red between steps.
    harness `bench/gc_minor/`). The self-compile gains (CPU 0.83×, GC time 0.56×, RSS 1.36×) and
    the galaxy client's pause drops (p50 0.36×); nqueens (CPU 1.08×) and http_log_middleware
    (1.04×) regress outside the spread. Their regression is the 2× rule: a third of their
-   collections are majors, and a major pays `sprout_gc_clear_marks`' extra walk while their minors
+   collections are majors, and a major paid `sprout_gc_clear_marks`' extra walk (on the free-list collector, since removed) while their minors
    save nothing. The fixed-threshold arm does not equalise collections, because
    `SPROUT_GC_THRESHOLD` compares a heap count that after a minor still holds dead old objects; it
    is read per collection (p50, p90) instead.

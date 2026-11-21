@@ -4046,14 +4046,15 @@ test-stress: bootstrap-from-seed
   # SPROUT_GC_DISABLE).  Tracked in BACKLOG.md; warn-only here.  Promote to
   # STRESS_FILES as each is fixed (an UNEXPECTED PASS flags that it's ready).
   STRESS_XFAIL=""
-  # Files that run under stress but WITHOUT the freelist oracle, because the two
-  # together are disproportionate.  test_ir_codegen_ctors is the serial critical
-  # path of this whole recipe: measured locally (5 jobs) it runs 180s under stress
-  # alone and 434s with the oracle, while all 15 other files finish in under 2s
-  # each either way — so the oracle on that one file is +254s (CI: 300s -> 883s for
-  # the step) for heap shapes `just test-freelist-verify` already walks at the
-  # default threshold.  Keep this list minimal and justify each entry with a
-  # measurement; the oracle is ON by default so new stress files are covered.
+  # Files that run under stress but WITHOUT FL_VERIFY, because the two together
+  # were disproportionate.  test_ir_codegen_ctors is the serial critical path of
+  # this whole recipe: measured with the removed free-list oracle (5 jobs locally) it
+  # ran 180s under stress alone and 434s with the oracle, while all 15 other files
+  # finished in under 2s each either way (CI: 300s -> 883s for the step).  The
+  # current check has not been re-measured there; the heap shapes it would cover
+  # `just test-freelist-verify` already walks at the default threshold.  Keep this
+  # list minimal and justify each entry with a measurement; FL_VERIFY is ON by
+  # default so new stress files are covered.
   FL_VERIFY_SKIP=" test_ir_codegen_ctors "
   failed=0
   JOBS=$(bash scripts/test_jobs.sh)

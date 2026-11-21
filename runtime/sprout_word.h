@@ -14,7 +14,7 @@
  * all" test).  Miss the third and the sweep aborts on the first slot of the new
  * kind — under a flag CI sets job-wide, so the first sign is every job red. */
 typedef enum {
-  SPROUT_HEAP_FREE = 0,   /* slot on a class freelist; header aux = slot_bytes */
+  SPROUT_HEAP_FREE = 0,   /* no longer written; a zero kind is rejected as a stray header */
   SPROUT_HEAP_OBJ = 1,
   SPROUT_HEAP_CLOSURE = 2,
   SPROUT_HEAP_VECTOR = 3,

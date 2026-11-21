@@ -294,10 +294,8 @@ static long long g_debug_alloc_builder = 0;
 static long long g_debug_alloc_arena_bytes = 0;
 static long long g_debug_alloc_offarena_bytes = 0;
 static long long g_debug_gc_swept = 0;
-/* Slots the sweep stepped over. walked - live - swept is the FREE slots it walked
-   and reclaimed nothing from: high when regions pinned by a few survivors hold a
-   slot class nothing allocates, and invisible to a trigger that reads `live`.
-   Under SPROUT_GC_LINEAGE it also counts every POISON corpse kept so far. */
+/* Bitmap words the sweep read (sprout_holes_sweep_region), plus one per large region it
+   looked at: what the sweep cost, as opposed to `swept`, what it bought. */
 static long long g_debug_gc_walked = 0;
 /* The free count: set by each sweep (sprout_holes_free_slots), in granules over the mean live slot
    size.  The trigger's footprint floor reads it (sprout_gc_collect_with_reason). */
@@ -320,10 +318,9 @@ static long long g_gc_threshold_base = 4096;
 /* Set by SPROUT_GC_THRESHOLD. Turns the footprint floor off, so the variable keeps
    forcing collections at the rate it names (docs/gc-trigger-v0.md §12 Q5). */
 static int g_gc_threshold_pinned = 0;
-/* Footprint floor divisor: collect once the program has allocated 1/k of what the
-   last sweep walked (live + free). Bounds free slots walked per object freed near
-   k - 1 on a sparse heap. At 3 it leaves nqueens alone and binds on part of the
-   compiler's run (docs/gc-trigger-v0.md §6.2, §9). */
+/* Footprint floor divisor: collect once the program has allocated 1/k of the heap held
+   (live + free slots after the last sweep). At 3 it leaves nqueens alone and binds on
+   part of the compiler's run (docs/gc-trigger-v0.md §6.2, §9). */
 static const long long g_gc_footprint_k = 3;
 static long long g_gc_marked_count = 0;
 /* Per-type live counts and CSTR bytes after each sweep (logged with SPROUT_DEBUG_GC). */
@@ -702,7 +699,7 @@ static void sprout_gc_log_cycle(
   if (!g_debug_gc_enabled) return;
   /* Field order: swept= and elapsed_us= stay adjacent, which bench/gc_pause/pause_stats.py
      reads.  walked= and free= follow, then kind= (only with minors on; a minor adds
-     sweep=young or sweep=full: which sweep it ran).  sweep_us= always ends the line,
+     sweep=young).  sweep_us= always ends the line,
      minors on or off: the sweep's share of elapsed_us; the rest is mostly marking. */
   fprintf(
     stderr,
@@ -1571,8 +1568,8 @@ static size_t slot_bytes(SproutHeapKind kind, unsigned long long aux) {
 /* Allocation (docs/gc-stage2-v0.md §5.7).  Two cursors walk the holes, the zero
  * runs of `occ`, forward only: `g_hole_cur` for ordinary requests, `g_hole_ovf` for a request over
  * 256 B that misses the current hole.  A cursor is (region index, granule).  It moves with its
- * region when the table shifts, as the class cursors above do, and each collection resets both to
- * region 0.  Each request reads `occ` afresh, so the two never hand out the same granules.
+ * region when the table shifts and each collection resets both to region 0.  Each request reads
+ * `occ` afresh, so the two never hand out the same granules.
  * `g_hole_tails[c]` heads the freed inline tails of exact class c. */
 typedef struct { size_t ri; size_t gran; } SproutHoleCursor;
 static SproutHoleCursor g_hole_cur, g_hole_ovf;
@@ -2158,7 +2155,7 @@ static void sprout_at_gc_start(long long cycle) {
   sprout_at_emit('G', &c, 1);
 }
 
-/* kind: a SPROUT_GC_KIND_* value; walked: the slots this collection's sweep stepped over. */
+/* kind: a SPROUT_GC_KIND_* value; walked: the bitmap words this collection's sweep read. */
 static void sprout_at_gc_end(long long cycle, int kind, long long walked) {
   if (!sprout_at_on()) return;
   uint64_t large = 0;
@@ -4188,9 +4185,9 @@ static void sprout_gc_collect_with_reason(const char* reason) {
      is the floor for small programs; the optional cap still applies.
      NOTE: adapt_ratio survives only as the on/off switch below — the swept fraction
      it used to name is no longer part of the decision.
-     Footprint floor: a sweep walks live AND free slots, and one survivor keeps a
-     region's free slots in every later walk, so `live * factor` alone can collect
-     every few thousand allocations while walking a large free pool each time.
+     Footprint floor: a major sweeps every held region, free slots included, and one
+     survivor keeps a region held, so `live * factor` alone can collect every few
+     thousand allocations while a large free pool stays held.
      Damped by k, so the pool it lets the program build settles (gc-trigger-v0 §6.2). */
   if (g_gc_adapt_ratio > 0.0) {
     long long target;

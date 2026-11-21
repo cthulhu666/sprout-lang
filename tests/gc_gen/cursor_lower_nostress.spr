@@ -3,16 +3,18 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_push, mutvec_len)
 
 # Run by `just gc-gen-check` WITHOUT SPROUT_GC_STRESS (the `_nostress` name: it builds ~40k live
 # cells, so collecting on every allocation would take quadratic time). Reaches the case where
-# `sprout_vec_release_inline_tail` frees a slot below a class cursor under per-region lists:
+# `sprout_vec_release_inline_tail` frees a tail in the lowest region after the hole cursors have
+# moved past it:
 #   1. `pusher` is allocated first, so it sits in the lowest region; its inline area leaves a
 #      32-byte tail (class 2) when its first push moves the elements out.
 #   2. `phase1` builds 40k live cells (two ordinary regions of class 2), keeps one cell from the
 #      second so that region survives, and drops the rest: the next collection frees them.
-#   3. `fill` allocates 200k more cells. They take the freed class-2 slots lowest region first,
-#      so the cursor passes the lowest region once its list is empty.
-#   4. The push then frees a class-2 slot in the lowest region, below the cursor, and `probe`
-#      allocates class 2 again: it must take that slot. SPROUT_FL_VERIFY=1 aborts if the push
-#      left the cursor above a region that holds the slot.
+#   3. `fill` allocates 200k more cells. They take the holes lowest region first, so the cursor
+#      passes the lowest region.
+#   4. The push then frees a class-2 tail in the lowest region, behind the cursor, and `probe`
+#      allocates class 2 again: it must take the tail from its list. The tail keeps its `occ`
+#      bits, so the cursor never hands it out. SPROUT_FL_VERIFY=1 aborts if the tail is listed
+#      twice, taken unlisted, or an allocation lands over granules in `occ`.
 
 type Two = Two(List Int) (List Int)
 

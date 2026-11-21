@@ -461,9 +461,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   `is_large` uniformization (~9 branch sites — do it before the generational step multiplies them);
   single ownership of the "keep ≥ 1 normal region" invariant; close the OBJ tag-write window by
   passing the tag into the alloc path.
-- [ ] `P3` **Sweep pass fusion** — pass 3 re-walks every region calling `slot_bytes` per live
-  slot; fusible into pass 1 if freelist entries from released regions are handled. Only worth it if
-  gc-profile shows sweep dominated by the extra pass.
 
 **Strings and data representation**
 
@@ -2460,16 +2457,15 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   does not contradict the "string concatenation was the wrong target" correction, and why fixing it
   hides the byte-blind GC trigger rather than closing it. Whether the fix collapses the curve is
   unmeasured.
-- [ ] `P2` **Vector element bytes moved from `malloc` to the arena's fixed size classes, and
-  nothing measures what that retains.** A small `Vec`'s elements now live in its own slot, so a
-  200-element vector holds a class-102 slot that only another ~200-element vector can reuse, where
-  before it was a `malloc` block libc could coalesce and hand back at any size. `sprout_gc_sweep`
-  returns memory to the OS only when a whole 1 MiB region has no live and no poison slot, so a
-  phase-structured workload (many 200-element vectors, then many 40-element ones) keeps the
-  class-102 slots for the rest of the run. Commit 4535204c measured peak RSS *down* on two shapes,
-  so this is a suspected counter-pressure, not a known regression — but no instrument reports
-  retained-by-class arena bytes, so neither direction can be checked today. Prior art and a field
-  set to copy (GHC ships this census): `docs/gc-size-classes-v0.md` §6.
+- [ ] `P2` **Vector element bytes moved from `malloc` into the arena, and nothing measures what
+  that retains.** A small `Vec`'s elements now live in its own slot, where before they were a
+  `malloc` block libc could coalesce and hand back at any size. A freed slot is a hole in `occ`
+  that any request that fits can take (`sprout_holes_take`), so reuse is no longer by exact class,
+  but the arena still returns memory only when a whole 1 MiB region has no live and no poison slot
+  (`sprout_sweep_release_regions`), and a hole too small for the next request stays unused. Commit
+  4535204c measured peak RSS *down* on two shapes, so this is a suspected counter-pressure, not a
+  known regression: no instrument reports hole sizes or bytes held below the bump marks. Prior art
+  and a field set to copy (GHC ships this census): `docs/gc-size-classes-v0.md` §6.
 - [ ] `P3` **`opt --passes=verify` can abort in teardown, and `_test-stdlib` reports it as IR
   INVALID.** Seen once on 2026-09-26, homebrew LLVM 23.1.1 on macOS arm64: verification succeeded,
   then `Module::~Module` -> `BasicBlock::eraseFromParent` aborted in libsystem_malloc. The harness
@@ -2478,23 +2474,15 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   `ir-golden-diff` showed 0 differences across 66 files. Worth distinguishing a verifier *finding*
   (opt prints an error and exits 1) from a *crash* (signal, no finding) at the three call sites, so
   the next one says "opt crashed" and, ideally, retries once.
-- [ ] `P2` **The class freelists are exact-fit, so a reclaimed remainder usually goes unused.**
-  `g_freelist` is indexed by `slot_bytes/16` and `sprout_gc_alloc_block` pops only that class, so a
-  free 4064-byte slot is invisible to the 4080-byte request beside it and to every 32-byte one.
-  So `sprout_vec_release_inline_tail` mostly makes bytes *reclaimable*, not reused; pages return
-  to the OS only when a whole 1 MiB region empties; and the trigger's footprint floor grows ~6× in
-  RSS when phases take turns across classes (`docs/gc-trigger-v0.md` §6.2.1). Options and prior
-  art: `docs/gc-size-classes-v0.md` — re-carve a larger free slot for a class-k request (the split
-  writes that header today); coalesce adjacent FREE slots in the sweep walk, which needs a
-  `slotmap_clear` or HDRCHECK's "no start bit inside a step" assert fires; or make regions
-  single-class, as five of six comparable heaps do. Unmeasured; needs the entry above's instrument.
-- [ ] `P3` **After a load spike, every full collection walks the peak's slots.** The galaxy client
+- [ ] `P3` **After a load spike, every major sweeps the peak's bitmap words.** The galaxy client
   (uncharted-suns `game/app.sprout`) peaks near 185k objects while loading, then holds ~1,550
-  live. Its 9 regions stay, since the survivors are spread over all of them and the sweep frees a
-  region only when it holds none, so each major walks 265k slots: p50 1,057 µs, max 1,945, 49 per
-  1,200 frames. Minors skip the walk (p50 30 µs); GC is ~142 µs per frame. Every region holds a
-  live slot, so skipping empty regions saves nothing; the walk must skip free runs inside a
-  region, or the survivors must move. Unmeasured. `bench/results-2026-11-09-galaxy-gc.md`.
+  live. Its 9 regions stay, since the survivors are spread over all of them and a region is
+  released only when it holds none. `sprout_holes_sweep_region` reads every word below each held
+  region's bump (`region_bump_words`, up to 1,024 per region), live or free, so a major costs
+  words in proportion to the peak heap. Measured on the free-list collector (265k slots per major:
+  p50 1,057 µs, max 1,945, 49 per 1,200 frames); the bitmap sweep is unmeasured. Minors skip
+  regions with no young object. If it matters: skip all-zero runs of `occ`, or move survivors.
+  `bench/results-2026-11-09-galaxy-gc.md`.
 - [ ] `P3` **`http_log_middleware` overflows in `wall_loop`.** The bench sums `time.wall_micros()`
   (~1.76e15) over 1,000,000 iterations in `bench/http_log_middleware/`, so the fifth of its six
   phases traps on Int overflow (since 61fd1617, 2026-09-23) and `fmt_loop` never runs. Every GC
@@ -2508,6 +2496,19 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   are its only elapsed-time uses, so the fix is one call site. It removes NTP and clock-change
   artifacts from `SPROUT_DEBUG_GC`'s `elapsed_us`, and does **not** explain the unattributable
   pause tail filed below — both clocks count descheduled time.
+- [ ] `P3` **`bench/gc_place`'s calibration has no runtime to match.** The replay's `base` policy
+  models the removed free-list collector, so on a trace from the shipping runtime it reads
+  `CALIBRATION MISS`, and `run.sh` no longer fails on that: the check that tied the replay to a
+  real trace is gone. `holes-ovf-tails` follows the runtime's allocation path (an overflow cursor
+  above 256 B, a freed tail reused at once by exact class); it takes the lowest-region tail where
+  the runtime's list is LIFO (`g_hole_tails`). Fix: calibrate that policy against the trace's `E`
+  records (regions, large regions, free count) and fail `run.sh` on a miss, or retire `base`.
+  `bench/gc_place/replay.c`.
+- [ ] `P3` **`sprout_heap_lookup_region` still rejects a FREE header.** Nothing writes
+  `SPROUT_HEAP_FREE` since the free-list sweep went, so that branch is dead on a hot, inlined
+  path (mark, drain, write barrier). Removing it, and the FREE kind if nothing else needs it (the
+  census name, GENCHECK and HDRCHECK read it), changes every inlined lookup and needs a perf A/B
+  (`bench/gc_minor/ab.sh`). `runtime/sprout_word.h`, `runtime/sprout_runtime.c`.
 - [ ] `P3` **A program cannot place a collection in its own frame — `sprout_gc_collect` is
   `static`.** A game with a 17.1 ms budget would rather take a major (~1 ms on the galaxy client)
   after present than wherever the allocation threshold lands, and OCaml exposes exactly this as
@@ -2515,15 +2516,15 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   barrier. **Requires approval and is NOT approved**: exposing it is a new builtin (AGENTS.md
   "Builtin vs Stdlib" 4–6), justified on the impossible-in-Sprout ground rather than performance.
   Design, prior art and the reason incremental collection is *not* recommended yet:
-  `docs/gc-frame-budget-v0.md`, which also splits the game's pause ~65% mark / ~35% sweep and
-  notes that a resumable sweep needs the generation-scoped freelists entry above.
+  `docs/gc-frame-budget-v0.md`, which also splits the game's pause ~65% mark / ~35% sweep (on the
+  free-list collector) and notes that the sweep is already per region.
 - [ ] `P3` **The GC pause tail is unattributable — `SPROUT_DEBUG_GC` cannot separate collector
   work from machine noise.** `docs/gc-generational-v0.md` §13.4: http_log_middleware's slowest
   collections ran 3.1–8.5 ms against a 33 µs median with identical `live`, `swept`, `marked` and
   region counts, and the same binary showed max 182 µs in one run and 8,516 µs in another. So no
   pause claim past p99 can be made from this instrument, which matters the moment anyone asks
-  whether a frame was dropped. Needs a per-phase timer inside `sprout_gc_collect` (mark / sweep
-  pass 1 / pass 2 / region release) and a quiet machine; the per-cycle `elapsed_us` already logged
+  whether a frame was dropped. Needs a per-phase timer inside `sprout_gc_collect` (mark / sweep /
+  region release) and a quiet machine; the per-cycle `elapsed_us` already logged
   is the aggregate and cannot be decomposed after the fact.
 - [ ] `P2` **nqueens allocates one `Vec` wrapper per `vec_set` — 16.7M per N=12 run**, which is its
   whole object-allocation count. Measured while landing nullary interning, which moved nqueens by 7
