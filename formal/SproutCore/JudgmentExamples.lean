@@ -25,7 +25,6 @@ cannot come from the judgment being empty.
 | `r5let_rejected` | `let boom = print_str("x")` | §5.2 |
 | `r5arity_rejected` | `print_str()`: a named `fn` is called with exactly its arity | §5.3 |
 | `r5zero_rejected` | `h()` for `h: Int -> Int`: no arguments to an arrow that takes some | §5.3 |
-| `okLetAnnIO_typed` | `let f : a -> a !{IO} = \(h: Int -> Int) -> h` (accepted) | §7 rule 9 |
 | `r9ret_rejected` | `fn f(x: Int) -> Int -> Int !{IO} = do print_str("a"); \y -> y` | §7 rule 9 |
 
 Rule 15's first example, `fn f(x: a) -> Int = x + 1`, needs `+`, which Core does not have. `x`
@@ -35,7 +34,9 @@ returned at `Int` forces `a = Int` in the same way, and is the nearest expressib
 at two types (omitted and written annotations), `okJoin_typed` a peer join of a pure and an
 `!{IO}` function into an `!{IO}` slot, `okContra_typed` the contravariant twin of `r8contra`,
 `okMain_typed` a `main` with a `do` block, `okRetIO_typed` the innermost-arrow reading of a
-signature's `!{IO}`. The `#guard`s at the end record that the checker gives the same verdict on
+signature's `!{IO}`, `okLetAnnIO_typed` `let f : a -> a !{IO} = \(h: Int -> Int) -> h`, where
+`a` is solved to an arrow and the refusal of an `!{IO}` arrow with an arrow result (§7 rule 9)
+does not apply, since it is on the written result. The `#guard`s at the end record that the checker gives the same verdict on
 every program here, except the one the BACKLOG entry names (`okRetIO`).
 -/
 
