@@ -937,6 +937,8 @@ test-lean-oracle: bootstrap-from-seed
   $O "${COMMON[@]}" --count 200 --plant no-local-let-mono --expect disagreement 2>&1 | tail -n 2
   echo "== planted printer bug =="
   $O "${COMMON[@]}" --count 40 --plant printer-bug --expect harness-error 2>&1 | tail -n 2
+  echo "== planted low fuel: every cut-off is a harness error, none a verdict =="
+  $O "${COMMON[@]}" --count 100 --plant low-fuel --expect fuel-error 2>&1 | tail -n 2
   echo "== small runs pass: an allowlist entry the run did not sample is not stale =="
   $O "${COMMON[@]}" --count 15 --seed 7 2>&1 | tail -n 2
   $O "${COMMON[@]}" --count 8 --seed 3 2>&1 | tail -n 2

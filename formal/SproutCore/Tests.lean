@@ -12,13 +12,13 @@ namespace SproutCore.Tests
 
 /-- Running out of fuel is no verdict: `accepts` and `rejects` are both false on it, so a
 `#guard` of either fails. Write `rejects p`, never `!accepts p`. -/
-def accepts (p : Program) : Bool :=
-  match checkProgram {} p with
+def accepts (p : Program) (fuel : Nat := defaultFuel) : Bool :=
+  match checkProgram {} p fuel with
   | .ok _ => true
   | .error _ => false
 
-def rejects (p : Program) : Bool :=
-  match checkProgram {} p with
+def rejects (p : Program) (fuel : Nat := defaultFuel) : Bool :=
+  match checkProgram {} p fuel with
   | .error (.reject ..) => true
   | _ => false
 
@@ -30,6 +30,12 @@ def rejectKey (p : Program) : String :=
   | .error e => e.key?.getD "<fuel>"
 
 private def printStr (s : String) : Expr := .app (.var "print_str") [.str s]
+
+-- A budget of 1 cuts the run off (`.fuel`), and neither `accepts` nor `rejects` calls it a verdict.
+private def fuelProg : Program := ⟨[.mainFn (some (.unit, .io)) (printStr "a")]⟩
+#guard match checkProgram {} fuelProg 1 with | .error .fuel => true | _ => false
+#guard !accepts fuelProg 1 && !rejects fuelProg 1
+#guard accepts fuelProg
 
 /-- `fn ap(f: a -> b, x: a) -> b = f(x)`. -/
 private def apDecl : Decl :=
