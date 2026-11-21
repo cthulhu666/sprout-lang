@@ -53,12 +53,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   (`RetTy.writtenInner`, `okRetIO` in `JudgmentExamples.lean`). A missed accept, so not a T2
   failure; the generator never writes the form, so the oracle cannot see it. Fix `FnInfo.build`,
   add a `Tests.lean` guard, let the generator build the shape.
-- [ ] `P3` **The Lean checker types `print_str` as a value, so it skips the arity check.**
-  A `do` step `print_str()` checks in the model (`preludeEnv` is `.poly`, so the value rule of
-  spec §5.3 types the call as the function itself) and fails in the compiler ("'print_str'
-  expects 1 arguments, got 0"). Make it `.fnPoly 1 0 …`. The generator never miscounts, so the
-  oracle cannot see it. `Judgment.lean` gives it arity 1, so T2 is false until this is fixed:
-  fix it in 1b's provable-checker step (`docs/lean-model-v0.md` §9).
+- [ ] `P3` **The spec does not say a zero-argument call of a non-`()` arrow value is an error.**
+  `fn g(h: Int -> Int) -> Int = h()`, or `let p = print_str in p()`: §5.3 checks a value's argument
+  count at run time, and §7 rule 9 makes `() -> T` the only type taking none, so the call can
+  never match at run time; the spec does not call it a compile error. The compiler ("requires
+  arguments but was called with none"), `Check.peel` and `Peel.rest` (`Judgment.lean`) reject it.
+  State it in §5.3.
 - [ ] `P3` **The spec does not say whether an annotated top-level `let` keeps the annotation's
   effect.** §5.2: the annotation "narrows the binding's type". `let f : Int -> Int !{IO} = \x -> x`
   then `g(f)` with `g(h: Int -> Int)` is accepted by the compiler, so `f` keeps the initialiser's

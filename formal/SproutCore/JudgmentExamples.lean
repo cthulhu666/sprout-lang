@@ -22,6 +22,7 @@ cannot come from the judgment being empty.
 | `r11param/print_rejected` | an `!{IO}` call in a pure `fn` body | §7 rules 8, 11 |
 | `r5let_rejected` | `let boom = print_str("x")` | §5.2 |
 | `r5arity_rejected` | `print_str()`: a named `fn` is called with exactly its arity | §5.3 |
+| `r5zero_rejected` | `h()` for `h: Int -> Int`: zero arguments to an arrow that takes some | §5.3 |
 | `r9ret_rejected` | `fn f(x: Int) -> Int -> Int !{IO} = do print_str("a"); \y -> y` | §7 rule 9 |
 
 Rule 15's first example, `fn f(x: a) -> Int = x + 1`, needs `+`, which Core does not have. `x`
@@ -32,7 +33,7 @@ at two types (omitted and written annotations), `okJoin_typed` a peer join of a 
 `!{IO}` function into an `!{IO}` slot, `okContra_typed` the contravariant twin of `r8contra`,
 `okMain_typed` a `main` with a `do` block, `okRetIO_typed` the innermost-arrow reading of a
 signature's `!{IO}`. The `#guard`s at the end record that the checker gives the same verdict on
-every program here, except the two the BACKLOG entries name (`okRetIO`, `r5arity`).
+every program here, except the one the BACKLOG entry names (`okRetIO`).
 -/
 
 namespace SproutCore.Judgment
@@ -276,7 +277,7 @@ theorem r8arg_rejected : ¬ r8arg.Typed := by
                     obtain ⟨_, rfl, _⟩ := h1
                     obtain ⟨_, rfl, _⟩ := h2
                     simp [Eff.le] at he
-          | rest _ _ _ _ hn => simp at hn
+          | rest _ _ _ _ _ hn => simp at hn
           | over _ _ _ _ _ _ _ hne hlt _ => simp at hlt
 
 /-- `fn r(f: String -> Unit !{IO}) -> (String -> Unit) = f`: a return. -/
@@ -447,7 +448,7 @@ theorem r11param_rejected : ¬ r11param.Typed := by
       simp at hpeel
       cases hpeel with
       | exact => simp [Eff.join] at hε; subst hε; simp [Eff.le] at heff
-      | rest _ _ _ _ hn => simp at hn
+      | rest _ _ _ _ _ hn => simp at hn
       | over _ _ _ _ _ _ _ _ hlt _ => simp at hlt
 
 /-- `fn f() -> Unit = print_str("x")`: the callee is the prelude's `print_str`. -/
@@ -470,7 +471,7 @@ theorem r11print_rejected : ¬ r11print.Typed := by
   simp at hpeel
   cases hpeel with
   | exact => simp [Eff.join] at hε; subst hε; simp [Eff.le] at heff
-  | rest _ _ _ _ hn => simp at hn
+  | rest _ _ _ _ _ hn => simp at hn
   | over _ _ _ _ _ _ _ _ hlt _ => simp at hlt
 
 /-- `let boom = print_str("x")`: a top-level `let` must be pure (spec §5.2). -/
@@ -489,7 +490,7 @@ theorem r5let_rejected : ¬ r5let.Typed := by
   simp at hpeel
   cases hpeel with
   | exact => simp [Eff.join] at hε; subst hε; cases hE
-  | rest _ _ _ _ hn => simp at hn
+  | rest _ _ _ _ _ hn => simp at hn
   | over _ _ _ _ _ _ _ _ hlt _ => simp at hlt
 
 /-! ### Spec §5.6: a local `let` is monomorphic -/
@@ -794,8 +795,8 @@ theorem okFnGenW_typed : okFnGenW.Typed := by
 /-! ### Spec §5.3: a named `fn` is called with exactly its arity -/
 
 /-- `fn main() -> Unit !{IO} = do print_str(); ()`. The prelude's `print_str` is a named `fn` of
-arity 1. The compiler rejects the call; the checker accepts it (BACKLOG, "The Lean checker types
-`print_str` as a value"). -/
+arity 1, so the call is an error twice over: `ArityOk` and `Peel` (zero arguments to an arrow that
+takes some). -/
 def r5arity : Program :=
   ⟨[.mainFn (some (.unit, .io)) (.doB [.exprS (.app (.var "print_str") [])] .unit)]⟩
 
@@ -812,6 +813,34 @@ theorem r5arity_rejected : ¬ r5arity.Typed := by
     obtain ⟨tf, ef, ts, ss, ce, εa, hf, har, hpeel, hargs, -, hε1⟩ := h1.app_inv
     have := har "print_str" 1 ⟨0, .arr [.str] .unit .io⟩ rfl rfl
     simp at this
+
+/-- `fn g(h: Int -> Int) -> Int = h()`: a value call with no arguments. Spec §7 rule 9 makes
+`() -> T` the only arrow taking none, so the run-time count check of §5.3 cannot pass. The
+compiler rejects it ("requires arguments but was called with none"). -/
+def r5zero : Program :=
+  ⟨[.fn "g" [("h", some (.arr [.int] .int .pure))] (some (.int, .pure)) (.app (.var "h") [])]⟩
+
+theorem r5zero_rejected : ¬ r5zero.Typed := by
+  intro h
+  obtain ⟨σ, τ, sc, hsk, hnd, ps, r, e, tb, eb, hps, hret, hτ, hbody, hflow, heff⟩ :=
+    single_fn_inv h
+  cases hps with
+  | written x a p prs ps' hel hrest =>
+    cases hrest
+    have e1 : (Ty.arr [.int] .int .pure).elab σ = some (.arr [.int] .int .pure) := rfl
+    rw [e1] at hel
+    obtain rfl := Option.some.inj hel
+    simp [bindParams] at hbody
+    obtain ⟨tf, ef, ts, ss, ce, εa, hf, -, hpeel, hargs, -, hε⟩ := hbody.app_inv
+    obtain ⟨b', hl, hi, rfl⟩ := hf.var_inv
+    simp [List.lookup] at hl
+    subst hl
+    simp [Binding.Inst] at hi
+    subst hi
+    simp at hpeel
+    cases hpeel with
+    | rest _ _ _ _ hn => simp at hn
+    | over _ _ _ _ _ _ _ _ hlt _ => simp at hlt
 
 /-! ### Spec §7 rule 9: `!{IO}` on a function-typed result belongs to its innermost arrow -/
 
@@ -853,7 +882,7 @@ theorem r9ret_rejected : ¬ r9ret.Typed := by
         simp [Eff.join] at hε
         subst hε
         simp [Eff.le] at heff
-      | rest _ _ _ _ hn => simp at hn
+      | rest _ _ _ _ _ hn => simp at hn
       | over _ _ _ _ _ _ _ _ hlt _ => simp at hlt
 
 /-- `fn f(x: Int) -> Int -> Int !{IO} = \y -> y`: the type is `Int -> Int -> Int !{IO}`. The
@@ -1035,7 +1064,7 @@ theorem c5_typed : c5.Typed := by
   exact HasType.lam _ "s" none _ .str .unit .io rfl
     (printCall rfl (HasType.var _ _ (.local .str) _ rfl rfl))
 
-/-! ### The checker agrees on every program above, except two -/
+/-! ### The checker agrees on every program above, except one -/
 
 section agree
 
@@ -1071,11 +1100,12 @@ open SproutCore.Tests
 #guard accepts c15
 #guard !accepts r9ret
 
--- The two divergences. The checker accepts `print_str()` (it types `print_str` as a value), the
--- judgment does not (BACKLOG). And the judgment accepts `-> Int -> Int !{IO}` (spec §7 rule 9,
--- and the compiler), `Check.FnInfo.build` rejects it as ill-formed.
+#guard !accepts r5arity
+#guard !accepts r5zero
+
+-- The one divergence. The judgment accepts `-> Int -> Int !{IO}` (spec §7 rule 9, and the
+-- compiler), `Check.FnInfo.build` rejects it as ill-formed (BACKLOG).
 #guard !accepts okRetIO
-#guard accepts r5arity
 
 end agree
 

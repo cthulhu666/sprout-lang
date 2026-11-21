@@ -45,7 +45,7 @@ theorem Peel.length {t : Ty} {n : Nat} {ss : List Ty} {r : Ty} {e : Eff}
     (h : Peel t n ss r e) : ss.length = n := by
   induction h with
   | exact => rfl
-  | rest ps r e n hn => simp; omega
+  | rest ps r e n _ hn => simp; omega
   | over ps r e n s2 r2 e2 hps hlt _ ih => simp [ih]; omega
 
 theorem Peel.det {t : Ty} {n : Nat} {ss : List Ty} {r : Ty} {e : Eff}
@@ -56,9 +56,9 @@ theorem Peel.det {t : Ty} {n : Nat} {ss : List Ty} {r : Ty} {e : Eff}
     intro ss' r' e' h'
     cases h' with
     | exact => simp
-    | rest _ _ _ _ hn => omega
+    | rest _ _ _ _ _ hn => omega
     | over _ _ _ _ _ _ _ _ hlt _ => omega
-  | rest ps r e n hn =>
+  | rest ps r e n _ hn =>
     intro ss' r' e' h'
     cases h' with
     | exact => omega
@@ -68,7 +68,7 @@ theorem Peel.det {t : Ty} {n : Nat} {ss : List Ty} {r : Ty} {e : Eff}
     intro ss' r' e' h'
     cases h' with
     | exact => omega
-    | rest _ _ _ _ hn => omega
+    | rest _ _ _ _ _ hn => omega
     | over _ _ _ _ s2' r2' e2' _ _ h2' =>
       obtain ⟨h1, h2, h3⟩ := ih h2'
       subst h1 h2 h3

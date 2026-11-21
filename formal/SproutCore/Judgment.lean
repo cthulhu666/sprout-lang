@@ -268,15 +268,20 @@ inductive Join : Ty → Ty → Ty → Prop
 
 /-- spec §5.3: `Peel t n ss r e`: applying a value of type `t` to `n` arguments has slots `ss`,
 result `r` and the call itself performs `e`. A saturating call performs the arrow's effect. Fewer
-arguments than parameters is typed as the rest of the arrow with no effect, because the count is
-checked at run time (spec §5.3). More arguments continue into the result. A `() -> T` takes
-exactly zero (spec §7 rule 9: "calling a `() -> T` requires the empty argument list"). -/
+arguments than parameters, but at least one, is typed as the rest of the arrow with no effect,
+because the count is checked at run time (spec §5.3). More arguments continue into the result. A
+`() -> T` takes exactly zero (spec §7 rule 9: "calling a `() -> T` requires the empty argument
+list"). Zero arguments to any other arrow is no call: spec §7 rule 9 makes `() -> T` the only type
+taking zero arguments, so the run-time count check of §5.3 can never pass. The spec does not say
+this is a compile error; the compiler rejects it ("requires arguments but was called with none")
+and so do the checker and this rule (BACKLOG, "The spec does not say a zero-argument call …"). -/
 inductive Peel : Ty → Nat → List Ty → Ty → Eff → Prop
   -- spec §5.3: a call saturates the arrow and performs its effect
   | exact (ps : List Ty) (r : Ty) (e : Eff) : Peel (.arr ps r e) ps.length ps r e
-  -- spec §5.3: a value applied to fewer arguments is typed as the rest (checked at run time)
+  -- spec §5.3: a value applied to fewer, but some, arguments is typed as the rest (checked at
+  -- run time); spec §7 rule 9: no arrow but `() -> T` takes none
   | rest (ps : List Ty) (r : Ty) (e : Eff) (n : Nat) :
-      n < ps.length → Peel (.arr ps r e) n (ps.take n) (mkArr (ps.drop n) r e) .pure
+      0 < n → n < ps.length → Peel (.arr ps r e) n (ps.take n) (mkArr (ps.drop n) r e) .pure
   -- spec §5.3: more arguments continue into the result, whose effect joins in
   | over (ps : List Ty) (r : Ty) (e : Eff) (n : Nat) (s2 : List Ty) (r2 : Ty) (e2 : Eff) :
       ps ≠ [] → ps.length < n → Peel r (n - ps.length) s2 r2 e2 →
