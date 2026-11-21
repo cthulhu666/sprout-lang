@@ -2,7 +2,8 @@
 
 A side pane (or a band above the prompt) that lists PRs with their CI state, the
 `/sprout-review` runs for each, and the issues those runs found with their status.
-The same plugin ships the `/sprout-review` skill (`skills/sprout-review/`) that writes the ledger.
+The same plugin ships the `/pr-tracker:sprout-review` skill (`skills/sprout-review/`) that writes
+the ledger.
 
 ## Commands
 
@@ -34,8 +35,13 @@ The same plugin ships the `/sprout-review` skill (`skills/sprout-review/`) that 
 ## Loading
 
 In this repo Claude Code loads it as `pr-tracker@skills-dir` in a trusted checkout. No install step.
+Do not install `pr-tracker@sprout` here: an installed marketplace plugin wins over the
+`@skills-dir` copy by manifest name, so worktree edits would stop taking effect
+([name conflicts](https://code.claude.com/docs/en/plugins/loading.md#name-conflicts)).
 In another repo: `/plugin marketplace add cthulhu666/sprout-lang`, then
-`/plugin install pr-tracker@sprout`. `plugin.json` has no `version`, so each commit is an update.
+`/plugin install pr-tracker@sprout`. `plugin.json` has no `version`, so each commit is an update
+([omit `version`](https://code.claude.com/docs/en/plugins/host-marketplace#release-a-new-version):
+"users track your commits instead").
 `.claude-plugin/types/` is written on first load and is gitignored; `tsc -p` needs the plugin to
 have loaded once, because `tsconfig.json` extends it.
 

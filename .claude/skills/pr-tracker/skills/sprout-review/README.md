@@ -24,5 +24,5 @@ is at `297cbed7`.
 ## Files
 
 - `SKILL.md`: the skill.
-- `../../scripts/review_ledger.sh`: the ledger.
-- `../../`: the `pr-tracker` plugin, which ships this skill and the `/prs` pane that reads the ledger.
+- `.claude/skills/pr-tracker/scripts/review_ledger.sh`: the ledger.
+- `.claude/skills/pr-tracker/`: the `pr-tracker` plugin, which ships this skill and the `/prs` pane that reads the ledger.

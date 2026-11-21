@@ -133,7 +133,7 @@ async function refreshPrs($: Dollar, round: PrRound): Promise<void> {
   }
 }
 
-/** The repo root, so the script resolves from a subdirectory, and the dirs it reads. */
+/** The repo root, which is the script's cwd and part of the ledger identity, and the dirs it reads. */
 type Ledger = { root: string; dirs: string[] }
 
 /** Runs the plugin's ledger script with the repo root as cwd; null when it fails or times out. */
