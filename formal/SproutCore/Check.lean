@@ -634,12 +634,16 @@ def Node.refs (names : List String) : Node → List String
 
 /-- Group order, dependencies first: repeatedly take the first group whose references are its own
 members or already placed. The last argument bounds the recursion: a group goes in per step,
-so `#groups + 1` never runs out with groups pending. -/
+so `#groups + 1` never runs out with groups pending. A member with no `edges` entry is an
+internal error, not a node without references: it would look ready too early. -/
 def orderGroups (edges : Array (List Nat)) (pending order : List (List Nat)) :
     Nat → Except CErr (List (List Nat))
   | 0 => if pending.isEmpty then pure order else throw (.reject "internal" "no group order")
   | b + 1 =>
     if pending.isEmpty then pure order else
+    if pending.any (·.any (· ≥ edges.size)) then
+      throw (.reject "internal" "no edges for a node")
+    else
     let ready := pending.filter fun g =>
       g.all fun i => (edges[i]?.getD []).all fun j => g.contains j || order.any (·.contains j)
     match ready with
@@ -663,8 +667,11 @@ def reachSet (reach : Array (Array Bool)) (i j : Nat) : Array (Array Bool) :=
   reach.set! i ((reach[i]?.getD #[]).set! j true)
 
 /-- The part of the checker that spends no fuel: duplicate and declaration-order rules, the
-reference graph and the binding groups in dependency order. Every array read is total (`getD`):
-the indices are in range, but nothing here depends on that. -/
+reference graph and the binding groups in dependency order. A read that selects a node or an edge
+list is checked, and an index out of range is an `internal` rejection, never a default node: a
+default `fn` would pass the declaration-order rules. The `reach` matrix reads (`reachAt`,
+`reachSet`) stay total: every index is a loop bound over `[0:n]` or an edge target that was
+checked as a node index when the edge was made. -/
 def checkPlan (p : Program) : Except CErr Plan := do
   let mut nodes : Array Node := #[]
   -- each `main` with the number of nodes declared above it
@@ -687,8 +694,9 @@ def checkPlan (p : Program) : Except CErr Plan := do
     let rs := nd.refs names
     let mut es := []
     for r in rs do
-      let j := (idx r).getD 0
-      match nd, nodes[j]?.getD default with
+      let some j := idx r | throw (.reject "internal" s!"no node named {r}")
+      let some tgt := nodes[j]? | throw (.reject "internal" s!"no node {j}")
+      match nd, tgt with
       | .fnN _, .letN .. =>
         -- spec §7 rule 16: a `fn` may not be moved above a top-level `let` it depends on
         if j > i then throw (.reject "fn-before-let" s!"{nd.name} precedes the `let` {r} it uses")
@@ -702,13 +710,16 @@ def checkPlan (p : Program) : Except CErr Plan := do
   for (pos, _, body) in mains do
     for r in (fv [] body).filter names.contains do
       -- spec §7 rule 16: `main` is a `fn`, so it may not sit above a top-level `let` it uses
-      if (idx r).getD 0 ≥ pos && ((nodes[(idx r).getD 0]?.getD default).isLet) then
+      let some j := idx r | throw (.reject "internal" s!"no node named {r}")
+      let some tgt := nodes[j]? | throw (.reject "internal" s!"no node {j}")
+      if j ≥ pos && tgt.isLet then
         throw (.reject "fn-before-let" s!"main precedes the `let` {r} it uses")
   -- reachability, to find binding groups (minimal mutually dependent sets)
   let n := nodes.size
   let mut reach : Array (Array Bool) := Array.replicate n (Array.replicate n false)
   for i in [0:n] do
-    for j in edges[i]?.getD [] do
+    let some es := edges[i]? | throw (.reject "internal" s!"no edges for node {i}")
+    for j in es do
       reach := reachSet reach i j
   for k in [0:n] do
     for i in [0:n] do
@@ -730,6 +741,10 @@ def checkPlan (p : Program) : Except CErr Plan := do
 def runPlan (rules : Rules) (pl : Plan) : M Unit := do
   let mut env := preludeEnv
   for g in pl.order do
+    -- `checkPlan` builds `order` from node indices; an index with no node or no edge list is an
+    -- internal error, not a default node (it would pass the declaration-order rules)
+    unless g.all (fun i => i < pl.nodes.size && i < pl.edges.size) do
+      reject "internal" "a group names a node the plan lacks"
     let members := g.map fun i => pl.nodes[i]?.getD default
     let fnMembers := members.filterMap fun nd => match nd with | .fnN f => some f | _ => none
     match members with
