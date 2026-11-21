@@ -294,7 +294,7 @@ logs no minor lowered the region count (self-compile 0 of 63, mutvec_int 0 of 35
 every survivor rarely leaves a region empty); in the K2 N1 prototype 105 of mutvec_int's 791
 minors did, so step 2 measures how often the fallback runs.
 
-**The free count.** The footprint floor reads `g_gc_freelist_len`, which the staged build
+**The free count.** The footprint floor reads `g_gc_free_slots`, which the staged build
 counts during the walk (`fl_region_commit`). A young-only minor keeps it incrementally: the count
 after the last sweep, minus free-list reuses, plus slots it lists, plus inline-tail splits. Only
 listed slots count: in lineage mode (`sprout_gc_lineage_on`) a dead object is poisoned, not listed.
@@ -448,7 +448,7 @@ block the region points to like `slotmap` (NULL for a large region), so region-t
 removals still move a small `SproutRegion`. The block holds no mask and no count: a scan tests
 the head, and a released region has no live and no poisoned slot, so every slot below `bump` is
 FREE and listed. Releasing it drops its lists in O(1) and subtracts the popcount of its slotmap
-bits below `bump` from `g_gc_freelist_len`. The free count stays in slots, so the footprint
+bits below `bump` from `g_gc_free_slots`. The free count stays in slots, so the footprint
 floor, `just gc-trigger-check`, `bench/gc_trigger/measure.sh` and the peak-slots metric keep
 their unit.
 
@@ -473,7 +473,7 @@ A miss in every region bumps, as today.
 **The reuse path.** With the global lists it pops a list and calls `region_find` for the young
 bit. With per-region lists `g_fl_cur[c]` caches the block of the cursor's region
 (`g_fl_cur[c] == g_regions[g_fl_cursor[c]].fl`, NULL past the table). A hit pops that block's
-head and decrements `g_gc_freelist_len`, nothing else; the young bit takes the region as
+head and decrements `g_gc_free_slots`, nothing else; the young bit takes the region as
 `g_regions[g_fl_cursor[c]]`, so `region_find` goes. A miss calls an out-of-line scan that tests
 one head per region from the cursor's successor, at most once per region per class between
 collections, and moves the cursor and the cached block. Blocks are heap-allocated, so a table
@@ -521,7 +521,7 @@ locally, inside CPU noise.
 - the `types:` census subtracts each dead object with age ≥ 1 (`sprout_gc_census_sub`);
   HDRCHECK requires a slotmap bit at every slot a walk stops on, FREE ones included; GENCHECK
   and `SPROUT_FL_VERIFY` count FREE slots by class; lineage corpses keep their slotmap bit;
-- the free count (`g_gc_freelist_len`) is in slots, and the footprint floor, `just
+- the free count (`g_gc_free_slots`) is in slots, and the footprint floor, `just
   gc-trigger-check` and the C tests `promote_age.c` and `young_sweep.c` read it;
 - a freed inline vector tail is reusable at once (`sprout_vec_release_inline_tail`;
   `tests/gc_gen/inline_tail_reuse.spr`, `cursor_lower_nostress.spr`).
@@ -740,9 +740,9 @@ Each premise has a test or a check that fails when it breaks.
    region. The check then exempts the one ordinary region with `bump == 0` the minor may open
    (§5.6).
 8. **Step 4.** Every entry on a region's lists is a FREE slot of that region, of the list's class,
-   and `g_gc_freelist_len` equals the entries over all regions (a released region has every slot
+   and `g_gc_free_slots` equals the entries over all regions (a released region has every slot
    below `bump` FREE and listed). `SPROUT_FL_VERIFY=1` checks each region's lists against a walk
-   of that region, and the total against `g_gc_freelist_len`.
+   of that region, and the total against `g_gc_free_slots`.
 9. **Step 4.** Between collections, no region below a class's cursor has a free slot of that
    class, and each cached block is its cursor region's. `SPROUT_FL_VERIFY=1` checks both at each
    allocation that advances a cursor, and the cache after every collection.
@@ -836,7 +836,7 @@ and premise 6's free count changes unit.
    - With `SPROUT_GC_MINOR=0`, the self-compile's cycle lines (timing fields removed) and output
      equal those of the runtime before the flip.
 3. **Done.** `SPROUT_GC_PROMOTE_AGE`, `SPROUT_GC_NURSERY` and `SPROUT_GC_NURSERY_SURVIVE` are
-   retired: set to a non-empty value they abort at startup with a message naming the removal. K = 3
+   retired: set to a non-empty value they exit 1 at startup with a message naming the removal. K = 3
    and c = 2 are fields of `g_gen` that a C test may set. `SPROUT_GC_NURSERY_SHARE` stays, since s
    is the one setting that moves the memory-for-CPU trade by workload: s = 0.5 kept peak slots at
    or under 1.00× minor-off on every workload at 0.88 self-compile CPU, and s = 2 collects less
@@ -848,7 +848,7 @@ and premise 6's free count changes unit.
    of its class reuses, and one that frees a slot below a class cursor between collections
    (`cursor_lower_nostress`). Stdout must equal the global lists'. `free`, region and collection
    counts may differ: allocation order changes which regions empty, and the footprint floor reads
-   `g_gc_freelist_len`. The VM A/B on the §14.8 set reports all three, with each workload's
+   `g_gc_free_slots`. The VM A/B on the §14.8 set reports all three, with each workload's
    spread, and the reuse path's cost with minors off.
 
    **Implemented behind the switch, removed in step 6** ([results](../bench/results-2026-11-12-gc-region-lists.md)).
@@ -889,9 +889,10 @@ and premise 6's free count changes unit.
    and the old FL_VERIFY multiset oracle and HDRCHECK slot walk.
 
    **Implemented.** The free-list collector and both switches are gone; each switch is retired
-   (set to a non-empty value, it aborts at startup with a message naming the removal). `walked=`
-   counts bitmap words, so `just gc-walk-check` and `gc-trigger-check`'s walk bound went with it.
-   The footprint floor stays.
+   (set to a non-empty value, it exits 1 at startup with a message naming the removal). `walked=`
+   counts bitmap words, so `just gc-walk-check` and `gc-trigger-check`'s per-slot walk bound went
+   with it; `gc-trigger-check` bounds the collection count of `test_gc_walk_sparse` instead
+   (docs/gates.md). The footprint floor stays.
 
 ## 8. On landing
 

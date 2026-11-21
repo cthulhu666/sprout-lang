@@ -172,8 +172,8 @@ typedef struct {
   const char* field_kinds; /* one char per field: i=Int/Char b=Bool s=String p=ADT/closure _=type-var */
   /* Nullary ctors only: the shared object every construction of this tag
    * returns, or NULL if none is cached.  WEAK — the object is an ordinary
-   * managed allocation, and sprout_gc_invalidate_singleton clears this slot
-   * when a sweep reclaims it, so nothing here needs rooting. */
+   * managed allocation, and sprout_holes_sweep_singletons clears this slot
+   * when the mark did not reach it, so nothing here needs rooting. */
   void* singleton;
 } CtorMeta;
 
@@ -299,7 +299,7 @@ static long long g_debug_gc_swept = 0;
 static long long g_debug_gc_walked = 0;
 /* The free count: set by each sweep (sprout_holes_free_slots), in granules over the mean live slot
    size.  The trigger's footprint floor reads it (sprout_gc_collect_with_reason). */
-static long long g_gc_freelist_len = 0;
+static long long g_gc_free_slots = 0;
 /* The intern table is malloc'd outside the arena and never freed, so neither the
    alloc counters nor the live census can see it. Reported so a program whose keys
    are COMPUTED shows its growth instead of hiding it. Unguarded, unlike the
@@ -718,7 +718,7 @@ static void sprout_gc_log_cycle(
     g_arena_region_count,
     g_overflow_region_count,
     walked_delta,
-    g_gc_freelist_len,
+    g_gc_free_slots,
     kind_suffix,
     sweep_us
   );
@@ -987,7 +987,6 @@ static void sprout_gc_retired_switch(const char* name, const char* message) {
 }
 
 static int g_holes_verify;   /* SPROUT_FL_VERIFY=1, set in sprout_gc_gen_init */
-static int sprout_fl_verify_on(void);
 
 /* Reads the generational switches at startup (sprout_set_argv), so a bad value fails before
  * the program runs, not inside the atexit collection.  SPROUT_GC_MINOR is on when unset or
@@ -1012,7 +1011,8 @@ static void sprout_gc_gen_init(void) {
   if (m == NULL || m[0] == '\0' || strcmp(m, "1") == 0) g_gen.on = 1;
   else if (strcmp(m, "0") == 0) g_gen.on = 0;
   else sprout_fail("SPROUT_GC_MINOR: expected 0 or 1");
-  g_holes_verify = sprout_fl_verify_on();
+  const char* fv = getenv("SPROUT_FL_VERIFY");
+  g_holes_verify = (fv != NULL && fv[0] == '1');
   if (!g_gen.on) return;
   const char* c = getenv("SPROUT_GC_GENCHECK");
   g_gen.check = (c != NULL && c[0] == '1');
@@ -1516,15 +1516,6 @@ static void sprout_at_hint_sync(void);
 #else
 #define SPROUT_AT_HINT_SYNC() ((void)0)
 #endif
-
-static int g_fl_verify = -1;
-static int sprout_fl_verify_on(void) {
-  if (g_fl_verify < 0) {
-    const char* e = getenv("SPROUT_FL_VERIFY");
-    g_fl_verify = (e && e[0] == '1') ? 1 : 0;
-  }
-  return g_fl_verify;
-}
 
 /* Round up to next multiple of 16. */
 static inline size_t round16(size_t n) {
@@ -2161,7 +2152,7 @@ static void sprout_at_gc_end(long long cycle, int kind, long long walked) {
   uint64_t large = 0;
   for (size_t i = 0; i < g_region_count; i++) large += (uint64_t)g_regions[i].is_large;
   uint64_t v[7] = { (uint64_t)cycle, (uint64_t)kind, (uint64_t)g_managed_heap_count,
-                    (uint64_t)g_gc_freelist_len, (uint64_t)g_region_count - large, large,
+                    (uint64_t)g_gc_free_slots, (uint64_t)g_region_count - large, large,
                     (uint64_t)walked };
   sprout_at_emit('E', v, 7);
 }
@@ -3068,26 +3059,22 @@ static inline void gc_mark_wl_push(void* payload) {
 
 /* The census line counts live objects by kind, large ones included.  The marker counts each
  * object it marks at a major (g_holes_census), and nothing subtracts. */
-static inline void sprout_gc_census_adjust(SproutHeapKind kind, unsigned long long aux,
-                                           long long d) {
+static inline void sprout_gc_census_add(SproutHeapKind kind, unsigned long long aux) {
   switch (kind) {
-    case SPROUT_HEAP_OBJ:     g_gc_live_obj += d;     break;
-    case SPROUT_HEAP_CLOSURE: g_gc_live_closure += d;  break;
-    case SPROUT_HEAP_VECTOR:  g_gc_live_vec += d;      break;
-    case SPROUT_HEAP_MAP:     g_gc_live_map += d;      break;
-    case SPROUT_HEAP_BYTES:   g_gc_live_bytes += d;    break;
-    case SPROUT_HEAP_BUILDER: g_gc_live_builder += d;  break;
-    case SPROUT_HEAP_TUPLE:   g_gc_live_tuple += d;    break;
-    case SPROUT_HEAP_REF:     g_gc_live_ref += d;      break;
+    case SPROUT_HEAP_OBJ:     g_gc_live_obj++;      break;
+    case SPROUT_HEAP_CLOSURE: g_gc_live_closure++;  break;
+    case SPROUT_HEAP_VECTOR:  g_gc_live_vec++;      break;
+    case SPROUT_HEAP_MAP:     g_gc_live_map++;      break;
+    case SPROUT_HEAP_BYTES:   g_gc_live_bytes++;    break;
+    case SPROUT_HEAP_BUILDER: g_gc_live_builder++;  break;
+    case SPROUT_HEAP_TUPLE:   g_gc_live_tuple++;    break;
+    case SPROUT_HEAP_REF:     g_gc_live_ref++;      break;
     case SPROUT_HEAP_CSTR:
-      g_gc_live_cstr += d;
-      g_gc_live_cstr_bytes += d * (long long)aux;
+      g_gc_live_cstr++;
+      g_gc_live_cstr_bytes += (long long)aux;
       break;
     default: break;
   }
-}
-static inline void sprout_gc_census_add(SproutHeapKind kind, unsigned long long aux) {
-  sprout_gc_census_adjust(kind, aux, 1);
 }
 static void sprout_gc_census_reset(void) {
   g_gc_live_obj = g_gc_live_closure = g_gc_live_vec = 0;
@@ -3425,28 +3412,12 @@ static void sprout_release_payload_extras(void* payload, SproutHeapKind kind) {
   }
 }
 
-/* Clear the cached singleton of a payload being reclaimed, so the next
- * construction allocates a fresh one instead of handing back freed memory.
- *
- * Keyed on the dying object's OWN tag, read from the header the caller already
- * holds, so the cost is one lookup per reclaimed nullary object — and nothing at
- * all for every other kind.  Scanning a list of singleton globals (what this did
- * while there were four) is what stopped interning from generalising: it is
- * O(singletons) on every reclaimed object of any kind. */
-static void sprout_gc_invalidate_singleton(uint64_t h, void* payload) {
-  if (sprout_hdr_kind(h) != SPROUT_HEAP_OBJ) return;
-  unsigned long long aux = sprout_hdr_aux(h);
-  if ((aux & SPROUT_OBJ_ARITY_MASK) != 0) return;   /* has fields: never interned */
-  CtorMeta* meta = find_ctor((long long)(aux >> SPROUT_OBJ_ARITY_BITS));
-  if (meta != NULL && meta->singleton == payload) meta->singleton = NULL;
-}
-
 /* Return the slot walk stride for a header word.
- * FREE or POISON: aux field (h>>14) floored at 16 bytes.
+ * POISON: aux field (h>>14) floored at 16 bytes.
  * Any live kind: slot_bytes(kind, aux). */
 static inline size_t sprout_slot_step(uint64_t h) {
   uint64_t kind_bits = h & 0xFF;
-  if (kind_bits == SPROUT_HEAP_FREE || kind_bits == SPROUT_GC_POISON) {
+  if (kind_bits == SPROUT_GC_POISON) {
     size_t ssize = (size_t)(h >> 14);
     return (ssize < 16) ? 16 : ssize;
   }
@@ -3476,8 +3447,8 @@ static size_t slotmap_next_start(const SproutRegion* r, size_t from, size_t to) 
  * into the middle of a slot and is reading a payload word as a header. */
 static inline int sprout_slot_kind_known(uint64_t kind_bits) {
   switch (kind_bits) {
-    case SPROUT_HEAP_FREE:    case SPROUT_HEAP_OBJ:     case SPROUT_HEAP_CLOSURE:
-    case SPROUT_HEAP_VECTOR:  case SPROUT_HEAP_MAP:     case SPROUT_HEAP_BYTES:
+    case SPROUT_HEAP_OBJ:     case SPROUT_HEAP_CLOSURE: case SPROUT_HEAP_VECTOR:
+    case SPROUT_HEAP_MAP:     case SPROUT_HEAP_BYTES:
     case SPROUT_HEAP_BUILDER: case SPROUT_HEAP_TUPLE:   case SPROUT_HEAP_REF:
     case SPROUT_HEAP_CSTR:    case SPROUT_GC_POISON:
       return 1;
@@ -3565,7 +3536,6 @@ static inline void sprout_gc_free_large(SproutRegion* r, uint64_t h, int lineage
 #if defined(SPROUT_GC_ALLOCTRACE)
   sprout_at_free(r, payload);
 #endif
-  sprout_gc_invalidate_singleton(h, payload);
   if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
   sprout_release_payload_extras(payload, kind);
   free(r->base);
@@ -3747,7 +3717,7 @@ static void sprout_holes_recount(void) {
     live += r->live_count;
   }
   g_gen.old_count = old;
-  g_gc_freelist_len = sprout_holes_free_slots(bumped, occupied, live);
+  g_gc_free_slots = sprout_holes_free_slots(bumped, occupied, live);
 }
 
 static void sprout_holes_sweep(void) {
@@ -4096,7 +4066,7 @@ static void sprout_gc_check_sweep(void) {
     sprout_gc_check_count_fail("heap count", NULL, g_managed_heap_count, t.live + t.large);
   if (g_gen.old_count != t.old) sprout_gc_check_count_fail("old count after the sweep", NULL, g_gen.old_count, t.old);
   const long long free_slots = sprout_holes_free_slots(t.bumped, t.occupied, t.live);
-  if (g_gc_freelist_len != free_slots) sprout_gc_check_count_fail("free count", NULL, g_gc_freelist_len, free_slots);
+  if (g_gc_free_slots != free_slots) sprout_gc_check_count_fail("free count", NULL, g_gc_free_slots, free_slots);
 }
 
 static void sprout_gc_collect(void) {
@@ -4213,7 +4183,7 @@ static void sprout_gc_collect_with_reason(const char* reason) {
     if (target < g_gc_threshold_base) target = g_gc_threshold_base;
     if (floor_on) {
       long long footprint_floor = g_managed_heap_count
-        + (g_managed_heap_count + g_gc_freelist_len) / g_gc_footprint_k;
+        + (g_managed_heap_count + g_gc_free_slots) / g_gc_footprint_k;
       if (target < footprint_floor) target = footprint_floor;
     }
     if (g_gc_adapt_cap > 0 && target > g_gc_adapt_cap) target = g_gc_adapt_cap;

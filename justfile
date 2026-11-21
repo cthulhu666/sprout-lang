@@ -4026,10 +4026,10 @@ test-stress: bootstrap-from-seed
   # test_gc_vec_buffer_heap_elems: a vector's elements live in its own slot while
   # they fit, so every vector allocation picks a size class by element count and a
   # push out of the inline area SPLITS the slot, handing the tail back mid-mutator
-  # — heap shapes no other stress file produces. It is cheap here (2.2s). What it
-  # is NOT is the oracle for that split: of four broken versions, stress catches
-  # one and only as a livelock, which is why the timeout above exists. The file's
-  # header comment has the measured table; HDRCHECK is what names all four.
+  # — heap shapes no other stress file produces. It is cheap here (0.09s). What it
+  # is NOT is the oracle for that split: stress passes all four broken versions of
+  # the release. The file's header comment has the measured table; HDRCHECK and
+  # FL_VERIFY name three each, and between them all four.
   # test_linear_reuse: a reused linear cell must stay rooted across an allocating call between
   # the match and the rebuild; `tock` is entered by a tail call, so only its own token roots it.
   # test_match_tuple_scrutinee: a tuple-literal match builds no tuple, so fresh heap elements
@@ -4047,24 +4047,18 @@ test-stress: bootstrap-from-seed
   # STRESS_FILES as each is fixed (an UNEXPECTED PASS flags that it's ready).
   STRESS_XFAIL=""
   # Files that run under stress but WITHOUT FL_VERIFY, because the two together
-  # were disproportionate.  test_ir_codegen_ctors is the serial critical path of
-  # this whole recipe: measured with the removed free-list oracle (5 jobs locally) it
-  # ran 180s under stress alone and 434s with the oracle, while all 15 other files
-  # finished in under 2s each either way (CI: 300s -> 883s for the step).  The
-  # current check has not been re-measured there; the heap shapes it would cover
-  # `just test-freelist-verify` already walks at the default threshold.  Keep this
-  # list minimal and justify each entry with a measurement; FL_VERIFY is ON by
-  # default so new stress files are covered.
-  FL_VERIFY_SKIP=" test_ir_codegen_ctors "
+  # were disproportionate.  Empty: test_ir_codegen_ctors, once skipped, runs in 2s under
+  # stress and 3s with FL_VERIFY=1 (macOS, one run, stage-1 compiler).  Keep this list
+  # minimal and justify each entry with a measurement; FL_VERIFY is ON by default so new
+  # stress files are covered.
+  FL_VERIFY_SKIP=""
   failed=0
   JOBS=$(bash scripts/test_jobs.sh)
   source scripts/test_lib.sh
-  # Per-file wall-clock bound.  Not every GC regression crashes: a slot the
-  # allocator hands out without a slotmap bit livelocks the collector (sweeps 0%
-  # forever, mutation-tested via tests/stdlib/test_gc_vec_buffer_heap_elems.spr),
-  # and this recipe prints nothing until the last file finishes — so without a
-  # bound that failure reads as a hung CI step rather than a red one.  900s is 5x
-  # the slowest file (test_ir_codegen_ctors, 180s under stress).
+  # Per-file wall-clock bound.  Not every GC regression crashes: a collector that
+  # livelocks hangs the run, and this recipe prints nothing until the last file
+  # finishes — so without a bound that failure reads as a hung CI step rather than
+  # a red one.
   STRESS_TIMEOUT_SEC="${STRESS_TIMEOUT_SEC:-900}"
   run_one() {  # prints "ok", "fail" or "timeout"; never exits.  Per-file err file
                # avoids the shared-$TMPD/err race when invoked concurrently.
@@ -4161,9 +4155,8 @@ test-freelist-verify: bootstrap-from-seed
   # test_gc_vec_buffer_heap_elems: the only file whose slots are sized by a payload
   # count rather than a fixed struct (a vector's class follows its element count),
   # and the only one that hands a freed tail back mid-mutator. It is here so the tail
-  # lists see those classes — measured against four broken splits, this flag adds no
-  # detection the plain run does not already give, so do not read its presence as
-  # coverage of them.
+  # lists see those classes. Measured against four broken splits, this flag names three
+  # of them, one of which HDRCHECK passes (the file's header comment has the table).
   FILES="tests/stdlib/test_gc_region_release.spr tests/stdlib/test_gc_freelist_reuse.spr tests/stdlib/test_gc_vec_buffer_heap_elems.spr"
   failed=0
   for f in $FILES; do
@@ -4626,11 +4619,13 @@ gc-alloctrace-check: bootstrap-from-seed
 # is at least `live + (live + free) / 3`, where `free` is the free slots (`free=` on the
 # SPROUT_DEBUG_GC cycle line): the free granules below the bump marks over the mean live slot
 # size. Known answers, under the DEFAULT trigger:
-#   1. It SETTLES: test_gc_trigger_adversary's footprint (free + heap_after) stops growing, with
+#   1. It is ON: test_gc_walk_sparse, minors off, runs at least 4x fewer collections than with
+#      SPROUT_GC_THRESHOLD pinned (floor off): 7 against 87. That is the `pinned` mode below.
+#   2. It SETTLES: test_gc_trigger_adversary's footprint (free + heap_after) stops growing, with
 #      minor collections on and off. A floor that counts free slots by class demand grows it
 #      ~100,000 slots a cycle there instead. Free alone is not the footprint under minors: a major
 #      moves the dead old objects a minor kept from the heap count into the free pool.
-#   2. It settles with the nursery rule, which is the default with minors on: it sizes every
+#   3. It settles with the nursery rule, which is the default with minors on: it sizes every
 #      collection, so the floor is its lower bound before a major and at it. The `share` mode
 #      repeats the check at SPROUT_GC_NURSERY_SHARE=0.5.
 # The probes clear the GC tuning env (SPROUT_GC_NURSERY_SHARE too); SPROUT_GC_THRESHOLD turns the floor off (§12 Q5).
@@ -4644,13 +4639,15 @@ gc-trigger-check: bootstrap-from-seed
     clang -c "$rtsrc" -O2 {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
       || { echo "gc-trigger-check: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
   done
-  # run <test> [default|0|1|share]: SPROUT_GC_MINOR unset (the default) or set; `share` is minors
-  # on with SPROUT_GC_NURSERY_SHARE=0.5. Log: <test>.<mode>.log.
+  # run <test> [default|0|1|share|pinned]: SPROUT_GC_MINOR unset (the default) or set; `share` is
+  # minors on with SPROUT_GC_NURSERY_SHARE=0.5; `pinned` is minors off with SPROUT_GC_THRESHOLD
+  # set, which turns the floor off. Log: <test>.<mode>.log.
   run() {
     local name="$1" mode="${2:-default}" f="tests/stdlib/$1.spr" menv=(-u SPROUT_GC_MINOR)
     case "$mode" in
       default) ;;
       share)      menv=(SPROUT_GC_MINOR=1 SPROUT_GC_NURSERY_SHARE=0.5) ;;
+      pinned)     menv=(SPROUT_GC_MINOR=0 SPROUT_GC_THRESHOLD=4096) ;;
       *)          menv=("SPROUT_GC_MINOR=$mode") ;;
     esac
     [ -f "$f" ] || { echo "gc-trigger-check: missing $f" >&2; return 1; }
@@ -4680,7 +4677,17 @@ gc-trigger-check: bootstrap-from-seed
            printf "%d %d %d\n", c, f[int(c / 2)], f[c]
          }' "$TMPD/$1.$2.log"
   }
+  # cycles <test> <mode>: the collection count, atexit excluded.
+  cycles() {
+    run "$1" "$2" || return 1
+    grep '^\[sprout gc\] cycle=' "$TMPD/$1.$2.log" | grep -vc 'reason=atexit'
+  }
   failed=0
+  if sp_on=$(cycles test_gc_walk_sparse 0) && sp_off=$(cycles test_gc_walk_sparse pinned); then
+    echo "  walk_sparse : minors off, collections with the floor=${sp_on}, floor off (pinned)=${sp_off}"
+    (( sp_on > 0 && 4 * sp_on <= sp_off )) \
+      || { echo "gc-trigger-check: walk_sparse ran ${sp_on} collections with the floor, ${sp_off} without — the footprint floor is not raising the threshold" >&2; failed=1; }
+  else failed=1; fi
   for mode in default 0 share; do
     if read -r ad_c ad_mid ad_end < <(pool test_gc_trigger_adversary "$mode"); then
       echo "  adversary   : minor=${mode} cycles=${ad_c} free+heap at middle=${ad_mid} at end=${ad_end}"

@@ -1110,7 +1110,9 @@ major, the old `Ref` old (colour persists and the `Ref` stays remembered).
 on a real heap, lineage (dead OBJs become corpses in a minor and stay through minors and majors,
 nothing is allocated over one, a marker that reaches one leaves it alone, a region of corpses is
 kept) and the corrupting cases, which must abort with their own message: a corrupted map, count or
-list, a corpse missing from `oldocc`, a wrong poison count and a POISON header without lineage.
+list, a corpse missing from `oldocc`, a wrong poison count, a POISON header without lineage, a
+zeroed (FREE) header inside a run of `occ`, and the remembered bit on a header outside the set when
+a major starts.
 `tests/c_runtime/promote_age.c` holds the stage-2 rules': a survivor
 is young until its Kth collection (colour, youngmap bit, region counts, also for a large object),
 a major's colour-keeping sweep promotes only at age K−1, a store into a young `Ref` whose parent is
@@ -1118,9 +1120,10 @@ then promoted keeps the child alive, the set is empty before a major, the 2× ru
 the nursery sizing (share, survivor floor, its pinned exception, and the footprint floor as its
 lower bound before a major and at it) are pinned, `SPROUT_GC_MINOR=0` ignores the nursery rule
 (threshold `live × factor`), `SPROUT_GC_NURSERY_SHARE` is read with minors on and ignored with
-them off, and an unremembered old-to-young edge, a stray bit 13 or a non-empty set before a major,
-each retired switch (`SPROUT_GC_PROMOTE_AGE`, `SPROUT_GC_NURSERY`, `SPROUT_GC_NURSERY_SURVIVE`,
-also with minors off) and each bad share value must abort with their messages.
+them off. An unremembered old-to-young edge and a stray bit 13 must abort with their messages; each
+retired switch (`SPROUT_GC_PROMOTE_AGE`, `SPROUT_GC_NURSERY`, `SPROUT_GC_NURSERY_SURVIVE`, also with
+minors off, and `SPROUT_GC_HOLES` and `SPROUT_GC_REGION_LISTS`) and each bad share value must exit 1
+with theirs.
 
 **Each site test was confirmed to fail with its barrier removed**, and the fact is the only reason
 to trust the gate: ref_write, vector_mutset, vector_push, each analysis helper, and the barrier
@@ -1165,17 +1168,27 @@ on and off; `free=` is the free granules over the mean live slot size:
 |---|---|---|---|
 | occupancy maps | 247,610 → 247,604 | 210,720 → 210,714 | 364,432 → 364,423 |
 
-The gate once also bounded the sweep's slot walk per object swept (`test_gc_walk_sparse`, free-list
-collector: 2.77 with the floor, 25 without). `walked=` counts bitmap words now, so that bound and
-`gc-walk-check` are gone; the workload remains.
+The floor is also checked to be ON. `test_gc_walk_sparse` (7 regions held by ~1,560 survivors, a
+free pool of ~209,000 granules over the mean slot size) runs with minors off, once under the default
+trigger and once with `SPROUT_GC_THRESHOLD=4096` (the `pinned` mode), which turns the floor off.
+Collections before the exit one, measured:
+
+| `test_gc_walk_sparse`, minors off | floor on (default) | floor off (`pinned`) |
+|---|---|---|
+| collections | 7 | 87 |
+
+The gate requires `4 × floor-on <= floor-off`, a ratio of 12 measured. With the free term in the
+floor forced to zero the counts were 87 and 87 and the gate went red. The adversary probe below
+did not: with that term zeroed its footprint still settled, at 911 collections instead of 224.
+The old walk bound (`gc-walk-check`) is gone, since `walked=` counts bitmap words.
 
 The share probe is there because the nursery rule sizes every collection, so the floor must stay
 its lower bound before a major and at the major, or the free pool grows there too.
 
 **The probe is there to fail the floor that looks right.** Counting free slots only in
 classes with allocation demand diverges on that fixture, and so does the floor without its `/ 3`.
-With the divisor at 1, the pool grew 210,570 → 718,250 (measured on the free-list collector) and
-the gate went red.
+With the divisor at 1, the footprint grew 215,948 → 228,605 over the second half with minors off
+(252,992 → 260,387 with the default) and the gate went red.
 
 **Footprint, not `free=` alone.** Under minors, dead old objects stay in the heap count until a
 major, which moves them to the free pool: on the free-list collector the adversary's `free=` stepped

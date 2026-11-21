@@ -8,7 +8,8 @@ gc-trigger-check`. §9 records the measurements on the build.
 per-slot walk) has been removed. The sweep is word-wise, `walked=` counts bitmap words, and `free`
 is the free granules over the mean live slot size; the floor itself is unchanged. §3, §6.2, §8.4
 and §10 keep that collector's measurements and `just gc-walk-check`, which went with it;
-`gc-trigger-check` keeps only the adversary footprint probe.
+`gc-trigger-check` keeps the adversary footprint probe and bounds the collection count of
+`test_gc_walk_sparse` with the floor on against off (docs/gates.md).
 
 Companion to [gc-generational-v0.md](gc-generational-v0.md), which owns the *sweep's* cost and the
 adapt-factor default. This doc owns the **trigger** only, and it is the cited exception to that

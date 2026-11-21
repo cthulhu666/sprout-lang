@@ -25,9 +25,10 @@
  * version of this case registered tag 0 and asserted the readback was 0 — which
  * freed-slot garbage satisfies, so the whole file passed with the invalidation
  * deleted. A short CSTR reusing the slot reads 0 too (aux = strlen,
- * strlen >> 8 == 0). A stale cache is caught only once the slot is reused or
- * poisoned (below); a dead slot nothing has touched still reads 7, so the
- * plain run is weaker than it was. Not re-checked since the FREE header went away.
+ * strlen >> 8 == 0). A dead slot nothing has touched still reads 7, so the
+ * readback alone catches a stale cache only once the slot is reused or poisoned.
+ * The case also asks sprout_heap_lookup whether the new singleton is a live slot: a
+ * stale one is not, since the sweep cleared its slotmap bit, so the plain run catches it.
  *
  * Under SPROUT_GC_LINEAGE=1 the reclaimed slot is POISONED rather than reused,
  * and sprout_tag aborts on it — a discriminator that does not depend on what the
@@ -42,12 +43,8 @@
 #include <stdio.h>
 #include <string.h>
 
-long long sprout_register_ctor(long long tag, const char* name, long long arity,
-                               const char* field_kinds);
-long long sprout_alloc_obj(long long tag, long long nfields);
-long long sprout_tag(long long h);
-long long int_to_string(long long value);
-long long sprout_gc_push_i64_root(void* slot);
+/* Included, not linked, so case_weak can ask sprout_heap_lookup whether a slot is live. */
+#include "../../runtime/sprout_runtime.c"
 
 /* Rooted across every allocation below; see the header note. */
 static long long g_a, g_b, g_c, g_d;
@@ -143,20 +140,39 @@ static int case_arity(void) {
   return 0;
 }
 
+/* The singleton just built, after a collection that reclaimed the previous one. */
+static int weak_check(const char* phase) {
+  /* A stale cache returns the dead slot: its slotmap bit is clear, so it is no live object, even
+   * while its header still reads 7. */
+  if (sprout_heap_lookup((void*)(uintptr_t)g_a) == NULL) {
+    fprintf(stderr, "weak (%s): the singleton is not a live slot after collection — "
+                    "the cache was not cleared when it was swept\n", phase);
+    return 1;
+  }
+  /* A reused slot reads back as another tag, a poisoned one aborts (SPROUT_GC_LINEAGE=1). */
+  if (sprout_tag(g_a) != 7) {
+    fprintf(stderr, "weak (%s): tag readback %lld after collection, expected 7 — "
+                    "the cache was not cleared when the singleton was swept\n",
+            phase, sprout_tag(g_a));
+    return 1;
+  }
+  return 0;
+}
+
 static int case_weak(void) {
   root_slots();
   sprout_register_ctor(7, "main.Ember", 0, "");
   (void)sprout_alloc_obj(7, 0);   /* caches the singleton, then drops every reference */
   churn();                        /* the sweep reclaims it and must clear the cache */
   g_a = sprout_alloc_obj(7, 0);
-  /* A stale cache returns the dead slot: a reused one reads back as another
-   * tag, a poisoned one aborts (SPROUT_GC_LINEAGE=1). */
-  if (sprout_tag(g_a) != 7) {
-    fprintf(stderr, "weak: tag readback %lld after collection, expected 7 — "
-                    "the cache was not cleared when the singleton was swept\n",
-            sprout_tag(g_a));
-    return 1;
-  }
+  if (weak_check("churn")) return 1;
+  /* The same, with nothing allocated between the sweep and the next construction, so a stale
+   * cache points at a dead slot nothing has reused. */
+  g_a = 0;
+  (void)sprout_alloc_obj(7, 0);
+  sprout_gc_collect_with_reason("atexit");   /* a major */
+  g_a = sprout_alloc_obj(7, 0);
+  if (weak_check("untouched slot")) return 1;
   printf("nullary-ctor-weak-cache\n");
   return 0;
 }

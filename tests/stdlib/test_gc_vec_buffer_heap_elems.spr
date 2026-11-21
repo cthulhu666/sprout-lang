@@ -32,28 +32,24 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_empty, mutvec_push, mutvec_at,
 # five counts into ordinary interior cases with every assertion still green.
 #
 # Like test_gc_freelist_reuse.spr, the heap-internal half of this file is DRIVEN
-# here and CHECKED by the runtime. Measured against four broken versions of the
-# inline-tail release, each run four ways (2026-09-26, under the removed free-list
-# collector, so "freelist class" below means the tail's size class; not re-measured):
+# here and CHECKED by the runtime. Measured against four broken versions of
+# `sprout_vec_release_inline_tail` in the occupancy-map collector, each run four ways
+# (2026-11-21, macOS):
 #
-#   mutation                        plain  HDRCHECK  FL_VERIFY  GC_STRESS
-#   tail header 16 bytes too long   pass   abort     pass       crash
-#   slotmap bit not set             crash  abort     crash      hang
-#   freelist class one too high     crash  abort     crash      pass
-#   live header never shrunk        crash  abort     crash      pass
+#   mutation                          plain  HDRCHECK  FL_VERIFY  GC_STRESS
+#   tail one granule too long         fail   abort     abort      pass
+#   tail given a slotmap bit          pass   pass      abort      pass
+#   tail class one too high           fail   abort     abort      pass
+#   live header never shrunk          pass   abort     pass       pass
 #
-# Read it as: SPROUT_GC_HDRCHECK=1 — which CI sets for the whole suite — is the
-# only column that NAMES the fault, and the only one that catches all four.
-# `crash` is this file dying mid-suite on a wrong answer, which locates nothing;
-# FL_VERIFY adds no row the plain run does not already give; and GC_STRESS is the
-# weakest column, with one row that hangs instead of failing (hence the per-file
-# timeout in the test-stress recipe).
+# Read it as: SPROUT_GC_HDRCHECK=1 — which CI sets for the whole suite — names three
+# of the four, and SPROUT_FL_VERIFY=1 names three, including the one HDRCHECK
+# passes (the slotmap bit), so the two cover all four between them. `fail` is this
+# file exiting non-zero; GC_STRESS passes all four.
 #
-# The allocations below that look redundant are what make rows 1 and 3 detectable
-# at all: `neighbour` asks for the class ABOVE the freed tail while that tail is
-# still listed, and `churned_free` forces a sweep to WALK the tail while it is
-# free. Without them the corrupt state is overwritten before anything reads it and
-# every column says pass.
+# The allocations below that look redundant: `neighbour` asks for the class ABOVE
+# the freed tail while that tail is still listed, and `churned_free` forces a sweep
+# to WALK the tail while it is free.
 
 fn churn(n: Int, acc: Int) -> Int =
   if n <= 0 then acc

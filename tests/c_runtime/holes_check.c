@@ -24,7 +24,9 @@
  *                    check, which must abort with its own message (the caller checks it).
  *   bad_fl_*       — the same under SPROUT_FL_VERIFY=1 (premise 12): the cursors, the tail lists
  *                    and each allocation's extent.  bad_hdr_* — under SPROUT_GC_HDRCHECK=1: a
- *                    header whose step does not land on a `slotmap` start or the run's end.
+ *                    header whose step does not land on a `slotmap` start or the run's end, and a
+ *                    zeroed (FREE) header.  bad_bit13_before_major — the remembered bit on a header
+ *                    outside the set when a major starts.
  *   bad_corpse_*, bad_poison_* — under SPROUT_GC_LINEAGE=1 a corpse missing from `oldocc` or a
  *                    wrong poison count; without lineage a POISON header at all.
  *
@@ -586,6 +588,28 @@ static int bad_hdr_too_short(void) {
   return 1;
 }
 
+/* HDRCHECK: a zeroed header, kind FREE, inside a run of `occ`.  Nothing writes one; the walk
+ * must reject it as an unknown kind. */
+static int bad_hdr_free(void) {
+  scene();
+  const uint64_t zero = 0;
+  memcpy((char*)g_o[0] - 8, &zero, 8);
+  sprout_holes_hdrcheck_walk();
+  fprintf(stderr, "bad_hdr_free: no abort\n");
+  return 1;
+}
+
+/* GENCHECK: bit 13 on a live header that is not in the remembered set, then a major.  The major
+ * clears bit 13 only through the set's entries, so the check at its start must see this one. */
+static int bad_bit13_before_major(void) {
+  scene();
+  const uint64_t h = sprout_hdr_of(g_o[3]) | SPROUT_GC_REMEMBERED_BIT;
+  memcpy((char*)g_o[3] - 8, &h, 8);
+  collect_major();
+  fprintf(stderr, "bad_bit13_before_major: no abort\n");
+  return 1;
+}
+
 typedef struct {
   const char* name;
   int (*fn)(void);
@@ -629,6 +653,8 @@ static const HolesCase k_cases[] = {
   { "bad_fl_cursor_not_reset", bad_fl_cursor_not_reset, "SPROUT_FL_VERIFY" },
   { "bad_hdr_too_long",       bad_hdr_too_long, "SPROUT_GC_HDRCHECK" },
   { "bad_hdr_too_short",      bad_hdr_too_short, "SPROUT_GC_HDRCHECK" },
+  { "bad_hdr_free",           bad_hdr_free, "SPROUT_GC_HDRCHECK" },
+  { "bad_bit13_before_major", bad_bit13_before_major, NULL },
 };
 
 int main(int argc, char** argv) {

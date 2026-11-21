@@ -20,14 +20,10 @@ import stdlib.test (check_eq, check_true, run_suite)
 # re-allocated. The invariant itself is checked by the runtime, under
 # SPROUT_FL_VERIFY=1 (`g_holes_verify`).
 #
-# BE CLEAR ABOUT WHAT THE ASSERTIONS BELOW ARE WORTH: they were mutation-tested
-# against three broken sweeps of the removed free-list collector (drop the
-# earlier-cycle re-list; never roll back; mis-scope the release fixup) and ALL
-# THREE still printed "12 passed". They confirm the churn ran and values
-# round-tripped; they detect no hole-set bug. Without SPROUT_FL_VERIFY=1 this
-# file is a workload, not a test, which is why `just test-stress` sets that
-# flag and plain `just test` does not gate it. (Not re-measured against the
-# occupancy-map sweep.)
+# WHAT THE ASSERTIONS BELOW ARE WORTH: they confirm the churn ran and values
+# round-tripped. They do not look at the hole set, so on their own this file is a
+# workload, not a test. `just test-stress` and `just test-freelist-verify` set
+# SPROUT_FL_VERIFY=1, which is the check.
 #
 # This file deliberately keeps a SMALL heap so it can run under
 # SPROUT_GC_STRESS=1 (collect on every allocation) where the number of sweeps is
