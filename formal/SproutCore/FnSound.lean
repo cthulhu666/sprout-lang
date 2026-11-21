@@ -204,30 +204,16 @@ theorem ParamsTy.inst {σ σ' : String → Ty} (ts : List Ty)
 
 /-! ### Loops that know their prefix -/
 
-/-- A loop over a list whose invariant also sees the prefix already processed. No step ends the
-loop early (`done` is not reachable). -/
+/-- `Wp.forIn_prefix_done` for a loop no step of which ends early (`done` is not reachable). -/
 theorem Wp.forIn_prefix {α β : Type} {f : α → β → M (ForInStep β)} {Q : β → CState → Prop}
     (I : List α → β → CState → Prop) (l : List α) (init : β) {s : CState} (h0 : I [] init s)
     (hf : ∀ pre a post b s1, pre ++ a :: post = l → I pre b s1 →
       Wp (f a b) (fun r s2 => ∃ b', r = ForInStep.yield b' ∧ I (pre ++ [a]) b' s2) s1)
-    (hq : ∀ b s1, I l b s1 → Q b s1) : Wp (ForIn.forIn l init f) Q s := by
-  have gen : ∀ (rest pre : List α) (b : β) (s : CState), pre ++ rest = l → I pre b s →
-      Wp (ForIn.forIn rest b f) Q s := by
-    intro rest
-    induction rest with
-    | nil =>
-      intro pre b s hl hI
-      simp only [List.forIn_nil]
-      simp only [List.append_nil] at hl
-      subst hl
-      exact Wp.pure' (hq b s hI)
-    | cons a post ih =>
-      intro pre b s hl hI
-      simp only [List.forIn_cons]
-      refine Wp.bind (Wp.mono (hf pre a post b s hl hI) ?_)
-      rintro r s2 ⟨b', rfl, hI'⟩
-      exact ih (pre ++ [a]) b' s2 (by simpa using hl) hI'
-  exact gen l [] init s (by simp) h0
+    (hq : ∀ b s1, I l b s1 → Q b s1) : Wp (ForIn.forIn l init f) Q s :=
+  Wp.forIn_prefix_done I l init h0
+    (fun pre a post b s1 hl hI => Wp.mono (hf pre a post b s1 hl hI)
+      fun r s2 ⟨b', hr, hI'⟩ => by subst hr; exact hI')
+    hq
 
 /-! ### Fresh skolems -/
 
