@@ -12,17 +12,19 @@ cannot come from the judgment being empty.
 
 | theorem | program | spec |
 |---|---|---|
-| `r15a/b/c_rejected` | `fn f(x: a) -> Int = x`; `fn f(x: a, g: b -> c) -> a = g`;
-  `fn f(x: a, y: b) -> a = y` | §7 rule 15 |
+| `r15a_rejected` | `fn f(x: a) -> Int = x` | §7 rule 15 |
+| `r15b_rejected` | `fn f(x: a, g: b -> c) -> a = g` | §7 rule 15 |
+| `r15c_rejected` | `fn f(x: a, y: b) -> a = y` | §7 rule 15 |
 | `r56_rejected` | a local `let id = \x -> x` used at `Int` and at `Bool` | §5.6 |
 | `r9a/b/c_rejected` | `() -> T` into `Unit -> T`, the reverse, `k(1)` for `k: () -> T` | §7 r9 |
-| `r8arg/ret/contra_rejected` | an `!{IO}` value in a pure argument slot, a pure return, under a
-  parameter | §7 rule 8 |
+| `r8arg_rejected` | an `!{IO}` value in a pure argument slot | §7 rule 8 |
+| `r8ret_rejected` | an `!{IO}` value returned as a pure one | §7 rule 8 |
+| `r8contra_rejected` | a pure-consuming fn where an `!{IO}`-consuming one is due | §7 rule 8 |
 | `joinPure_rejected` | `if c then pure_fn else io_fn` into a pure slot, either order | §7 rule 8 |
 | `r11param/print_rejected` | an `!{IO}` call in a pure `fn` body | §7 rules 8, 11 |
 | `r5let_rejected` | `let boom = print_str("x")` | §5.2 |
 | `r5arity_rejected` | `print_str()`: a named `fn` is called with exactly its arity | §5.3 |
-| `r5zero_rejected` | `h()` for `h: Int -> Int`: zero arguments to an arrow that takes some | §5.3 |
+| `r5zero_rejected` | `h()` for `h: Int -> Int`: no arguments to an arrow that takes some | §5.3 |
 | `r9ret_rejected` | `fn f(x: Int) -> Int -> Int !{IO} = do print_str("a"); \y -> y` | §7 rule 9 |
 
 Rule 15's first example, `fn f(x: a) -> Int = x + 1`, needs `+`, which Core does not have. `x`
