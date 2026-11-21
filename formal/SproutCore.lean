@@ -1,5 +1,6 @@
 import SproutCore.Syntax
 import SproutCore.Check
+import SproutCore.CheckFuel
 import SproutCore.Print
 import SproutCore.Gen
 import SproutCore.GenProgram

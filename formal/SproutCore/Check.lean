@@ -649,10 +649,17 @@ def orderGroups (edges : Array (List Nat)) (pending order : List (List Nat)) :
     | [] => throw (.reject "internal" "no group order")
     | g :: _ => orderGroups edges (pending.filter (· != g)) (order ++ [g]) b
 
-/-- The checker. `accept` is `ok ()`; a rejection carries `<key>: <detail>`, and `fuel` means a
-run was cut off at `fuel` (never a verdict). -/
-def checkProgram (rules : Rules := {}) (p : Program) (fuel : Nat := defaultFuel) :
-    Except CErr Unit := do
+/-- What `checkPlan` hands to the type-checking run: the nodes, their reference edges, each `main`
+with the number of nodes declared above it, and the group order. -/
+structure Plan where
+  nodes : Array Node
+  edges : Array (List Nat)
+  mains : List (Nat × Option (Ty × Eff) × Expr)
+  order : List (List Nat)
+
+/-- The part of the checker that spends no fuel: duplicate and declaration-order rules, the
+reference graph and the binding groups in dependency order. -/
+def checkPlan (p : Program) : Except CErr Plan := do
   let mut nodes : Array Node := #[]
   -- each `main` with the number of nodes declared above it
   let mut mains : List (Nat × Option (Ty × Eff) × Expr) := []
@@ -711,29 +718,38 @@ def checkProgram (rules : Rules := {}) (p : Program) (fuel : Nat := defaultFuel)
       groups := groups ++ [g]
   -- groups in dependency order: a group runs after every group it reaches
   let order ← orderGroups edges groups [] (n + 1)
-  let act : M Unit := do
-    let mut env := preludeEnv
-    for g in order do
-      let members := g.map fun i => nodes[i]!
-      let fnMembers := members.filterMap fun nd => match nd with | .fnN f => some f | _ => none
-      match members with
-      | [Node.letN nm a i] =>
-        if (edges[g.head!]!).contains g.head! then
-          reject "unknown-var" s!"let {nm} refers to itself"
-        env ← inferLet rules env nm a i
-      | _ =>
-        if fnMembers.length != members.length then
-          reject "let-in-group" "a top-level `let` in a recursive group"
-        env ← inferFnGroup rules env fnMembers
-    for (_, sg, body) in mains do
-      -- spec §10.10 / §7 rule 10: `main` is `fn main() -> Unit !{IO}` (or `Int !{IO}`), written out
-      match sg with
-      | none => reject "main-sig" "main must declare its return type and effect"
-      | some (r, e) =>
-        unless r == .unit || r == .int do reject "main-sig" "main must return Unit or Int"
-        unless e == .io do reject "main-sig" "main must declare the IO effect"
-        checkBody rules env [] r e body
-  match (act.run fuel).run {} with
+  return { nodes, edges, mains, order }
+
+/-- The part of the checker that runs the inference, group by group, then each `main`. -/
+def runPlan (rules : Rules) (pl : Plan) : M Unit := do
+  let mut env := preludeEnv
+  for g in pl.order do
+    let members := g.map fun i => pl.nodes[i]!
+    let fnMembers := members.filterMap fun nd => match nd with | .fnN f => some f | _ => none
+    match members with
+    | [Node.letN nm a i] =>
+      if (pl.edges[g.head!]!).contains g.head! then
+        reject "unknown-var" s!"let {nm} refers to itself"
+      env ← inferLet rules env nm a i
+    | _ =>
+      if fnMembers.length != members.length then
+        reject "let-in-group" "a top-level `let` in a recursive group"
+      env ← inferFnGroup rules env fnMembers
+  for (_, sg, body) in pl.mains do
+    -- spec §10.10 / §7 rule 10: `main` is `fn main() -> Unit !{IO}` (or `Int !{IO}`), written out
+    match sg with
+    | none => reject "main-sig" "main must declare its return type and effect"
+    | some (r, e) =>
+      unless r == .unit || r == .int do reject "main-sig" "main must return Unit or Int"
+      unless e == .io do reject "main-sig" "main must declare the IO effect"
+      checkBody rules env [] r e body
+
+/-- The checker. `accept` is `ok ()`; a rejection carries `<key>: <detail>`, and `fuel` means a
+run was cut off at `fuel` (never a verdict). -/
+def checkProgram (rules : Rules := {}) (p : Program) (fuel : Nat := defaultFuel) :
+    Except CErr Unit := do
+  let pl ← checkPlan p
+  match ((runPlan rules pl).run fuel).run {} with
   | .ok _ => pure ()
   | .error e => throw e
 
