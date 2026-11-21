@@ -254,7 +254,8 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
      compiler bugs: a non-generalised function value passed to an `!{IO}` slot is then read back
      as IO at its other uses, and a peer join of a nested join with an `!{IO}` function is
      order-dependent. The spec gaps and compiler bugs are `BACKLOG.md` entries.
-   - **1b (landed): T2**, inference soundness, and the axiom check of §7. One PR per step, in this order:
+   - **1b (landed): T2**, inference soundness, and the axiom check of §7. One PR per step, in this
+     order:
      - ~~**Judgment.**~~ Landed. `formal/SproutCore/Judgment.lean` is an inductive `HasType` over
        solved types (no metavariables; a scheme is `∀n.` over `.gen`; a written variable is
        rigid), one rule per construct, effect subsumption only where rule 8 puts it. The program
