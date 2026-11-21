@@ -375,15 +375,24 @@ theorem Ext.set {s s' : CState} {n : Nat} {v : Option Ty} (hu : s.Unbound n)
   · subst hnj; exact absurd hj (hu t)
   · simp [hnj, hj]
 
+/-- A pushed entry is unbound, and an unbound variable stays so. -/
+theorem Unbound.push {s s' : CState} (h : s'.subst = s.subst.push none) {m : Nat}
+    (hu : s.Unbound m) : s'.Unbound m := by
+  intro t ht
+  rw [h, Array.getElem?_push] at ht
+  split at ht
+  · simp at ht
+  · exact hu t ht
+
 theorem fresh_leaf {Q : Ty → CState → Prop} {s : CState} (hs : s.WF)
     (h : ∀ a s', Ty.WF s'.sz 0 a → (∃ j, a = .mv j) → s.sz + 1 = s'.sz → Ext s s' → s'.WF →
-      Q a s') :
+      (∀ m, s.Unbound m → s'.Unbound m) → Q a s') :
     Wp fresh Q s := by
   intro n a s' hr
   have h2 : (Except.ok (.mv s.sz, { s with subst := s.subst.push none }) :
       Except CErr (Ty × CState)) = .ok (a, s') := hr
   cases h2
-  refine h _ _ ?_ ⟨_, rfl⟩ ?_ (Ext.push rfl) (hs.push rfl)
+  refine h _ _ ?_ ⟨_, rfl⟩ ?_ (Ext.push rfl) (hs.push rfl) (fun m hu => Unbound.push rfl hu)
   · simp [CState.sz]
   · simp [CState.sz]
 
@@ -611,7 +620,7 @@ theorem fresh_push_loop_sound {α : Type} (l : List α) :
     intro ms0 Q s hs hm h0 h
     simp only [List.forIn_cons]
     refine Wp.bind (Wp.bind (fresh_leaf hs ?_))
-    intro d s1 hd hdm g1 e1 h1
+    intro d s1 hd hdm g1 e1 h1 _
     refine Wp.pure' ?_
     dsimp only
     refine ih (ms0.push d) h1 ?_ ?_ ?_

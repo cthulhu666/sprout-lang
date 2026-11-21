@@ -9,6 +9,8 @@ import SproutCore.Shrink
 import SproutCore.Tests
 import SproutCore.Judgment
 import SproutCore.Subst
+import SproutCore.FlowsLemmas
+import SproutCore.FlowSound
 import SproutCore.JudgmentLemmas
 import SproutCore.JudgmentExamples
 import SproutCore.Witnesses
