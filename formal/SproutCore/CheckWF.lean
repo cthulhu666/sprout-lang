@@ -188,24 +188,51 @@ theorem Wp.map' {α β : Type} {x : M α} (f : α → β) {Q : β → CState →
   rw [map_eq_pure_bind]
   exact Wp.bind (Wp.mono h fun a s' hq => Wp.pure' hq)
 
+/-- A loop over a list whose invariant also sees the prefix already processed. A step that ends
+the loop (`done b'`) must reach the goal `Q` outright; a step that goes on (`yield b'`) must keep
+the invariant on the longer prefix. -/
+theorem Wp.forIn_prefix_done {α β : Type} {f : α → β → M (ForInStep β)}
+    {Q : β → CState → Prop} (I : List α → β → CState → Prop) (l : List α) (init : β) {s : CState}
+    (h0 : I [] init s)
+    (hf : ∀ pre a post b s1, pre ++ a :: post = l → I pre b s1 →
+      Wp (f a b) (fun r s2 => match r with
+        | .done b' => Q b' s2
+        | .yield b' => I (pre ++ [a]) b' s2) s1)
+    (hq : ∀ b s1, I l b s1 → Q b s1) : Wp (ForIn.forIn l init f) Q s := by
+  have gen : ∀ (rest pre : List α) (b : β) (s : CState), pre ++ rest = l → I pre b s →
+      Wp (ForIn.forIn rest b f) Q s := by
+    intro rest
+    induction rest with
+    | nil =>
+      intro pre b s hl hI
+      simp only [List.forIn_nil]
+      simp only [List.append_nil] at hl
+      subst hl
+      exact Wp.pure' (hq b s hI)
+    | cons a post ih =>
+      intro pre b s hl hI
+      simp only [List.forIn_cons]
+      refine Wp.bind (Wp.mono (hf pre a post b s hl hI) ?_)
+      intro r s2 hr
+      cases r with
+      | done b' => exact Wp.pure' hr
+      | yield b' => exact ih (pre ++ [a]) b' s2 (by simpa using hl) hr
+  exact gen l [] init s (by simp) h0
+
 /-- A loop over a list, with an invariant on the loop variable and the state. -/
 theorem Wp.forIn_list {α β : Type} {f : α → β → M (ForInStep β)} {Q : β → CState → Prop}
     (I : β → CState → Prop) (l : List α) (init : β) {s : CState} (h0 : I init s)
     (hf : ∀ a ∈ l, ∀ b s1, I b s1 →
       Wp (f a b) (fun r s2 => match r with | .done b' => I b' s2 | .yield b' => I b' s2) s1)
     (hq : ∀ b s1, I b s1 → Q b s1) :
-    Wp (ForIn.forIn l init f) Q s := by
-  induction l generalizing init s with
-  | nil =>
-    simp only [List.forIn_nil]
-    exact Wp.pure' (hq _ _ h0)
-  | cons a l ih =>
-    simp only [List.forIn_cons]
-    refine Wp.bind ?_
-    refine Wp.mono (hf a (List.mem_cons_self ..) init s h0) fun r s2 hr => ?_
-    cases r with
-    | done b => exact Wp.pure' (hq _ _ hr)
-    | yield b => exact ih b hr (fun a ha => hf a (List.mem_cons_of_mem _ ha))
+    Wp (ForIn.forIn l init f) Q s :=
+  Wp.forIn_prefix_done (fun _ => I) l init h0
+    (fun pre a _ b s1 hl hI => Wp.mono
+      (hf a (hl ▸ List.mem_append_right pre (List.mem_cons_self ..)) b s1 hI)
+      fun r _ hr => match r, hr with
+        | .done _, hr => hq _ _ hr
+        | .yield _, hr => hr)
+    hq
 
 theorem Wp.forIn_range {β : Type} {f : Nat → β → M (ForInStep β)} {Q : β → CState → Prop}
     (I : β → CState → Prop) (r : Std.Legacy.Range) (init : β) {s : CState} (h0 : I init s)
