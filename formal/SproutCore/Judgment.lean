@@ -6,7 +6,8 @@ import SproutCore.Check
 Written from the spec text, not from `Check.lean`. `Check.lean` is the algorithm; this file says
 what a program must satisfy for the spec to call it well-typed, so that T2 (soundness: whatever
 the checker accepts is derivable here) and the rejection proofs at the end mean something. Every
-rule carries a `-- spec §…` tag; `formal/spec-snapshot/` pins the text the tags cite.
+rule carries a `-- spec §…` tag, or `-- structural` when it only builds a list or a derivation's
+empty case and no spec clause says more; `formal/spec-snapshot/` pins the text the tags cite.
 
 Nothing here changes `Check.lean`, and the checker is not an input to the judgment: the only
 definition taken from it is `mkArr`, the one arrow constructor. `JudgmentExamples.lean` runs the
@@ -253,6 +254,7 @@ inductive Flows : Ty → Ty → Prop
       Flows ra re → ea.le ee = true → Flows (.arr [] ra ea) (.arr [] re ee)
 
 inductive FlowsAll : List Ty → List Ty → Prop
+  -- spec §7 rules 3, 12: pointwise, so the two lists have one length
   | nil : FlowsAll [] []
   | cons (a b : Ty) (as bs : List Ty) :
       Flows a b → FlowsAll as bs → FlowsAll (a :: as) (b :: bs)
@@ -351,19 +353,25 @@ inductive HasType : Ctx → Expr → Ty → Eff → Prop
 
 /-- Each expression of a list has the type at its position; the effect is the join. -/
 inductive HasExprs : Ctx → List Expr → List Ty → Eff → Prop
+  -- structural: no expressions, no effect
   | nil (Γ : Ctx) : HasExprs Γ [] [] .pure
+  -- structural: one typing per expression; the effect is the join
   | cons (Γ : Ctx) (e : Expr) (es : List Expr) (t : Ty) (ts : List Ty) (ε₁ ε₂ : Eff) :
       HasType Γ e t ε₁ → HasExprs Γ es ts ε₂ →
       HasExprs Γ (e :: es) (t :: ts) (ε₁.join ε₂)
 
 /-- The non-final steps of a `do` block, the context after them and their effect. -/
 inductive HasSteps : Ctx → List Step → Ctx → Eff → Prop
+  -- structural: no steps, no effect
   | nil (Γ : Ctx) : HasSteps Γ [] Γ .pure
   /-- spec §5.2.1a: a `do` `let` binds like `let … in`: pure right-hand side, monomorphic. -/
   | letS (Γ Γ' : Ctx) (x : String) (rhs : Expr) (rest : List Step) (t : Ty) (ε : Eff) :
       HasType Γ rhs t .pure → HasSteps ((x, .local t) :: Γ) rest Γ' ε →
       HasSteps Γ (.letS x rhs :: rest) Γ' ε
-  /-- A bare step: its value is dropped, its effect is not. -/
+  /-- spec §5.8: a non-final `do` statement's value is dropped; only a linear one is refused, and
+  stage 1 has none. It need not be `Unit`: the discard form of §5.9 drops a whole `Maybe` or
+  `Result` and continues, and §6 rule 11 takes the block's value from its last statement. Its
+  effect is not dropped. The checker accepts any type here. -/
   | exprS (Γ Γ' : Ctx) (e : Expr) (rest : List Step) (t : Ty) (ε₁ ε₂ : Eff) :
       HasType Γ e t ε₁ → HasSteps Γ rest Γ' ε₂ →
       HasSteps Γ (.exprS e :: rest) Γ' (ε₁.join ε₂)
@@ -473,6 +481,7 @@ inductive GroupTy : Ctx → List Decl → Ctx → Prop
 
 /-- spec §7 rule 16: some order of some groups covering the declarations. -/
 inductive Groups : Ctx → List Decl → Ctx → Prop
+  -- structural: no declarations left
   | nil (Γ : Ctx) : Groups Γ [] Γ
   | step (Γ Γ₁ Γ₂ : Ctx) (ds g rest : List Decl) :
       ds.Perm (g ++ rest) → GroupTy Γ g Γ₁ → Groups Γ₁ rest Γ₂ → Groups Γ ds Γ₂
