@@ -279,7 +279,8 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
        diffed before and after, not its counts. The axiom check is `formal/AxiomCheck.lean`
        (§7). The plan code reads arrays by total functions; an index out of range where it picks
        a node or an edge list is an `internal` rejection, not a default node. 3b proved the index
-       invariants (`PlanInv.lean`).
+       invariants (`PlanInv.lean`); `Plan.Inv` makes `runPlan`'s guard unreachable, and it stays
+       as fail-closed defence.
      - ~~**3a.**~~ Landed. `infer_sound_run` (`formal/SproutCore/InferSound.lean`): a successful
        `infer {} env e` from a well-formed, named-free state and environment, on a source
        expression, gives a type and effect that every grounding `θ` solving the final state turns
