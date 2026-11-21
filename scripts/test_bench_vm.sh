@@ -379,7 +379,7 @@ echo "$tbl" | grep -E '^sprout_obj +10 *$' >/dev/null \
   || fail "parse: alloc table with an empty B file leaves column B blank"
 
 # ── --gc mode ────────────────────────────────────────────────────────────────
-GC_ARMS='s50:SPROUT_GC_NURSERY_SHARE=0.5,SPROUT_GC_HOLES=0;fl:SPROUT_GC_HOLES=0'
+GC_ARMS='s50:SPROUT_GC_NURSERY_SHARE=0.5,SPROUT_GC_MAJOR_EVERY=5;m0:SPROUT_GC_MINOR=0'
 CASE_REFS=(--gc HEAD "$GC_ARMS" -n 3 -w selfcompile,mutvec_int)
 run_case gc_happy
 NAME="$(created_name)"
@@ -394,7 +394,7 @@ check "gc happy: delete names nothing else, no label filter" deletes_only_own_na
 check "gc happy: every call carries --project and --account" every_call_scoped
 check "gc happy: name shape" bash -c '[[ "$1" =~ ^sprout-bench-gc-[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$ ]]' _ "$NAME"
 check "gc happy: run call quotes the arms for the remote shell, passes ab.sh args" \
-  grep -qF "bash bench_vm_remote.sh --gc tree.tar $HEAD_SHA s50:SPROUT_GC_NURSERY_SHARE=0.5\\,SPROUT_GC_HOLES=0\\;fl:SPROUT_GC_HOLES=0 -n 3 -w selfcompile\\,mutvec_int" "$CASE_LOG"
+  grep -qF "bash bench_vm_remote.sh --gc tree.tar $HEAD_SHA s50:SPROUT_GC_NURSERY_SHARE=0.5\\,SPROUT_GC_MAJOR_EVERY=5\\;m0:SPROUT_GC_MINOR=0 -n 3 -w selfcompile\\,mutvec_int" "$CASE_LOG"
 check "gc happy: results.tsv copied back" test -s "$OUT/results.tsv"
 check "gc happy: env.txt copied back" test -s "$OUT/env.txt"
 check "gc happy: summary.md written from results.tsv" grep -q 'nqueens' "$OUT/summary.md"
@@ -427,11 +427,11 @@ check "gc happy: ab.sh knows no workload this script cannot build besides galaxy
   done' _ "$ROOT/bench/gc_minor/ab.sh"
 
 # BENCH_TTL wins; no -w / no extra args is fine.
-CASE_REFS=(--gc HEAD "fl:SPROUT_GC_HOLES=0")
+CASE_REFS=(--gc HEAD "m0:SPROUT_GC_MINOR=0")
 run_case gc_ttl BENCH_TTL=45m
 create_line="$(grep '^compute instances create ' "$CASE_LOG" | head -1)"
 { [ "$CASE_RC" -eq 0 ] && has --max-run-duration=45m \
-  && grep -qF -e "--gc tree.tar $HEAD_SHA fl:SPROUT_GC_HOLES=0" "$CASE_LOG"; } \
+  && grep -qF -e "--gc tree.tar $HEAD_SHA m0:SPROUT_GC_MINOR=0" "$CASE_LOG"; } \
   && ok "gc: explicit BENCH_TTL wins; no extra args" \
   || fail "gc: explicit BENCH_TTL wins; no extra args (rc=$CASE_RC)"
 
@@ -473,7 +473,7 @@ check "gc: remote script points UNSUNS and CATALOG nowhere so ab.sh drops galaxy
   grep -q 'UNSUNS=/nonexistent CATALOG=/nonexistent bash bench/gc_minor/ab.sh' "$REMOTE"
 
 # The VM is deleted on every exit path of the gc mode, by its own name.
-CASE_REFS=(--gc HEAD "fl:SPROUT_GC_HOLES=0" -n 2)
+CASE_REFS=(--gc HEAD "m0:SPROUT_GC_MINOR=0" -n 2)
 for at in create ssh scp run scp_back; do
   run_case "gc_fail_$at" "STUB_FAIL_AT=$at"
   { [ "$CASE_RC" -ne 0 ] && deleted_own_name && deletes_only_own_name; } \

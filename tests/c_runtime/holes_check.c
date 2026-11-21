@@ -1,4 +1,4 @@
-/* GENCHECK under SPROUT_GC_HOLES=1 (docs/gc-stage2-v0.md §5.7, §6 premises 2, 3, 5-7, 10, 11, 13-16),
+/* GENCHECK on the occupancy-map collector (docs/gc-stage2-v0.md §5.7, §6 premises 2, 3, 5-7, 10, 11, 13-16),
  * driven directly with minor collections on.  Collection is explicit: the threshold is zeroed
  * after each one, so only `collect` runs the collector.  An object is made old the real way,
  * rooted across g_gen.promote_age collections, the first a major.
@@ -262,7 +262,7 @@ static size_t granule_of(void* payload) {
 }
 
 static int bad_end(const char* name) {
-  sprout_gc_check_sweep(1, 1);          /* what the collector runs after a sweep */
+  sprout_gc_check_sweep();              /* what the collector runs after a sweep */
   fprintf(stderr, "%s: no abort\n", name);
   return 1;
 }
@@ -358,7 +358,7 @@ static int bad_buf_young_on_old(void) {
   return bad_end("bad_buf_young_on_old");
 }
 
-/* ---- SPROUT_GC_LINEAGE under HOLES: a dead OBJ is kept as a corpse ---- */
+/* ---- SPROUT_GC_LINEAGE: a dead OBJ is kept as a corpse ---- */
 
 enum { N_CORPSE = 40000 };   /* 32-byte slots: more than one region, so one holds only corpses */
 static void* g_corpse[N_CORPSE];
@@ -465,7 +465,7 @@ static int bad_poison_no_lineage(void) {
   return bad_end("bad_poison_no_lineage");
 }
 
-/* ---- SPROUT_FL_VERIFY under HOLES (premise 12) ---- */
+/* ---- SPROUT_FL_VERIFY (premise 12) ---- */
 
 /* Release a real inline tail: an inline vector of 100 elements grows past its slot.  Returns the
  * tail's address, and its region and class. */
@@ -562,7 +562,7 @@ static int bad_fl_cursor_not_reset(void) {
   return 1;
 }
 
-/* ---- HDRCHECK under HOLES: a header whose step ends off a `slotmap` start or the run's end ---- */
+/* ---- HDRCHECK: a header whose step ends off a `slotmap` start or the run's end ---- */
 
 static void set_aux(void* payload, uint64_t aux) {
   uint64_t h = sprout_hdr_of(payload);
@@ -637,7 +637,6 @@ int main(int argc, char** argv) {
   for (size_t i = 0; i < sizeof k_cases / sizeof k_cases[0]; i++)
     if (strcmp(argv[1], k_cases[i].name) == 0) c = &k_cases[i];
   if (!c) return 2;
-  setenv("SPROUT_GC_HOLES", "1", 1);
   setenv("SPROUT_GC_MINOR", "1", 1);
   setenv("SPROUT_GC_GENCHECK", "1", 1);
   setenv("SPROUT_GC_MAJOR_EVERY", "1000", 1);
@@ -652,7 +651,6 @@ int main(int argc, char** argv) {
   }
   unsetenv("SPROUT_GC_STRESS");
   unsetenv("SPROUT_GC_AGEPROF");
-  unsetenv("SPROUT_GC_REGION_LISTS");
   sprout_set_argv(argc, argv);  /* reads the switches, as a compiled program's main does */
   g_gc_threshold = 0;
   if (c->fn() || g_failed) return 1;
