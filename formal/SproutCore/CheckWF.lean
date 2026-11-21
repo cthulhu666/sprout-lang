@@ -1853,10 +1853,10 @@ theorem instTy_idx {ms : Array Ty} {sz n i : Nat} (hm : ms.size = n) (h : Ty.WF 
 
 `checkPlan`, `orderGroups` and `runPlan` read arrays and lists by total functions (`getD`,
 `headD`, `reachAt`), not `!`: the indices are in range, but proving it means a loop invariant for
-each of `checkPlan`'s nine loops, and nothing downstream needs it. The rewrite is the same
+each of `checkPlan`'s nine loops; 3b needs them, safety does not. The rewrite is the same
 function as the `!` it replaced, in the logic and at run time (`getElem!_eq_getD`,
 `head!_eq_headD`); the per-program verdicts of the oracle were diffed before and after.
-`msgKey`'s `head!` is backed by `splitOn_ne_nil`. `set!` is `setIfInBounds`: it never panics. -/
+`set!` is `setIfInBounds`: it never panics. -/
 
 theorem getElem!_eq_getD {α : Type} [Inhabited α] (a : Array α) (i : Nat) :
     a[i]! = a[i]?.getD default := by
@@ -1865,34 +1865,6 @@ theorem getElem!_eq_getD {α : Type} [Inhabited α] (a : Array α) (i : Nat) :
 
 theorem head!_eq_headD {α : Type} [Inhabited α] (l : List α) : l.head! = l.headD default := by
   cases l <;> rfl
-
-theorem splitOnAux_ne_nil (s sep : String) (b i j : String.Pos.Raw) (r : List String) :
-    s.splitOnAux sep b i j r ≠ [] := by
-  induction b, i, j, r using String.splitOnAux.induct s sep with
-  | case1 b i j r h =>
-    rw [String.splitOnAux]
-    simp [h]
-  | case2 b i j r h1 h2 _ _ h3 ih =>
-    rw [String.splitOnAux]
-    simpa (config := {zetaDelta := true}) [h1, h2, h3] using ih
-  | case3 b i j r h1 h2 _ _ h3 ih =>
-    rw [String.splitOnAux]
-    simpa (config := {zetaDelta := true}) [h1, h2, h3] using ih
-  | case4 b i j r h1 h2 ih =>
-    rw [String.splitOnAux]
-    simpa [h1, h2] using ih
-
-theorem splitOn_ne_nil (e sep : String) : e.splitOn sep ≠ [] := by
-  unfold String.splitOn
-  split
-  · simp
-  · exact splitOnAux_ne_nil _ _ _ _ _ _
-
-/-- `msgKey` reads a real head: `splitOn` never returns `[]`. -/
-theorem msgKey_head (e : String) : ∃ x xs, e.splitOn ":" = x :: xs ∧ msgKey e = x := by
-  cases h : e.splitOn ":" with
-  | nil => exact absurd h (splitOn_ne_nil e ":")
-  | cons x xs => exact ⟨x, xs, rfl, by simp only [msgKey, h]; rfl⟩
 
 /-! ### Canonical arrows
 

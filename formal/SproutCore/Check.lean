@@ -54,9 +54,6 @@ abbrev M := ReaderT Nat (StateT CState (Except CErr))
 /-- Reject with `<key>: <detail>`; the key is what the oracle's allowlist names. -/
 def reject {α : Type} (key detail : String) : M α := throw (CErr.reject key detail)
 
-/-- The key of a rejection message (the text before the first colon). -/
-def msgKey (e : String) : String := (e.splitOn ":").head!
-
 def fresh : M Ty := do
   let s ← get
   set { s with subst := s.subst.push none }
