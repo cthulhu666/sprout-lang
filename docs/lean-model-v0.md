@@ -269,7 +269,7 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
        `x + 1` example needs `+`, which Core lacks, so `fn f(x: a) -> Int = x` stands in. The
        judgment departs from the checker in one place, a `BACKLOG.md` entry against the checker:
        a signature's `!{IO}` on a function-typed result (rule 9).
-     - **Provable checker.** Every `partial def` becomes total: termination proofs for the
+     - **Provable checker (landed).** Every `partial def` becomes total: termination proofs for the
        structural ones, a fuel argument (not in `CState`, which `try` rolls back) for `shallow`,
        `zonk`, `flow`, `joinTy` and `peel`. The `for` loops in `infer` become recursive helpers,
        arrows get one canonical form (`zonk` reshapes them through `mkArr` today), and
@@ -280,7 +280,10 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
        oracle's per-program verdicts are diffed before and after, not its counts. The axiom
        check lands here, as an executable that walks every module in the package and fails on an
        axiom outside the three, with a planted-`sorry` self-test; the fuel theorem is its first
-       subject.
+       subject. In `formal/`: the total checker in `SproutCore/Check.lean`, the fuel theorem in
+       `CheckFuel.lean`, the invariants (`CState.WF`, `Env.WF`, `Expr.Src`), their preservation by
+       every state-touching function and `Ty.Canon` in `CheckWF.lean`, the axiom check in
+       `AxiomCheck.lean`.
      - **3a.** `infer` is sound: under a well-formed state and environment, its result, with the
        final substitution applied, is derivable. Instantiation and effects are included; they
        cannot be split off.

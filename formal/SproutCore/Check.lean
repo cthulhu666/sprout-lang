@@ -644,7 +644,7 @@ def orderGroups (edges : Array (List Nat)) (pending order : List (List Nat)) :
   | b + 1 =>
     if pending.isEmpty then pure order else
     let ready := pending.filter fun g =>
-      g.all fun i => (edges[i]!).all fun j => g.contains j || order.any (·.contains j)
+      g.all fun i => (edges[i]?.getD []).all fun j => g.contains j || order.any (·.contains j)
     match ready with
     | [] => throw (.reject "internal" "no group order")
     | g :: _ => orderGroups edges (pending.filter (· != g)) (order ++ [g]) b
@@ -657,8 +657,17 @@ structure Plan where
   mains : List (Nat × Option (Ty × Eff) × Expr)
   order : List (List Nat)
 
+/-- `reach[i][j]`; `false` when either index is out of range. -/
+def reachAt (reach : Array (Array Bool)) (i j : Nat) : Bool :=
+  (reach[i]?.bind (·[j]?)).getD false
+
+/-- Set `reach[i][j]`; out of range, nothing changes. -/
+def reachSet (reach : Array (Array Bool)) (i j : Nat) : Array (Array Bool) :=
+  reach.set! i ((reach[i]?.getD #[]).set! j true)
+
 /-- The part of the checker that spends no fuel: duplicate and declaration-order rules, the
-reference graph and the binding groups in dependency order. -/
+reference graph and the binding groups in dependency order. Every array read is total (`getD`):
+the indices are in range, but nothing here depends on that. -/
 def checkPlan (p : Program) : Except CErr Plan := do
   let mut nodes : Array Node := #[]
   -- each `main` with the number of nodes declared above it
@@ -682,7 +691,7 @@ def checkPlan (p : Program) : Except CErr Plan := do
     let mut es := []
     for r in rs do
       let j := (idx r).getD 0
-      match nd, nodes[j]! with
+      match nd, nodes[j]?.getD default with
       | .fnN _, .letN .. =>
         -- spec §7 rule 16: a `fn` may not be moved above a top-level `let` it depends on
         if j > i then throw (.reject "fn-before-let" s!"{nd.name} precedes the `let` {r} it uses")
@@ -696,24 +705,24 @@ def checkPlan (p : Program) : Except CErr Plan := do
   for (pos, _, body) in mains do
     for r in (fv [] body).filter names.contains do
       -- spec §7 rule 16: `main` is a `fn`, so it may not sit above a top-level `let` it uses
-      if (idx r).getD 0 ≥ pos && (nodes[(idx r).getD 0]!.isLet) then
+      if (idx r).getD 0 ≥ pos && ((nodes[(idx r).getD 0]?.getD default).isLet) then
         throw (.reject "fn-before-let" s!"main precedes the `let` {r} it uses")
   -- reachability, to find binding groups (minimal mutually dependent sets)
   let n := nodes.size
   let mut reach : Array (Array Bool) := Array.replicate n (Array.replicate n false)
   for i in [0:n] do
-    for j in edges[i]! do
-      reach := reach.set! i (reach[i]!.set! j true)
+    for j in edges[i]?.getD [] do
+      reach := reachSet reach i j
   for k in [0:n] do
     for i in [0:n] do
       for j in [0:n] do
-        if reach[i]![k]! && reach[k]![j]! then
-          reach := reach.set! i (reach[i]!.set! j true)
+        if reachAt reach i k && reachAt reach k j then
+          reach := reachSet reach i j
   let mut groups : List (List Nat) := []
   let mut seen : List Nat := []
   for i in [0:n] do
     unless seen.contains i do
-      let g := (List.range n).filter fun j => j == i || (reach[i]![j]! && reach[j]![i]!)
+      let g := (List.range n).filter fun j => j == i || (reachAt reach i j && reachAt reach j i)
       seen := seen ++ g
       groups := groups ++ [g]
   -- groups in dependency order: a group runs after every group it reaches
@@ -724,11 +733,11 @@ def checkPlan (p : Program) : Except CErr Plan := do
 def runPlan (rules : Rules) (pl : Plan) : M Unit := do
   let mut env := preludeEnv
   for g in pl.order do
-    let members := g.map fun i => pl.nodes[i]!
+    let members := g.map fun i => pl.nodes[i]?.getD default
     let fnMembers := members.filterMap fun nd => match nd with | .fnN f => some f | _ => none
     match members with
     | [Node.letN nm a i] =>
-      if (pl.edges[g.head!]!).contains g.head! then
+      if (pl.edges[g.headD 0]?.getD []).contains (g.headD 0) then
         reject "unknown-var" s!"let {nm} refers to itself"
       env ← inferLet rules env nm a i
     | _ =>

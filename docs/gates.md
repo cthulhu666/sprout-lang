@@ -1439,7 +1439,8 @@ PATH. It installs on first use, so nothing changes for a contributor who never t
   verdict never depends on the budget once the run fits in it. `formal/SproutCore/CheckWF.lean`
   defines the invariants the soundness proof runs under (`CState.WF`: bindings in range and
   acyclic; `Env.WF`; `Expr.Src`) and proves that every state-touching function keeps them, which
-  makes the checker's `!` accessors in-range.
+  makes the checker's remaining `!` accessors (`instTy`, `bindMeta`'s `set!`) in-range; the plan
+  code reads its arrays with total accessors, and `zonk`'s arrows are proved canonical there.
 - Spec snapshot: `formal/spec-snapshot/` holds spec §5.1–5.5, the intro of §5.6 (up to
   `### 5.6.1`), §5.8, §7 and §10.10, cut by heading (`scripts/lean_spec_snapshot.py`). Any change
   to them fails `lean-model` until the model has been re-checked against the new text and
