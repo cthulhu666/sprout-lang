@@ -49,7 +49,8 @@ theorem Peel.length {t : Ty} {n : Nat} {ss : List Ty} {r : Ty} {e : Eff}
   | over ps r e n s2 r2 e2 hps hlt _ ih => simp [ih]; omega
 
 theorem Peel.det {t : Ty} {n : Nat} {ss : List Ty} {r : Ty} {e : Eff}
-    (h : Peel t n ss r e) : ∀ {ss' r' e'}, Peel t n ss' r' e' → ss = ss' ∧ r = r' ∧ e = e' := by
+    (h : Peel t n ss r e) :
+    ∀ {ss' r' e'}, Peel t n ss' r' e' → ss = ss' ∧ r = r' ∧ e = e' := by
   induction h with
   | exact ps r e =>
     intro ss' r' e' h'
@@ -119,15 +120,18 @@ theorem HasType.app_inv {Γ : Ctx} {f : Expr} {args : List Expr} {t : Ty} {ε : 
       HasType Γ f tf ef ∧ ArityOk Γ f args.length ∧ Peel tf args.length ss t ce ∧
       HasExprs Γ args ts εa ∧ FlowsAll ts ss ∧ ε = ef.join (ce.join εa) := by
   cases h with
-  | app _ _ _ tf ef ts ss _ ce εa h1 h2 h3 h4 h5 => exact ⟨tf, ef, ts, ss, ce, εa, h1, h2, h3, h4, h5, rfl⟩
+  | app _ _ _ tf ef ts ss _ ce εa h1 h2 h3 h4 h5 =>
+    exact ⟨tf, ef, ts, ss, ce, εa, h1, h2, h3, h4, h5, rfl⟩
 
 theorem HasType.ite_inv {Γ : Ctx} {c a b : Expr} {r : Ty} {ε : Eff}
     (h : HasType Γ (.ite c a b) r ε) :
     ∃ (ec ea eb : Eff) (ta tb : Ty),
-      HasType Γ c .bool ec ∧ HasType Γ a ta ea ∧ HasType Γ b tb eb ∧ r.Solved ∧ Join ta tb r ∧
+      HasType Γ c .bool ec ∧ HasType Γ a ta ea ∧ HasType Γ b tb eb ∧ r.Solved ∧
+      Join ta tb r ∧
       ε = ec.join (ea.join eb) := by
   cases h with
-  | ite _ _ _ _ ec ea eb ta tb _ h1 h2 h3 h4 h5 => exact ⟨ec, ea, eb, ta, tb, h1, h2, h3, h4, h5, rfl⟩
+  | ite _ _ _ _ ec ea eb ta tb _ h1 h2 h3 h4 h5 =>
+    exact ⟨ec, ea, eb, ta, tb, h1, h2, h3, h4, h5, rfl⟩
 
 theorem HasType.letIn_inv {Γ : Ctx} {x : String} {rhs body : Expr} {t : Ty} {ε : Eff}
     (h : HasType Γ (.letIn x rhs body) t ε) :
@@ -137,7 +141,8 @@ theorem HasType.letIn_inv {Γ : Ctx} {x : String} {rhs body : Expr} {t : Ty} {ε
 
 theorem HasType.doB_inv {Γ : Ctx} {steps : List Step} {final : Expr} {t : Ty} {ε : Eff}
     (h : HasType Γ (.doB steps final) t ε) :
-    ∃ (Γ' : Ctx) (ε₁ ε₂ : Eff), HasSteps Γ steps Γ' ε₁ ∧ HasType Γ' final t ε₂ ∧ ε = ε₁.join ε₂ := by
+    ∃ (Γ' : Ctx) (ε₁ ε₂ : Eff),
+      HasSteps Γ steps Γ' ε₁ ∧ HasType Γ' final t ε₂ ∧ ε = ε₁.join ε₂ := by
   cases h with
   | doB _ Γ' _ _ _ ε₁ ε₂ h1 h2 => exact ⟨Γ', ε₁, ε₂, h1, h2, rfl⟩
 
@@ -179,7 +184,8 @@ theorem single_fn_inv {name : String} {ps : List (String × Option Ty)} {sg : Op
 /-- What a typed program of one top-level `let` says about it. -/
 theorem single_let_inv {name : String} {ann : Option Ty} {init : Expr}
     (h : Program.Typed ⟨[.letD name ann init]⟩) :
-    ∃ (t : Ty) (s : Scheme), HasType Ctx.prelude init t .pure ∧ LetAnn ann t ∧ Generalises t s := by
+    ∃ (t : Ty) (s : Scheme),
+      HasType Ctx.prelude init t .pure ∧ LetAnn ann t ∧ Generalises t s := by
   obtain ⟨Γ, hg, _⟩ := h
   obtain ⟨Γ₁, hgt⟩ := Groups.single (d := .letD name ann init) hg
   generalize hd : [Decl.letD name ann init] = g at hgt

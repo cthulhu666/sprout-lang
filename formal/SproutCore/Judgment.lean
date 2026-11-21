@@ -35,8 +35,8 @@ checker on every program it proves about, to show the two agree.
 * **`Flows` reads an n-ary arrow as curried.** Spec §5.1: `fn add(x: Int, y: Int) -> Int` has type
   `Int -> Int -> Int`. So one rule compares the first curried level of two arrows (`Ty.uncons`),
   whatever their stored parameter counts. `() -> T` is not a curried level: it flows only into
-  `() -> U` (spec §7 rule 9). Because levels, not stored arrows, are compared, the three arity cases
-  of the checker's `flow` are one rule here.
+  `() -> U` (spec §7 rule 9). Because levels, not stored arrows, are compared, the three arity
+  cases of the checker's `flow` are one rule here.
 * **`Join a b r`** holds when `r` is an upper bound of both branch types: both flow into `r`
   ("judged against a fresh result type that neither branch owns, so both are compared as values").
   `r` is chosen, not computed; the checker's `joinTy` computes the least one. Every use of `r` is
@@ -230,8 +230,9 @@ def Generalises (t : Ty) (s : Scheme) : Prop :=
 /-! ### Effect-aware comparison of types (spec §7 rule 8) -/
 
 mutual
-/-- spec §7 rule 8: `Flows a e`: a value of type `a` may stand in a slot of type `e`. Directional: an `!{IO}`
-arrow is refused where a pure one is required, and the direction reverses under a parameter. -/
+/-- spec §7 rule 8: `Flows a e`: a value of type `a` may stand in a slot of type `e`. Directional:
+an `!{IO}` arrow is refused where a pure one is required, and the direction reverses under a
+parameter. -/
 inductive Flows : Ty → Ty → Prop
   -- spec §7 rule 1: a base type flows only into itself (`int`, `bool`, `str`, `unit`)
   | int : Flows .int .int
@@ -253,7 +254,8 @@ inductive Flows : Ty → Ty → Prop
 
 inductive FlowsAll : List Ty → List Ty → Prop
   | nil : FlowsAll [] []
-  | cons (a b : Ty) (as bs : List Ty) : Flows a b → FlowsAll as bs → FlowsAll (a :: as) (b :: bs)
+  | cons (a b : Ty) (as bs : List Ty) :
+      Flows a b → FlowsAll as bs → FlowsAll (a :: as) (b :: bs)
 end
 
 /-- spec §7 rule 8: `Join a b r`: `r` is a result type neither branch owns, and both branches flow
@@ -264,11 +266,11 @@ inductive Join : Ty → Ty → Ty → Prop
 
 /-! ### Calls (spec §5.3, §7 rule 9) -/
 
-/-- spec §5.3: `Peel t n ss r e`: applying a value of type `t` to `n` arguments has slots `ss`, result `r`
-and the call itself performs `e`. A saturating call performs the arrow's effect. Fewer arguments
-than parameters is typed as the rest of the arrow with no effect, because the count is checked at
-run time (spec §5.3). More arguments continue into the result. A `() -> T` takes exactly zero
-(spec §7 rule 9: "calling a `() -> T` requires the empty argument list"). -/
+/-- spec §5.3: `Peel t n ss r e`: applying a value of type `t` to `n` arguments has slots `ss`,
+result `r` and the call itself performs `e`. A saturating call performs the arrow's effect. Fewer
+arguments than parameters is typed as the rest of the arrow with no effect, because the count is
+checked at run time (spec §5.3). More arguments continue into the result. A `() -> T` takes
+exactly zero (spec §7 rule 9: "calling a `() -> T` requires the empty argument list"). -/
 inductive Peel : Ty → Nat → List Ty → Ty → Eff → Prop
   -- spec §5.3: a call saturates the arrow and performs its effect
   | exact (ps : List Ty) (r : Ty) (e : Eff) : Peel (.arr ps r e) ps.length ps r e
@@ -286,9 +288,9 @@ def ArityOk (Γ : Ctx) (f : Expr) (n : Nat) : Prop :=
   ∀ x k s, f = .var x → Γ.lookup x = some (.fn k s) → k = n
 
 /-- spec §5.3: the type of a lambda parameter. Unannotated: any solved type. Annotated: the
-annotation, with no type variable in it ("A type variable in a lambda parameter annotation is rejected in
-v0"). Spec §5.3 / §7 rule 4 also fix an argument lambda's parameter to the callee's slot; the
-judgment does not (see the header). -/
+annotation, with no type variable in it ("A type variable in a lambda parameter annotation is
+rejected in v0"). Spec §5.3 / §7 rule 4 also fix an argument lambda's parameter to the callee's
+slot; the judgment does not (see the header). -/
 def LamParam (ann : Option Ty) (pt : Ty) : Prop :=
   match ann with
   | none => pt.Solved
@@ -345,7 +347,8 @@ inductive HasType : Ctx → Expr → Ty → Eff → Prop
 inductive HasExprs : Ctx → List Expr → List Ty → Eff → Prop
   | nil (Γ : Ctx) : HasExprs Γ [] [] .pure
   | cons (Γ : Ctx) (e : Expr) (es : List Expr) (t : Ty) (ts : List Ty) (ε₁ ε₂ : Eff) :
-      HasType Γ e t ε₁ → HasExprs Γ es ts ε₂ → HasExprs Γ (e :: es) (t :: ts) (ε₁.join ε₂)
+      HasType Γ e t ε₁ → HasExprs Γ es ts ε₂ →
+      HasExprs Γ (e :: es) (t :: ts) (ε₁.join ε₂)
 
 /-- The non-final steps of a `do` block, the context after them and their effect. -/
 inductive HasSteps : Ctx → List Step → Ctx → Eff → Prop
@@ -356,7 +359,8 @@ inductive HasSteps : Ctx → List Step → Ctx → Eff → Prop
       HasSteps Γ (.letS x rhs :: rest) Γ' ε
   /-- A bare step: its value is dropped, its effect is not. -/
   | exprS (Γ Γ' : Ctx) (e : Expr) (rest : List Step) (t : Ty) (ε₁ ε₂ : Eff) :
-      HasType Γ e t ε₁ → HasSteps Γ rest Γ' ε₂ → HasSteps Γ (.exprS e :: rest) Γ' (ε₁.join ε₂)
+      HasType Γ e t ε₁ → HasSteps Γ rest Γ' ε₂ →
+      HasSteps Γ (.exprS e :: rest) Γ' (ε₁.join ε₂)
 end
 
 /-! ### Declarations -/
@@ -375,7 +379,8 @@ def FnD.vars (f : FnD) : List String :=
   ((f.params.flatMap fun (_, t) => match t with | some t => t.vars | none => []) ++
     (match f.sig with | some (t, _) => t.vars | none => [])).eraseDups
 
-/-- spec §7 rule 16: every parameter and the return type are written ("a complete … signature"). -/
+/-- spec §7 rule 16: every parameter and the return type are written ("a complete … signature").
+-/
 def FnD.complete (f : FnD) : Bool := f.sig.isSome && f.params.all (·.2.isSome)
 
 /-- spec §7 rule 16: parameter types. A written one is read through `σ`; an omitted one is "one
@@ -388,9 +393,9 @@ inductive ParamsTy (σ : String → Ty) : List (String × Option Ty) → List Ty
       p.Solved → ParamsTy σ prs ps → ParamsTy σ ((x, none) :: prs) (p :: ps)
 
 /-- spec §5.1, §7 rule 9: the declared return type `r` and the effect `e` the function itself
-performs when called with its declared parameters. Omitted: the function is pure and the return type is "one
-type" (rule 16). Written `-> T !{IO}`: `!{IO}` is the function's own effect, unless `T` is a
-function type; then spec §7 rule 9 puts it on `T`'s innermost arrow (`-> A -> B !{IO}` is
+performs when called with its declared parameters. Omitted: the function is pure and the return
+type is "one type" (rule 16). Written `-> T !{IO}`: `!{IO}` is the function's own effect, unless
+`T` is a function type; then spec §7 rule 9 puts it on `T`'s innermost arrow (`-> A -> B !{IO}` is
 `A -> B !{IO}` returned by a pure call), and the call itself is pure. The checker rejects that
 second form (`Check.FnInfo.build`) and the compiler accepts it (BACKLOG, "Lean model rejects
 `-> A -> B !{IO}`"); the judgment follows the spec. -/
@@ -398,7 +403,8 @@ inductive RetTy (σ : String → Ty) : Option (Ty × Eff) → Ty → Eff → Pro
   | written (a r : Ty) (e : Eff) :
       a.elab σ = some r → ¬ (r.isArr = true ∧ e = .io) → RetTy σ (some (a, e)) r e
   | writtenInner (a r0 r : Ty) :
-      a.elab σ = some r0 → r0.isArr = true → r0.attachIO = some r → RetTy σ (some (a, .io)) r .pure
+      a.elab σ = some r0 → r0.isArr = true → r0.attachIO = some r →
+      RetTy σ (some (a, .io)) r .pure
   | omitted (r : Ty) : r.Solved → RetTy σ none r .pure
 
 /-- Parameters in scope in a body. Later parameters shadow earlier ones, as in `Check.checkBody`. -/
@@ -437,11 +443,14 @@ pure). -/
 def LetAnn (ann : Option Ty) (t : Ty) : Prop :=
   match ann with
   | none => True
-  | some a => ∃ (σ : String → Ty) (a' : Ty), (∀ s, (σ s).Solved) ∧ a.elab σ = some a' ∧ Flows t a'
+  | some a =>
+    ∃ (σ : String → Ty) (a' : Ty),
+      (∀ s, (σ s).Solved) ∧ a.elab σ = some a' ∧ Flows t a'
 
 /-- One binding group. A top-level `let` is a group of its own. -/
 inductive GroupTy : Ctx → List Decl → Ctx → Prop
-  /-- spec §5.2: a top-level `let` initialiser is pure; spec §7 rule 16: the binding generalises. -/
+  /-- spec §5.2: a top-level `let` initialiser is pure; spec §7 rule 16: the binding generalises.
+  -/
   | letG (Γ : Ctx) (name : String) (ann : Option Ty) (init : Expr) (t : Ty) (s : Scheme) :
       HasType Γ init t .pure → LetAnn ann t → Generalises t s →
       GroupTy Γ [.letD name ann init] ((name, .val s) :: Γ)
@@ -478,6 +487,7 @@ def Program.nodes (p : Program) : List Decl :=
 
 /-- The program is well-typed. -/
 def Program.Typed (p : Program) : Prop :=
-  ∃ Γ, Groups Ctx.prelude p.nodes Γ ∧ ∀ sg body, Decl.mainFn sg body ∈ p.decls → MainOk Γ sg body
+  ∃ Γ, Groups Ctx.prelude p.nodes Γ ∧
+    ∀ sg body, Decl.mainFn sg body ∈ p.decls → MainOk Γ sg body
 
 end SproutCore
