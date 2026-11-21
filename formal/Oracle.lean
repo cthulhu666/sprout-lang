@@ -158,18 +158,23 @@ def parseAllow (path : String) : IO (List (String × String × String)) := do
     | _ => throw (IO.userError s!"ALLOWLIST: expected `id | shape | reason`: {l}")
   return out
 
+def parseNat (flag v : String) : Except String Nat :=
+  match v.toNat? with
+  | some n => .ok n
+  | none => .error s!"{flag}: not a number: {v}"
+
 def parseArgs : List String → Cfg → Except String Cfg
   | [], c => .ok c
   | "--driver" :: v :: r, c => parseArgs r { c with driver := v }
   | "--stdlib" :: v :: r, c => parseArgs r { c with stdlib := v }
   | "--out" :: v :: r, c => parseArgs r { c with out := v }
   | "--allowlist" :: v :: r, c => parseArgs r { c with allowlist := v }
-  | "--count" :: v :: r, c => parseArgs r { c with count := v.toNat!}
-  | "--seed" :: v :: r, c => parseArgs r { c with seed := v.toNat! }
+  | "--count" :: v :: r, c => do parseArgs r { c with count := ← parseNat "--count" v }
+  | "--seed" :: v :: r, c => do parseArgs r { c with seed := ← parseNat "--seed" v }
   | "--plant" :: v :: r, c => parseArgs r { c with plant := v }
   | "--expect" :: v :: r, c => parseArgs r { c with expect := v }
   | "--expect-shape" :: v :: r, c => parseArgs r { c with expectShape := v }
-  | "--fuel" :: v :: r, c => parseArgs r { c with fuel := v.toNat! }
+  | "--fuel" :: v :: r, c => do parseArgs r { c with fuel := ← parseNat "--fuel" v }
   | "--dump-verdicts" :: v :: r, c => parseArgs r { c with dump := v }
   | a :: _, _ => .error s!"unknown argument {a}"
 
@@ -244,11 +249,15 @@ def main (args : List String) : IO UInt32 := do
       | none => pure ()
       | some w =>
         let (m, c) ← evalProg s w
-        if shapeOf m c != some shape then
+        -- a cut-off witness run is no verdict: a harness error, not a stale entry
+        if isFuel m then
+          harness := harness ++ [s!"witness {id}: (fuel: the model's run was cut off at {fuel})"]
+        else if shapeOf m c != some shape then
           stale := stale ++ [s!"{id}: {shape} (witness: model {verdictStr m}, compiler {cvStr c})"]
   IO.FS.removeDirAll work
   if cfg.dump != "" then IO.FS.writeFile cfg.dump ("\n".intercalate dump ++ "\n")
-  IO.println s!"programs {cfg.count} (model accept {nAccept}, reject {nReject}); disagreements {disagreements} (allowlisted {allowed.length}); harness errors {harness.length}"
+  IO.println s!"programs {cfg.count} (model accept {nAccept}, reject {nReject}, fuel {nFuel}); \
+    disagreements {disagreements} (allowlisted {allowed.length}); harness errors {harness.length}"
   for h in harness.take 5 do IO.println s!"HARNESS ERROR {h}"
   match cfg.expect with
   | "disagreement" =>
