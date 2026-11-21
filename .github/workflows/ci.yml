@@ -459,10 +459,10 @@ jobs:
       - *cache-stage1
       - *bootstrap
 
-      - name: Lean model builds, no unfinished proofs, spec snapshot current
+      - name: Lean model builds, no unfinished proofs, standard axioms only, spec snapshot current
         run: just lean-model
 
-      - name: Oracle self-test (planted model and printer defects)
+      - name: Oracle and axiom-check self-test (planted model, printer, fuel and axiom defects)
         run: just test-lean-oracle
 
       - name: Oracle, 500 generated programs (fixed seed)
