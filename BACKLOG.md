@@ -50,13 +50,15 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   Spec §7 rule 9 puts the annotation on the innermost arrow: the type is `Int -> Int -> Int !{IO}`,
   `f(1)` is pure and `f`'s own body may not print (the compiler: "`f` performs IO but is declared
   pure"). `Check.FnInfo.build` rejects the form as "ill-formed". `Judgment.lean` accepts it
-  (`RetTy.writtenInner`, `okRetIO` in `JudgmentExamples.lean`), so T2 step 3 fails on it until the
-  checker follows. Fix `FnInfo.build`, add a `Tests.lean` guard, let the generator build the shape.
+  (`RetTy.writtenInner`, `okRetIO` in `JudgmentExamples.lean`). A missed accept, so not a T2
+  failure; the generator never writes the form, so the oracle cannot see it. Fix `FnInfo.build`,
+  add a `Tests.lean` guard, let the generator build the shape.
 - [ ] `P3` **The Lean checker types `print_str` as a value, so it skips the arity check.**
   A `do` step `print_str()` checks in the model (`preludeEnv` is `.poly`, so the value rule of
   spec §5.3 types the call as the function itself) and fails in the compiler ("'print_str'
   expects 1 arguments, got 0"). Make it `.fnPoly 1 0 …`. The generator never miscounts, so the
-  oracle cannot see it; `Judgment.lean` gives it arity 1.
+  oracle cannot see it. `Judgment.lean` gives it arity 1, so T2 is false until this is fixed:
+  fix it in 1b's provable-checker step (`docs/lean-model-v0.md` §9).
 - [ ] `P3` **The spec does not say whether an annotated top-level `let` keeps the annotation's
   effect.** §5.2: the annotation "narrows the binding's type". `let f : Int -> Int !{IO} = \x -> x`
   then `g(f)` with `g(h: Int -> Int)` is accepted by the compiler, so `f` keeps the initialiser's
