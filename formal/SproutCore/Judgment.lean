@@ -137,7 +137,8 @@ end
 mutual
 /-- Read a written type with its variables mapped through `σ`. An arrow goes through `mkArr`; an
 `!{IO}` arrow whose WRITTEN result is an arrow has no spelling and is not read (spec §7 rule 9,
-as in `Check.elabTy`); the test is on the written `r`, not on `σ`'s reading of it. A type a programmer cannot write (`.mv`, `.skolem`, `.gen`) is not read. -/
+as in `Check.elabTy`); the test is on the written `r`, not on `σ`'s reading of it. A type a
+programmer cannot write (`.mv`, `.skolem`, `.gen`) is not read. -/
 def Ty.elab (σ : String → Ty) : Ty → Option Ty
   | .named s => some (σ s)
   | .int => some .int
