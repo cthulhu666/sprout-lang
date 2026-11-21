@@ -574,7 +574,7 @@ if grep -q "after-alloc" "$TMP_DIR/gen_check_bad_every_late.out"; then
 fi
 ABORT_NOTE="a bad SPROUT_GC_MINOR did not abort at startup" \
   abort_check "$GC" bad_minor "SPROUT_GC_MINOR: expected 0 or 1"
-for sel in barrier minor_keeps_old major_every clear_before_major doubling doubling_free_list no_check bad_every_off default_on empty_on; do
+for sel in barrier minor_keeps_old major_every doubling no_check bad_every_off default_on empty_on; do
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$GC" "$sel" > "$TMP_DIR/gc_$sel.out" 2> "$TMP_DIR/gc_$sel.err" || {
     echo "  gen_check '$sel' failed:" >&2
     cat "$TMP_DIR/gc_$sel.out" "$TMP_DIR/gc_$sel.err" >&2
@@ -583,28 +583,8 @@ for sel in barrier minor_keeps_old major_every clear_before_major doubling doubl
   test "$(cat "$TMP_DIR/gc_$sel.out")" = "gen-check-$sel"
 done
 
-echo "==> c runtime: a minor sweeps only the young slots, keeps the free lists, and GENCHECK aborts on a bad young bit or free count"
-# young_sweep.c includes sprout_runtime.c (like gen_check.c). The corrupting cases must abort with
-# the GENCHECK message: a check that tests nothing fails here.
-YS="$TMP_DIR/young_sweep"
-clang "$ROOT/tests/c_runtime/young_sweep.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
-  "${CLANG_EXTRA[@]}" -O0 -g ${SAN[@]+"${SAN[@]}"} -o "$YS"
-for sel in bad_young_bit bad_young_bit_free bad_free_count; do
-  want="GENCHECK: young bit"
-  [[ "$sel" == bad_free_count ]] && want="GENCHECK: free count"
-  abort_check "$YS" "$sel" "$want"
-done
-for sel in walked_young free_count no_double_list region_release large_young lineage; do
-  ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$YS" "$sel" > "$TMP_DIR/ys_$sel.out" 2> "$TMP_DIR/ys_$sel.err" || {
-    echo "  young_sweep '$sel' failed:" >&2
-    cat "$TMP_DIR/ys_$sel.out" "$TMP_DIR/ys_$sel.err" >&2
-    exit 1
-  }
-  test "$(cat "$TMP_DIR/ys_$sel.out")" = "young-sweep-$sel"
-done
-
-echo "==> c runtime: GENCHECK, SPROUT_FL_VERIFY, HDRCHECK and SPROUT_GC_LINEAGE under the default collector (SPROUT_GC_HOLES=1) pass on a real heap, walk holes by slotmap, keep lineage corpses, and abort on each corrupted map, count, buffer list, cursor, tail list, header and corpse"
-# holes_check.c includes sprout_runtime.c (like young_sweep.c). Each corrupting case must abort
+echo "==> c runtime: GENCHECK, SPROUT_FL_VERIFY, HDRCHECK and SPROUT_GC_LINEAGE pass on a real heap, walk holes by slotmap, keep lineage corpses, and abort on each corrupted map, count, buffer list, cursor, tail list, header and corpse"
+# holes_check.c includes sprout_runtime.c (like gen_check.c). Each corrupting case must abort
 # with its own message: a check that tests nothing fails here.
 HC="$TMP_DIR/holes_check"
 clang "$ROOT/tests/c_runtime/holes_check.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
@@ -636,7 +616,7 @@ abort_check "$HC" bad_hdr_too_long "${HDR}header too long"
 abort_check "$HC" bad_hdr_too_short "${HDR}header too short"
 abort_check "$HC" bad_corpse_not_in_oldocc "${GCK}corpse outside oldocc"
 abort_check "$HC" bad_corpse_count "${GCK}poison count"
-abort_check "$HC" bad_poison_no_lineage "${GCK}poison header under HOLES"
+abort_check "$HC" bad_poison_no_lineage "${GCK}poison header"
 for sel in positive positive_verify scribble scribble_verify scribble_hdrcheck tail_retained \
            positive_lineage scribble_lineage lineage_corpses tail_release_trace large_free_trace; do
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$HC" "$sel" > "$TMP_DIR/hc_$sel.out" 2> "$TMP_DIR/hc_$sel.err" || {
@@ -648,7 +628,7 @@ for sel in positive positive_verify scribble scribble_verify scribble_hdrcheck t
 done
 
 echo "==> c runtime: promotion age, the remembered rule and the nursery rule, and GENCHECK aborts on an unremembered old->young edge"
-# promote_age.c includes sprout_runtime.c (like young_sweep.c). The corrupting cases, the retired
+# promote_age.c includes sprout_runtime.c (like gen_check.c). The corrupting cases, the retired
 # switches and the bad share values must abort with their message: a check that tests nothing
 # fails here.
 PA="$TMP_DIR/promote_age"
@@ -660,19 +640,20 @@ grep -q "owner: kind=REF .* field=0" "$TMP_DIR/promote_age_unremembered_edge.err
   cat "$TMP_DIR/promote_age_unremembered_edge.err" >&2
   exit 1
 }
-abort_check "$PA" major_bit13 "GENCHECK: remembered bit set before a major" bad_major_bit13
-abort_check "$PA" major_set "GENCHECK: remembered set not empty before a major" bad_major_set
 abort_check "$PA" stray_bit13 "GENCHECK: remembered bits differ from the remembered set" bad_stray_bit13
 # A retired switch aborts at startup with a removal message, at any value and with minors off too.
 abort_check "$PA" retired_age "SPROUT_GC_PROMOTE_AGE was removed: promotion age is fixed at 3" bad_env SPROUT_GC_PROMOTE_AGE 2
 abort_check "$PA" retired_nursery "SPROUT_GC_NURSERY was removed: .*SPROUT_GC_NURSERY_SHARE" bad_env SPROUT_GC_NURSERY 1
 abort_check "$PA" retired_survive "SPROUT_GC_NURSERY_SURVIVE was removed: the survivor floor is fixed at 2" bad_env SPROUT_GC_NURSERY_SURVIVE 4
 abort_check "$PA" retired_minors_off "SPROUT_GC_PROMOTE_AGE was removed" bad_env SPROUT_GC_MINOR 0 SPROUT_GC_PROMOTE_AGE 2
+abort_check "$PA" retired_holes_0 "SPROUT_GC_HOLES was removed: the occupancy-map collector is the only one" bad_env SPROUT_GC_HOLES 0
+abort_check "$PA" retired_holes_1 "SPROUT_GC_HOLES was removed: the occupancy-map collector is the only one" bad_env SPROUT_GC_HOLES 1
+abort_check "$PA" retired_region_lists "SPROUT_GC_REGION_LISTS was removed: the occupancy-map collector is the only one" bad_env SPROUT_GC_REGION_LISTS 1
 SHARE_MSG="SPROUT_GC_NURSERY_SHARE: expected a number in (0, 4]"
 abort_check "$PA" bad_share_abc "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE abc
 abort_check "$PA" bad_share_0 "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE 0
 abort_check "$PA" bad_share_5 "$SHARE_MSG" bad_env SPROUT_GC_NURSERY_SHARE 5
-for sel in age2 age3 age_large major_age remember set_before_major major_rule defaults nursery_sizing nursery_share_half nursery_small_heap nursery_min_binds nursery_pinned nursery_floor_before_major nursery_floor_binds nursery_survive nursery_survive_major nursery_survive_off minors_off share_read share_ignored_minors_off census_age holes_age2 holes_age3 holes_age_large holes_remember holes_remember_old_child holes_census holes_census_minors_off census_large holes_census_large; do
+for sel in age2 age3 age_large remember holes_remember_old_child major_rule defaults nursery_sizing nursery_share_half nursery_small_heap nursery_min_binds nursery_pinned nursery_floor_before_major nursery_floor_binds nursery_survive nursery_survive_major nursery_survive_off minors_off share_read share_ignored_minors_off holes_census holes_census_minors_off census_large; do
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$PA" "$sel" > "$TMP_DIR/pa_$sel.out" 2> "$TMP_DIR/pa_$sel.err" || {
     echo "  promote_age '$sel' failed:" >&2
     cat "$TMP_DIR/pa_$sel.out" "$TMP_DIR/pa_$sel.err" >&2
@@ -680,7 +661,7 @@ for sel in age2 age3 age_large major_age remember set_before_major major_rule de
   }
   test "$(cat "$TMP_DIR/pa_$sel.out")" = "promote-age-$sel"
 done
-# Under HOLES the cycle line carries a census only at a major: 2 of holes_census's 4 collections and
+# The cycle line carries a census only at a major: 2 of holes_census's 4 collections and
 # the atexit one, and all 5 of the minors-off run's and the atexit one.
 for want in holes_census:3 holes_census_minors_off:6; do
   got=$(grep -c "types: " "$TMP_DIR/pa_${want%%:*}.err" || true)

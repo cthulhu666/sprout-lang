@@ -31,14 +31,15 @@
  *   G cycle                a collection starts (cycle number, counting from 1).
  *   E cycle kind heap_after free_slots ordinary_regions large_regions walked
  *                          that collection ends.  kind: 0 minors off, 1 major, 2 minor with the
- *                          young-only sweep, 3 minor with the full sweep (GC_KIND_* below).
+ *                          young-only sweep (GC_KIND_* below; 3, a minor with the full sweep, was
+ *                          recorded by the removed free-list collector).
  *                          heap_after is the live object count, free_slots the runtime's free
- *                          count (g_gc_freelist_len) in whatever unit the run used: slots under
- *                          SPROUT_GC_HOLES=0, else the granules over the mean live slot size.  --check
+ *                          count (g_gc_freelist_len): the granules over the mean live slot size
+ *                          (slots in a trace from the removed free-list collector).  --check
  *                          does not read it; the policy replay compares it with its own free
  *                          slots only to calibrate, so that figure is meaningful for slot-unit
- *                          traces alone.  walked the slots the sweep stepped over (the cycle
- *                          line's walked=), or under HOLES the bitmap words.
+ *                          traces alone.  walked the bitmap words the sweep read (the cycle
+ *                          line's walked=; slots stepped over in a free-list trace).
  *
  * The runtime flushes the trace after the atexit collection, so a complete trace ends with an E.
  *
@@ -279,7 +280,7 @@ static const Handlers check_handlers = { chk_alloc, chk_free, chk_tail, chk_vec_
  *   held = regions x region_size + live large bytes.
  *
  * POLICIES
- *   base      the free-list layout with SPROUT_GC_HOLES=0 SPROUT_GC_REGION_LISTS=1, 1 MiB regions.  Per region and class an
+ *   base      the removed free-list collector's layout with per-region lists, 1 MiB regions.  Per region and class an
  *             exact-fit free slot count; class c takes from the lowest region holding one (a cursor
  *             per class, reset at every E, lowered by a tail), else bumps exactly as
  *             sprout_gc_alloc_block does: the hint region if the slot fits, else the highest region

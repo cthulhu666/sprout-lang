@@ -13,7 +13,7 @@
  * ascending, descending, zigzag and shuffled keys, checking the AVL invariants), bst_remove_min,
  * bst_rotate_left, bst_rotate_right and bst_balance (all four cases, directly);
  * sprout_alloc_closure, sprout_alloc_tuple_blob, ref_new;
- * sprout_heap_child_value_payload for every heap kind; sprout_gc_sweep (garbage is reclaimed, and
+ * sprout_heap_child_value_payload for every heap kind; the sweep (garbage is reclaimed, and
  * a lineage sweep records the corpse's backtrace in its payload).
  * Not covered: the size/arity aborts in sprout_alloc_closure and sprout_alloc_tuple_blob, the
  * null-payload and out-of-range aborts in sprout_heap_child_value_payload, and out-of-memory.
