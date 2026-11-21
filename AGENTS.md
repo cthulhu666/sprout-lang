@@ -69,11 +69,13 @@ so a reseed or a golden snapshot never trips it. A turn whose last tool call is
 and it records nothing, so the change is still gated once you reply. Test with
 `just test-review-gate`.
 
-**`/sprout-review`** — `.claude/skills/sprout-review/SKILL.md`, a wrapper around `/code-review` that
-records each run in `claude-review/runs.tsv` under the common git dir (one ledger for all worktrees,
-invisible to `git status`), with findings and items files beside it. `.claude/skills/pr-tracker/`
-(`/prs`) shows each PR's runs and issues. `/sprout-review [low|medium|high|xhigh|max]
-[<pr#>|<branch>|<path>]`, default `high`. It reports and stops. Test with `just test-review-ledger`.
+**`/sprout-review`** — `.claude/skills/pr-tracker/skills/sprout-review/SKILL.md`, a wrapper around
+`/code-review` that records each run in `claude-review/runs.tsv` under the common git dir (one
+ledger for all worktrees, invisible to `git status`), with findings and items files beside it.
+`.claude/skills/pr-tracker/` (`/prs`) shows each PR's runs and issues; the one plugin ships both,
+and other repos install it as `pr-tracker@sprout` from this repo's marketplace. `/sprout-review
+[low|medium|high|xhigh|max] [<pr#>|<branch>|<path>]`, default `high`. It reports and stops. Test
+with `just test-review-ledger`.
 
 **Seed gate** — `scripts/seed_gate.sh`, a PreToolUse Bash hook. Intercepts `git commit` and blocks if
 `stdlib/compiler/*.sprout` or `stdlib/*.sprout` is staged without a refreshed

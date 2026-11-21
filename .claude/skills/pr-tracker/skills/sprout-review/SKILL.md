@@ -39,14 +39,12 @@ Validate all of this before the ledger row exists.
 
 1. **Resolve** level, flags and target. Tell the user the level.
 
-2. **Open the row**, before any review work. First resolve the repo root, as its own command:
-   `git rev-parse --show-toplevel`. Use that literal absolute path as `<root>` in every ledger
-   command below. The root, not a relative path, so a subdirectory session does not miss the
-   script and silently skip the row. No `$(git ...)` inside the `bash` call: a worktree-isolated
-   session's sandbox refuses it.
+2. **Open the row**, before any review work. The script files the row in the repo of the
+   session's cwd. The `bash` call must contain no `$(git ...)`: a worktree-isolated session's
+   sandbox refuses it.
 
    ```
-   bash <root>/scripts/review_ledger.sh open [--pr <n> | --branch <b>]
+   bash ${CLAUDE_PLUGIN_ROOT}/scripts/review_ledger.sh open [--pr <n> | --branch <b>]
    ```
 
    `--pr <n>` for a PR target, `--branch <b>` for a branch target, no flag for the working tree or
@@ -63,7 +61,7 @@ Validate all of this before the ledger row exists.
 4. **Write the findings** as markdown. Write it to a scratch file with file tools, then:
 
    ```
-   bash <root>/scripts/review_ledger.sh findings <run-id> --write < <file>
+   bash ${CLAUDE_PLUGIN_ROOT}/scripts/review_ledger.sh findings <run-id> --write < <file>
    ```
 
    Never write the ledger path directly: in a worktree it is inside the main checkout's `.git`.
@@ -73,8 +71,8 @@ Validate all of this before the ledger row exists.
    assigned: always `severity`, and `track` when `/code-review` gave no `category`.
 
 5. **Write the items** as JSON:
-   `bash <root>/scripts/review_ledger.sh items <run-id> --write < <file>`. One object per grouped
-   issue, with the keys `validate_items` in `scripts/review_ledger.sh` checks: `ns`,
+   `bash ${CLAUDE_PLUGIN_ROOT}/scripts/review_ledger.sh items <run-id> --write < <file>`. One object per grouped
+   issue, with the keys `validate_items` in the plugin's `scripts/review_ledger.sh` checks: `ns`,
    `track`, `severity`, `verdict`, `file`, `line`, `summary`, `decision`. Mapping:
    - `track`: from `category` when present: `cleanup` for reuse, simplification, efficiency,
      altitude or conventions, `bug` for anything else. Without `CLAUDE_CODE_REPORT_FINDINGS`
@@ -94,7 +92,7 @@ Validate all of this before the ledger row exists.
 6. **Close the row:**
 
    ```
-   bash <root>/scripts/review_ledger.sh done <run-id> <found> <confirmed> <level> <cleanups> <cleanups-confirmed>
+   bash ${CLAUDE_PLUGIN_ROOT}/scripts/review_ledger.sh done <run-id> <found> <confirmed> <level> <cleanups> <cleanups-confirmed>
    ```
 
    `found` and `confirmed` are the bug-track reports and the bug-track CONFIRMED ones; `cleanups`
@@ -109,11 +107,11 @@ Validate all of this before the ledger row exists.
    the reader a changelog, not a decision (run `1789385000-27845`).
 
 8. **When the user acts on a finding**, record it:
-   `bash <root>/scripts/review_ledger.sh status <run-id> <n> <open|fixed|skipped|wontfix> [<sha>]`.
+   `bash ${CLAUDE_PLUGIN_ROOT}/scripts/review_ledger.sh status <run-id> <n> <open|fixed|skipped|wontfix> [<sha>]`.
    `fixed` needs the commit sha. Any `n` of a grouped issue sets the whole issue; `issues <run-id>`
    prints the result. Never in the review turn itself.
 
 ## Ledger
 
 `$(git rev-parse --git-common-dir)/claude-review/runs.tsv`: one for all worktrees, append-only.
-See `scripts/review_ledger.sh`.
+See `scripts/review_ledger.sh` in this plugin.
