@@ -886,7 +886,8 @@ theorem r9ret_rejected : ¬ r9ret.Typed := by
       | over _ _ _ _ _ _ _ _ hlt _ => simp at hlt
 
 /-- `fn f(x: Int) -> Int -> Int !{IO} = \y -> y`: the type is `Int -> Int -> Int !{IO}`. The
-compiler accepts it; the checker does not (BACKLOG, "Lean model rejects `-> A -> B !{IO}`"). -/
+compiler accepts it; the checker does not (BACKLOG, "The Lean checker rejects
+`fn f(x: Int) -> Int -> Int !{IO}`"). -/
 def okRetIO : Program :=
   ⟨[.fn "f" [("x", some .int)] (some (.arr [.int] .int .pure, .io)) (.lam "y" none (.var "y"))]⟩
 
