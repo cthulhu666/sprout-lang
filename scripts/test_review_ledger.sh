@@ -94,20 +94,6 @@ check "a traversing id is rejected"     "1" \
 check "a missing id is rejected"       "1" \
   "$(bash "$LEDGER" findings 2>&1 >/dev/null | grep -c 'run id')"
 
-# The RAW findings are a second sibling, and the only record of what each pass said
-# in its own words. Keeping them is what made OVERLAP_MIN measurable, and measuring
-# it is what retired it — 0.5 had survived three runs on adjectives until then.
-rpath=$(bash "$LEDGER" raw "$id1")
-check "raw path names the run"         "1"  "$(printf '%s' "$rpath" | grep -c "raw-$id1.json$")"
-check "raw path is under GIT_DIR"      "1"  "$(printf '%s' "$rpath" | grep -c '/claude-review/')"
-check "raw is not the findings file"   "1"  "$([ "$rpath" != "$fpath" ] && echo 1 || echo 0)"
-echo '[]' > "$rpath"
-check "writing raw keeps count"        "3"  "$(bash "$LEDGER" count)"
-check "a traversing raw id is rejected" "1" \
-  "$(bash "$LEDGER" raw "../../escape" 2>&1 >/dev/null | grep -c 'run id')"
-check "a missing raw id is rejected"   "1" \
-  "$(bash "$LEDGER" raw 2>&1 >/dev/null | grep -c 'run id')"
-
 # `--write` lets the script do the write: in a worktree the ledger dir sits in the
 # main checkout's `.git`, which an isolated session's file tools refuse.
 wid="write-test"
@@ -115,11 +101,7 @@ printf '# findings\n\nline two\n  indented\n' > "$R/want.md"
 wpath=$(bash "$LEDGER" findings "$wid" --write < "$R/want.md")
 check "findings --write prints the plain path" "$(bash "$LEDGER" findings "$wid")" "$wpath"
 check "findings --write round-trips"   "0"  "$(cmp -s "$R/want.md" "$wpath"; echo $?)"
-printf '[]' > "$R/want.json"
-wraw=$(bash "$LEDGER" raw "$wid" --write < "$R/want.json")
-check "raw --write prints the plain path" "$(bash "$LEDGER" raw "$wid")" "$wraw"
-check "raw --write round-trips []"     "0"  "$(cmp -s "$R/want.json" "$wraw"; echo $?)"
-check "--write leaves no temp file"    "2"  "$(ls "${wpath%/*}" | grep -c -- "-$wid\.")"
+check "--write leaves no temp file"    "0" "$(ls -A "${wpath%/*}" | grep -c '^\.tmp\.')"
 
 bash "$LEDGER" findings "$wid" --write < /dev/null 2> "$R/err.txt"
 check "empty stdin exits 2"            "2"  "$?"
@@ -142,8 +124,6 @@ printf 'from sub\n' | bash "$LEDGER" findings "sub-write" --write > /dev/null
 check "--write from a subdir"          "from sub" "$(cat "${wpath%/*}/findings-sub-write.md")"
 sub_path=$(bash "$LEDGER" findings "$id1")
 check "findings path from a subdir"    "1"  "$([ -n "$sub_path" ] && [ "$sub_path" = "$fpath" ] && echo 1 || echo 0)"
-sub_raw=$(bash "$LEDGER" raw "$id1")
-check "raw path from a subdir"         "1"  "$([ -n "$sub_raw" ] && [ "$sub_raw" = "$rpath" ] && echo 1 || echo 0)"
 cd "$R" || exit 1
 
 # --- the effort column ---------------------------------------------------
@@ -235,6 +215,34 @@ check "an omitted confirmed count is '-'" "-" \
 # A 9-field row predates the column and must keep counting.
 printf '2020-01-01T00:00:00Z\tdone\tcleanup-real\tdeadbee\t999-3\t3\t1\tlow\t2\n' >> "$runs"
 check "a legacy 9-field row counts"    "4"  "$(bash "$LEDGER" count)"
+
+# A review with no verify pass records "-" for both confirmed columns. `show` must not
+# read that as 0 real, and a later counted run still sums on its own.
+git switch -q -c no-verify
+idv=$(bash "$LEDGER" open)
+bash "$LEDGER" done "$idv" 3 - high 1 -
+check "a dash confirmed count is stored" $'-\t-' \
+  "$(awk -F'\t' -v i="$idv" '$2=="done" && $5==i { print $7 "\t" $10 }' "$runs")"
+check "a dash run still counts"        "1"  "$(bash "$LEDGER" count)"
+check "all-dash rows show as unverified" "review:1 +3 unverified @high" "$(bash "$LEDGER" show)"
+idw0=$(bash "$LEDGER" open)
+bash "$LEDGER" done "$idw0" 2 1 high
+check "a counted run sums beside a dash run" "review:2 2 found 1 real +3 unverified @high" \
+  "$(bash "$LEDGER" show)"
+git switch -q -c zero-real
+idz=$(bash "$LEDGER" open)
+bash "$LEDGER" done "$idz" 3 0 high
+check "a real 0 is still shown as 0"   "review:1 3 found 0 real @high" "$(bash "$LEDGER" show)"
+# found and confirmed are digits or '-'; anything else is an error and writes no row.
+rows_before=$(($(wc -l < "$runs")))
+bash "$LEDGER" done "$idz" 4 - high
+check "digits and '-' are accepted"    "$((rows_before + 1))" "$(($(wc -l < "$runs")))"
+rows_before=$(($(wc -l < "$runs")))
+bash "$LEDGER" done "$idz" "3 (2)" 1 high 2>/dev/null; rc1=$?
+bash "$LEDGER" done "$idz" 3 "$(printf '1\tx')" high 2>/dev/null; rc2=$?
+bash "$LEDGER" done "$idz" "$(printf '1\tx')" 1 high 2>/dev/null; rc3=$?
+check "a bad found or confirmed fails"  "2 2 2" "$rc1 $rc2 $rc3"
+check "and appends no row"             "$rows_before" "$(($(wc -l < "$runs")))"
 git switch -q main
 
 # --- the reviewed target --------------------------------------------------

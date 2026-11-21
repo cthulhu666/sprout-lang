@@ -1021,14 +1021,6 @@ test-pr-tracker:
 test-error-line-marker:
   bash scripts/test_error_line_marker.sh
 
-# Exercise the workflow script inside .claude/skills/sprout-review/SKILL.md. Same
-# rationale as the three above, one level worse: that script is JS in a markdown
-# fence, so nothing runs it until a review is already several agents in, and a slip
-# in its verify path or its cap loses a finding without ever failing loudly.
-[group('test')]
-test-review-script:
-  python3 scripts/test_review_script.py
-
 # Exercise scripts/check_clang_cpr.sh against stub clangs: one per lowering of `__int128`.
 [group('test')]
 test-check-clang-cpr:
@@ -2549,9 +2541,6 @@ backlog-shape:
   #!/usr/bin/env bash
   set -euo pipefail
   ./scripts/backlog_shape.sh
-  # The skill keeps its own backlog so it stays self-contained; it is held to the
-  # same shape rules, or "same discipline" is just a claim in its header.
-  ./scripts/backlog_shape.sh .claude/skills/sprout-review/BACKLOG.md
 
 # AGENTS.md "Docs & Spec" #6: cite runtime C code by identifier, not line number.
 # The runtime only grows, so a line number decays in one direction; when this gate
@@ -4905,7 +4894,6 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "pr-rebase|test-pr-rebase"
     "bench-vm|test-bench-vm"
     "error-line-marker|test-error-line-marker"
-    "review-script|test-review-script"
     "setup-dev|test-setup-dev"
     # Added with the prelude-extern relocation: one C symbol, one `extern fn`
     # declaration, repo-wide. The prelude and stdlib.regex both declared
