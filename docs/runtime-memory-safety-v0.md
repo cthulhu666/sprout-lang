@@ -155,6 +155,10 @@ Steps:
 
 Runtime only: no compiler edit, no reseed. Under ASan:
 
+The names below (`fl_push_staged`, `sprout_fl_verify_against_full_walk`, the free-list link, a FREE
+header) are the removed free-list collector's. The sweep (`sprout_holes_sweep_region`) writes no
+header and no link for a dead slot, so this stage needs re-deriving against it before it starts.
+
 - **Quarantine.** A swept slot is not pushed to the free list for N cycles; it stays poisoned and
   unused. Without this the collection that frees a slot hands it straight back
   (`sprout_alloc_obj_raw` collects just before it allocates), allocation unpoisons it, and a stale

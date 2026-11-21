@@ -222,24 +222,17 @@ but the first is verbatim — the cycle line is elided at each `...`, since its 
 The line also ends in `closure_apply=<n>` (older output lacks it): closure values applied. `closure=`
 counts allocations, and a capture-free closure is a static constant that never allocates.
 
-By default the marker counts the census, so it is printed at majors only; a minor's cycle line has
-no `types:` line. (With `SPROUT_GC_HOLES=0` the sweep counts it and every cycle prints it.) Live
-large objects, which have a region of their own, are counted under both collectors.
+The marker counts the census, so it is printed at majors only; a minor's cycle line has no
+`types:` line. Live large objects, which have a region of their own, are counted too.
 
-**With `SPROUT_GC_HOLES=0`, `walked` is what the sweep cost, `swept` is what it bought.** (By
-default `walked` counts bitmap words read and no dead slot is visited, so the split below does not
-apply.) Every slot walked was kept, freed
-this cycle, or already FREE, so `walked - live - swept` is the FREE slots stepped over for nothing:
-116,666 above, 1.19 per object freed. The trigger reads `live` and nothing else, so this part of a
-collection's cost is invisible to it. A FREE count that dwarfs `swept` means regions are pinned by
-a few survivors and full of a slot class nothing allocates any more — #407's shape, and
-`test_gc_walk_sparse.spr` in miniature
-([bench/results-2026-10-03-gc-walk.md](../bench/results-2026-10-03-gc-walk.md)).
-
-**Not under `SPROUT_GC_LINEAGE=1`.** Lineage keeps each dead OBJ as a POISON corpse, which counts
-in `swept` only in the cycle it dies and is walked in every cycle after. There
-`walked - live - swept` is FREE slots *plus every corpse so far*, and grows for that reason alone.
-`walked` itself stays exact; only the three-way split stops holding.
+**`walked` is what the sweep cost, `swept` is what it bought.** `walked` counts the bitmap words
+the sweep reads: for each region it sweeps, the words below the region's bump mark, plus one per
+large region. No dead slot is visited, so it is not a count of slots, and live and free slots cost
+the same. A major sweeps every region, so a heap pinned by a few survivors still costs words in
+proportion to its bump marks (`test_gc_walk_sparse.spr` is that shape in miniature); a minor
+sweeps only the regions holding a young object or a freed inline tail. Under `SPROUT_GC_LINEAGE=1`
+a dead OBJ stays as a POISON corpse through minors and majors, and its granules are not
+counted in `free`.
 
 **Read the two byte totals before concluding anything from the counts.** Every other field on that
 line is a COUNT, and a count cannot see a shape bug: right-nested `++` and `string_concat_many`
@@ -565,10 +558,10 @@ earlier gaps.
 
 ## String-invariant oracle (`SPROUT_GC_HDRCHECK`) — and why local green ≠ CI green
 
-With `SPROUT_GC_HOLES=0`, `SPROUT_GC_HDRCHECK=1` also asserts the sweep's **slot walk** against the
-slotmap (by default the sweep visits no slot, and it walks each run of `occ` by headers) — a
-step that skips a recorded slot start, or lands on an offset that is not one, aborts with
-`HDRCHECK: slot walk desync at region … skipped_start=…`, and a VECTOR whose header aux
+`SPROUT_GC_HDRCHECK=1` also asserts, after each sweep, a walk of each run of `occ` by headers
+against the slotmap — a header whose step passes a recorded slot start or the run's end, or
+stops short of it, aborts with `HDRCHECK: holes walk: header too long …` or `… header too short …`,
+and a VECTOR whose header aux
 disagrees with where `->data` points aborts with `VECTOR aux/data disagree`. Those are the
 failure mode every `aux` invariant exists to prevent and they otherwise corrupt in
 silence; see `docs/compiler-internals.md` for what each one pins.

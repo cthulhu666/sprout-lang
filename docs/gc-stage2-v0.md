@@ -1,9 +1,10 @@
 # GC stage 2 — promotion age, nursery size, a young-only sweep (v0, 2026-11-04)
 
-Status: steps 1, 2, 2b, 3 and 5 of §7 are implemented; the defaults are K = 3, s = 1, c = 2 and
-the occupancy-map collector (`SPROUT_GC_HOLES=0` keeps the free-list one until step 6). Step 4
-is implemented behind `SPROUT_GC_REGION_LISTS=1`, which needs `SPROUT_GC_HOLES=0`. Stage 1
-is [gc-generational-v0.md §14](gc-generational-v0.md); this doc replaces its §14.6.
+Status: steps 1, 2, 2b, 3, 4, 5 and 6 of §7 are implemented; the defaults are K = 3, s = 1, c = 2
+and the occupancy-map collector, which is the only one. Step 6 removed the free-list collector
+with both of its switches, so the young-only sweep (step 3, §5.3), the walk before a major (§5.4)
+and the per-region lists (step 4, §5.6) describe code that is gone; §5.7 describes the collector.
+Stage 1 is [gc-generational-v0.md §14](gc-generational-v0.md); this doc replaces its §14.6.
 
 ## 1. Problem
 
@@ -783,7 +784,8 @@ and premise 6's free count changes unit.
    cost with `bench/gc_minor/ab.sh`, reporting region counts (§5.3) and how often a minor fell back
    to the full sweep.
 
-   **Implemented** (`sprout_gc_sweep_young`, `sprout_gc_young_sweep_ok`, `sprout_gc_check_sweep`).
+   **Implemented** (`sprout_gc_sweep_young`, `sprout_gc_young_sweep_ok`, removed in step 6;
+   `sprout_gc_check_sweep` stays).
    Against master's runtime, with `walked=` and timing removed, every `[sprout gc]` line and the
    stdout are identical on the self-compile, mutvec_int, the §14.8 programs that build from this
    repo except http_log_middleware, `tests/gc_gen/*` and `test_gc_freelist_reuse`.
@@ -849,7 +851,7 @@ and premise 6's free count changes unit.
    `g_gc_freelist_len`. The VM A/B on the §14.8 set reports all three, with each workload's
    spread, and the reuse path's cost with minors off.
 
-   **Implemented behind the switch** ([results](../bench/results-2026-11-12-gc-region-lists.md)).
+   **Implemented behind the switch, removed in step 6** ([results](../bench/results-2026-11-12-gc-region-lists.md)).
    On a quiet VM at the default, against the global lists, stdout matched and every
    full-walk minor that was not before a major is gone. Collection counts are equal on every
    workload, and peak slots on every workload but the self-compile (1.01; 0.83 of minor-off).
@@ -866,7 +868,7 @@ and premise 6's free count changes unit.
    switch for the A/B. Option D is part of C.
 
    **Implemented, default on** ([results](../bench/results-2026-11-15-gc-holes-proto.md)).
-   `SPROUT_GC_HOLES=0` keeps the free-list collector until step 6.
+   `SPROUT_GC_HOLES=0` kept the free-list collector until step 6.
    On the VM, against the free-list collector, GC time falls 49–96% on every workload that collects and no
    workload's CPU or RSS rises outside its spread: the self-compile's CPU is 0.95, load_spike's
    0.63, rotate_classes' 0.73 with 0.12 of its RSS, mutvec_push's RSS 0.76. The free count's unit
@@ -875,7 +877,7 @@ and premise 6's free count changes unit.
    FL_VERIFY's successor, HDRCHECK, lineage, AGEPROF, the census and ALLOCTRACE work under it;
    `tests/c_runtime/holes_check.c` and the default arms of `just gc-gen-check` check premises
    10–16. On `test_gc_trigger_adversary` the cycle count is not monotone in the share s (§5.5)
-   on either collector (s = 0.5 to 4 gives 163 to 327 cycles with
+   on either collector (s = 0.5 to 4 gave 163 to 327 cycles with
    `SPROUT_GC_HOLES=0` and 142 to 265 by default), because s also moves where the majors fall,
    which sets the steady heap. What s fixes is the nursery after a minor, s × the heap it left;
    `just gc-adapt-check` reads that ratio off the cycle lines.
@@ -885,6 +887,11 @@ and premise 6's free count changes unit.
    per-region lists, the staged build (`g_fl_saved`, `fl_push_staged`, `fl_region_commit`,
    `fl_region_rollback`), `sprout_gc_young_sweep_ok`, the `SPROUT_GC_HOLES=0` gate arms and C cases,
    and the old FL_VERIFY multiset oracle and HDRCHECK slot walk.
+
+   **Implemented.** The free-list collector and both switches are gone; each switch is retired
+   (set to a non-empty value, it aborts at startup with a message naming the removal). `walked=`
+   counts bitmap words, so `just gc-walk-check` and `gc-trigger-check`'s walk bound went with it.
+   The footprint floor stays.
 
 ## 8. On landing
 
@@ -940,7 +947,7 @@ Step 5:
 - The comment above `vector_push`'s growth branch: the sweep no longer steps over a FREE slot by
   its header, and lookups reject by start bit.
 
-Step 6, for step 4's switch: `sprout_gc_young_sweep_ok`, the staged build, and the
+Step 6 (done), for step 4's switch: `sprout_gc_young_sweep_ok`, the staged build, and the
 `fl_push_staged` warning in the comment above `sprout_vec_release_inline_tail`. For
 `SPROUT_GC_HOLES=0`: the free-list collector of §7 step 6, the `SPROUT_GC_HOLES=0` arms of the
 justfile gates and `tests/c_runtime` cases (`gen_check.c`'s `clear_before_major` and

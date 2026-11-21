@@ -4,6 +4,12 @@ Design doc for issue #407. **Option B (§6.2), the damped footprint floor with `
 2026-10-08 and is implemented** in `sprout_gc_collect_with_reason`, tested by `just
 gc-trigger-check`. §9 records the measurements on the build.
 
+**Since written:** the free-list collector this doc measures (`sprout_gc_sweep`, `g_freelist`, the
+per-slot walk) has been removed. The sweep is word-wise, `walked=` counts bitmap words, and `free`
+is the free granules over the mean live slot size; the floor itself is unchanged. §3, §6.2, §8.4
+and §10 keep that collector's measurements and `just gc-walk-check`, which went with it;
+`gc-trigger-check` keeps only the adversary footprint probe.
+
 Companion to [gc-generational-v0.md](gc-generational-v0.md), which owns the *sweep's* cost and the
 adapt-factor default. This doc owns the **trigger** only, and it is the cited exception to that
 doc's §11.4 — see §4.
@@ -64,8 +70,8 @@ ratio as exact.)
 **Non-goals**
 
 - **The sweep's own cost.** A young-only minor no longer rebuilds the freelists
-  ([gc-stage2-v0.md](gc-stage2-v0.md) §5.3); a full sweep still does. Filed as `BACKLOG.md`
-  **"The class freelists are exact-fit"**. After any trigger fix
+  ([gc-stage2-v0.md](gc-stage2-v0.md) §5.3); a full sweep still did. The exact-fit lists went
+  with the free-list collector. After any trigger fix
   the heap is large again and the pinned run's 2.2 ms pause is nearly all sweep.
 - **Compacting or evacuating sparse regions**, which is the root-cause fix for §3's mechanism and
   is *structurally blocked*: [compiler-internals.md](compiler-internals.md) makes non-moving
@@ -267,8 +273,7 @@ work-per-garbage near `k` whatever the live set is.
   (§3.1, `bench/results-2026-10-03-gc-walk.md`). Under the damped floor it settles at
   `k·free / (live + free) − 1`: `k − 1` when the free pool dwarfs the live set, as on the game.
 - **It terminates while `U` stays fixed, and the undamped form does not.** §6.2.1 has the case
-  where `U` grows. `g_freelist` is exact-fit (`BACKLOG.md`
-  **"The class freelists are exact-fit"**), so take `U` free slots no allocation can reuse. A
+  where `U` grows. `g_freelist` (removed) was exact-fit, so take `U` free slots no allocation can reuse. A
   cycle allocates `(live + U + A) / k` into the reusable pool `A`; allocations `A` cannot hold bump
   fresh slots, and if anything live pins their regions they outlive Pass 2 and join `A`. `A`
   settles at `(live + U) / (k − 1)`, so the whole free pool at `U + (live + U) / (k − 1)`, which
@@ -515,7 +520,7 @@ Each GC-sensitive gate run twice against the prototype runtime (via `just runtim
 |---|---|---|
 | `gc-adapt-check` | green | green, every probe identical (6 / 9 / 6 cycles, `retain_none` 118) |
 | `gc-ageprof-check` | green | green, identical (73%, 24% / 99%) — needs no pin under B |
-| `gc-walk-check` | green | **red**: `walk_sparse` 88 → 10 cycles, 25 → 2.8 slots walked per object swept |
+| `gc-walk-check` (removed) | green | **red**: `walk_sparse` 88 → 10 cycles, 25 → 2.8 slots walked per object swept |
 | `render-cost-gate` | green | green: 3 objects in 3.1M differ |
 | `rooting-cost-gate` | green | green: 4 objects in 75,026, `gc_swept` 185,213 → 185,209 |
 
@@ -576,15 +581,16 @@ re-deriving it by hand.
 
 Landed as `just gc-trigger-check` (in `ci-fast-gates`), described in [gates.md](gates.md).
 
-- **Regression test, written first and confirmed RED** (Definition of Ready #3):
-  `test_gc_walk_sparse` under the default trigger must walk fewer than 4 slots per object swept.
+- **Regression test, written first and confirmed RED** (Definition of Ready #3; the walk bound
+  has since been removed with the free-list collector):
+  `test_gc_walk_sparse` under the default trigger had to walk fewer than 4 slots per object swept.
   It read 25 before B and 2.77 after; it is also the "B is on by default" assertion below.
 - **A termination test**: `test_gc_trigger_adversary` — a dead class with a trickle of demand,
   and live objects pinning the churn's fresh regions — must reach a fixed free pool: at most 2%
   growth over the second half of the run. It reads 150,802 → 150,842 under B. With the divisor
   set to 1 it grew 210,570 → 718,250 and the gate went red, so it tells a settling floor from a
   diverging one.
-- **`gc-walk-check` pins `SPROUT_GC_THRESHOLD=4096` in its probes** (§8.4). It tests the counter,
+- **`gc-walk-check` (removed) pinned `SPROUT_GC_THRESHOLD=4096` in its probes** (§8.4). It tests the counter,
   and B removes the walk its known answer needs. The pin is the default and turns B off (§12 Q5),
   so the gate's readings stay where they were.
 - **`gc-ageprof-check` and `gc-adapt-check` need nothing under B**: every probe reads identically

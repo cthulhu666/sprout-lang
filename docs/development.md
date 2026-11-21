@@ -146,7 +146,7 @@ All variables are read at program startup; invalid values abort with a message.
 | Variable | Default | Description |
 |---|---|---|
 | `SPROUT_GC_THRESHOLD` | `4096` | Managed heap node count that triggers a mid-execution collection. Positive integer to override; `off` or `0` to collect only at exit. Setting it turns the footprint floor (below) and the nursery rule off, so the value forces collections at the rate it names. |
-| `SPROUT_DEBUG_GC` | off | Set to `1` / `true` / `yes` to log each GC cycle to stderr: `[sprout gc] cycle=N reason=X threshold=N heap_before=N heap_after=N live=N roots=N marked=N alloc_since_gc=N swept=N elapsed_us=N arena_regions=N overflow_regions=N walked=N free=N`. `arena_regions`/`overflow_regions` report how many live regions sit inside the reserved arena versus outside it (see below). By default (occupancy maps) `walked` counts the bitmap words the sweep reads, no dead slot is visited, `free` is the free granules below the bump marks over the mean live slot size (`sprout_holes_free_slots`), the `types:` census line prints at majors only, and with minor collections on a minor's line ends ` kind=minor sweep=young` (no ` sweep=full`). With `SPROUT_GC_HOLES=0`: `walked` counts the slots the sweep stepped over, so `walked - live - swept` is the FREE slots it walked and reclaimed nothing from — sweep cost the trigger cannot see; under `SPROUT_GC_LINEAGE=1` it also includes every POISON corpse ([debugging.md](debugging.md)); `free` is the freelist length after the sweep, which the footprint floor reads; and a minor's line ends ` kind=minor sweep=young` or ` kind=minor sweep=full` (which sweep that minor ran). With minor collections on, a major's line ends ` kind=major`. Every line, minors on or off, ends ` sweep_us=N`: the sweep's share of `elapsed_us`; the rest is mostly marking. |
+| `SPROUT_DEBUG_GC` | off | Set to `1` / `true` / `yes` to log each GC cycle to stderr: `[sprout gc] cycle=N reason=X threshold=N heap_before=N heap_after=N live=N roots=N marked=N alloc_since_gc=N swept=N elapsed_us=N arena_regions=N overflow_regions=N walked=N free=N`. `arena_regions`/`overflow_regions` report how many live regions sit inside the reserved arena versus outside it (see below). `walked` counts the bitmap words the sweep reads and no dead slot is visited; `free` is the free granules below the bump marks over the mean live slot size (`sprout_holes_free_slots`), which the footprint floor reads; the `types:` census line prints at majors only; and with minor collections on a minor's line ends ` kind=minor sweep=young`. With minor collections on, a major's line ends ` kind=major`. Every line, minors on or off, ends ` sweep_us=N`: the sweep's share of `elapsed_us`; the rest is mostly marking. |
 
 **Region arena** — 1-MiB regions are carved from a contiguous `mmap(PROT_NONE)` *reservation* of
 address space (not memory; pages are committed per chunk with `mprotect` on first use). This makes
@@ -158,7 +158,6 @@ Full rationale and measurements in [gc-arena-lookup-v0.md](gc-arena-lookup-v0.md
 | Variable | Default | Description |
 |---|---|---|
 | `SPROUT_GC_ARENA_MB` | `4096` | Reserved address space in MiB. Costs no physical memory — RSS is driven by committed chunks, not by this number. Halves on `mmap` failure down to 1 MiB. Set `0` to disable the arena entirely and send every region to `malloc` (the pre-arena behaviour). |
-| `SPROUT_GC_HOLES` | `1` | `0` or `1`; anything else aborts at startup. `1` (default, also when empty) is the occupancy-map collector ([gc-stage2-v0.md](gc-stage2-v0.md) §5.7); `0` selects the free-list collector, kept for A/B and pending removal. `SPROUT_GC_REGION_LISTS=1` needs `0` (alone it exits 2 with "needs SPROUT_GC_HOLES=0"). |
 
 **Adaptive threshold** — after each collection the trigger is re-based on the *live* set, so the
 heap (hence RSS) stays proportional to live data: it rises for genuinely live-heavy heaps,
@@ -177,10 +176,10 @@ avoiding GC thrash, and falls again when the working set shrinks. Two regimes, c
 Design and measurements: [gc-stage2-v0.md](gc-stage2-v0.md) §5.5 and
 [the results](../bench/results-2026-11-08-gc-nursery-share.md).
 
-**Footprint floor** — a sweep walks free slots as well as live ones, and one survivor keeps a
-region's free slots in every later walk. So the threshold is also at least
-`live + (live + free) / 3`, where `free` is the freelist length after the sweep: collect once the
-program has allocated a third of what the last sweep walked. Most programs stay under
+**Footprint floor** — a major sweeps every held region, free slots included, and one survivor
+keeps a region held. So the threshold is also at least `live + (live + free) / 3`, where `free`
+is the free count after the sweep (free granules over the mean live slot size): collect once the
+program has allocated a third of the heap the last sweep left held. Most programs stay under
 `live × factor`, and the compiler reaches it on part of its run; a program holding a large free
 pool behind a small live set collects far less often ([gc-trigger-v0.md](gc-trigger-v0.md) §6.2).
 Its limit: a program whose phases take turns across three or more object sizes while its live

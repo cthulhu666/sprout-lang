@@ -1,37 +1,40 @@
 import stdlib.test (check_eq, check_true, run_suite)
 
-# Regression net for the per-class free lists the sweep hands to the allocator.
+# Regression net for hole reuse under the occupancy-map collector.
 #
-# The sweep builds those lists while it classifies slots, staging each region's
-# entries so they can be dropped again if that region turns out to have nothing
-# live and gets released. Two cases pinned down here, both of which produce a
-# WRONG free list rather than an obvious crash:
+# The sweep (`sprout_holes_sweep_region`) clears the `occ` bits of dead slots,
+# which makes them holes, and `sprout_holes_take` hands them to the allocator.
+# Two cases pinned down here, both of which produce a WRONG hole set rather
+# than an obvious crash:
 #
-#   1. A slot freed in an EARLIER cycle is still free in this one and must be
-#      re-listed. Missing it silently shrinks the free list, so the allocator
-#      stops reusing memory the process already owns.
-#   2. Entries staged for a region that is then released must be dropped, or the
-#      free list points into memory that has been handed back.
+#   1. A slot freed in an EARLIER cycle is still a hole in this one. A sweep
+#      that re-marks it occupied silently shrinks the hole set, so the
+#      allocator stops reusing memory the process already owns.
+#   2. A region the sweep empties is released (`sprout_sweep_release_regions`),
+#      so no cursor or freed-tail entry may still point into it.
 #
 # Neither is observable from Sprout as a wrong value, so this file's job is to
 # DRIVE those states, not to assert on them: the anchors keep regions non-empty
-# across collections (so their staged entries must be kept, not dropped), two
-# churn rounds leave slots free across a cycle boundary, and every size class is
-# then re-allocated. The invariant itself is checked by the runtime, under
-# SPROUT_FL_VERIFY=1.
+# across collections (so they are retained, not released), two churn rounds
+# leave holes across a cycle boundary, and every size class is then
+# re-allocated. The invariant itself is checked by the runtime, under
+# SPROUT_FL_VERIFY=1 (`g_holes_verify`).
 #
 # BE CLEAR ABOUT WHAT THE ASSERTIONS BELOW ARE WORTH: they were mutation-tested
-# against three broken sweeps (drop the earlier-cycle re-list; never roll back;
-# mis-scope the release fixup) and ALL THREE still printed "12 passed". They
-# confirm the churn ran and values round-tripped; they detect no freelist bug.
-# Without SPROUT_FL_VERIFY=1 this file is a workload, not a test — which is why
-# `just test-stress` sets that flag, and why plain `just test` does not gate it.
+# against three broken sweeps of the removed free-list collector (drop the
+# earlier-cycle re-list; never roll back; mis-scope the release fixup) and ALL
+# THREE still printed "12 passed". They confirm the churn ran and values
+# round-tripped; they detect no hole-set bug. Without SPROUT_FL_VERIFY=1 this
+# file is a workload, not a test, which is why `just test-stress` sets that
+# flag and plain `just test` does not gate it. (Not re-measured against the
+# occupancy-map sweep.)
 #
 # This file deliberately keeps a SMALL heap so it can run under
 # SPROUT_GC_STRESS=1 (collect on every allocation) where the number of sweeps is
-# maximal. The consequence is that Pass 2 barely releases any region here, so the
-# rollback hazard above is only weakly covered — `test_gc_region_release.spr`
-# exists to drive that case with a multi-region heap at the default threshold.
+# maximal. The consequence is that `sprout_sweep_release_regions` barely
+# releases any region here, so case 2 is only weakly covered:
+# `test_gc_region_release.spr` drives it with a multi-region heap at the
+# default threshold.
 
 type Shape (..) =
   | S0
@@ -47,7 +50,7 @@ fn shape_sum(s: Shape) -> Int =
   | S0 -> 0
 
 # One round of garbage spread over four OBJ slot classes and two CSTR classes,
-# so several free lists fill at once rather than just one.
+# so several size classes of holes open at once rather than just one.
 fn churn(n: Int, acc: Int) -> Int =
   if n <= 0 then acc
   else churn(n - 1,
@@ -61,7 +64,7 @@ fn churn(n: Int, acc: Int) -> Int =
 
 fn main() -> Unit !{IO} =
   # Allocated before any churn, and live to the end: these keep their regions
-  # from being released, so the sweep must COMMIT those regions' staged entries.
+  # from being released, so those regions are swept and kept.
   let anchor0 = S0
       anchor1 = S1(11)
       anchor3 = S3(1, 2, 3)
@@ -69,7 +72,7 @@ fn main() -> Unit !{IO} =
       anchor_s = "anchor-" ++ int_to_string(99)
       # Round 1 leaves free slots in every class it touched.
       round1 = churn(4000, 0)
-      # Round 2 runs with round 1's slots ALREADY free: a sweep that only lists
+      # Round 2 runs with round 1's slots ALREADY free: a sweep that only reuses
       # the slots it frees this cycle loses them permanently.
       round2 = churn(4000, 0)
       # Fresh allocations must come back out of those reused slots intact.
@@ -89,9 +92,9 @@ fn main() -> Unit !{IO} =
     check_eq("anchor S7 survives both rounds", shape_sum(anchor7), 28),
     check_eq("anchor string survives both rounds", anchor_s, "anchor-99"),
 
-    check_eq("S0 reused from freelist", shape_sum(fresh0), 0),
-    check_eq("S1 reused from freelist", shape_sum(fresh1), 77),
-    check_eq("S3 reused from freelist", shape_sum(fresh3), 60),
-    check_eq("S7 reused from freelist", shape_sum(fresh7), 49),
-    check_eq("CSTR reused from freelist", fresh_s, "fresh-5")
+    check_eq("S0 reused from a hole", shape_sum(fresh0), 0),
+    check_eq("S1 reused from a hole", shape_sum(fresh1), 77),
+    check_eq("S3 reused from a hole", shape_sum(fresh3), 60),
+    check_eq("S7 reused from a hole", shape_sum(fresh7), 49),
+    check_eq("CSTR reused from a hole", fresh_s, "fresh-5")
   ])

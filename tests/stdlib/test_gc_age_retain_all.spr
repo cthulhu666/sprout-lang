@@ -15,7 +15,7 @@ import stdlib.test (check_eq, check_true, run_suite)
 # An instrument that cannot separate these two files is measuring nothing, so
 # `just gc-ageprof-check` asserts the separation rather than either number alone.
 #
-# As with the other GC workloads (`test_gc_freelist_reuse.spr`,
+# As with the other GC workloads (`test_gc_freelist_reuse.spr` (hole reuse),
 # `test_gc_region_release.spr`), the assertions below only confirm the workload
 # ran and its data survived — object age is not observable from Sprout. The
 # measurement lives entirely in the runtime counters.

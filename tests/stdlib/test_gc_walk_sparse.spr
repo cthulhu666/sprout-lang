@@ -1,21 +1,16 @@
 import stdlib.test (check_eq, run_suite)
 
-# Calibration workload for the sweep-walk counter (`walked=` under SPROUT_DEBUG_GC=1).
+# Workload: sparse regions pinned by a few survivors.
 #
-# Shape: regions left mostly FREE in a slot class nothing allocates again, each
-# pinned by a few survivors so it is never released. Every later collection walks
-# those FREE slots and reclaims nothing from them — #407's shape in miniature: a
-# live set shrank and the sweep did not.
-#
-# KNOWN ANSWER: with SPROUT_GC_THRESHOLD pinned (footprint floor off), slots walked
-# per object swept is HIGH here and ~1 for `test_gc_age_retain_none.spr`;
-# `just gc-walk-check` asserts the separation. With the floor on it is LOW, and
-# `just gc-trigger-check` asserts that.
-# The assertions below only confirm the workload ran; the measurement is in the
-# runtime counters.
+# Shape: regions left mostly free after their Wides die, each pinned by a few
+# survivors so it is never released. Every later major sweeps those regions and
+# reclaims little from them — #407's shape in miniature: a live set shrank and the
+# heap held did not. `walked=` under SPROUT_DEBUG_GC=1 counts the bitmap words the
+# sweep reads, so no per-slot bound is checked on it.
+# The assertions below only confirm the workload ran; the runtime counters carry
+# the measurement.
 
-# Arity 6, so a different slot class from Chain's arity 2: a FREE Wide slot can
-# never be refilled by the churn below.
+# Arity 6, so a different slot size from Chain's arity 2.
 type Wide (..) =
   | WEnd
   | Wide Int Int Int Int Int Wide
@@ -51,7 +46,7 @@ fn sparse_survivors(n: Int) -> (Int, Chain) =
   let (wides, keep) = build_sparse(n, 64, WEnd, End)
   in (wide_len(wides, 0), keep)
 
-# Narrow garbage only, so every collection it drives walks the FREE Wide slots.
+# Narrow garbage only, so every collection it drives sweeps the pinned regions.
 fn churn(n: Int, acc: Int) -> Int =
   if n <= 0 then acc
   else churn(n - 1, acc + chain_len(build(8, End), 0))
@@ -65,5 +60,5 @@ fn main() -> Unit !{IO} =
   run_suite("gc_walk_sparse", [
     check_eq("all wides built", wides_built, 100000),
     check_eq("one pin per 64 wides survives the churn", kept_after, 1562),
-    check_eq("churn walked every round", churned, 272000)
+    check_eq("churn ran every round", churned, 272000)
   ])

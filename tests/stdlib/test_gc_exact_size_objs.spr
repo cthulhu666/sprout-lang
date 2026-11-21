@@ -1,9 +1,9 @@
 import stdlib.test (check_true, run_suite)
 
 # Regression net for exact-size OBJ allocation: each ctor arity gets its own
-# slot size and freelist class, freelists link through the slot's first payload
-# word (tag lives in the object header at payload-8), and field values must
-# survive GC cycles and freelist reuse. Covers the arity spectrum (0..9).
+# slot size (a whole number of granules, found by `sprout_holes_take` as a hole
+# of that size; the tag lives in the object header at payload-8), and field
+# values must survive GC cycles and hole reuse. Covers the arity spectrum (0..9).
 
 type Spectrum (..) =
   | A0
@@ -19,7 +19,7 @@ fn spectrum_sum(s: Spectrum) -> Int =
   | A0 -> 0
 
 # Allocate and drop mixed-arity objects so collections run at the default
-# threshold and the per-arity freelists fill, then get reused.
+# threshold and the sweeps open holes of each arity's size, which then get reused.
 fn churn(n: Int, acc: Int) -> Int =
   if n <= 0 then acc
   else churn(n - 1, acc + spectrum_sum(A2(1, 1)) + spectrum_sum(A0) + spectrum_sum(A9(1, 0, 0, 0, 0, 0, 0, 0, 0)))
@@ -29,7 +29,7 @@ fn main() -> Unit !{IO} =
   let keep1 = A1(7)
       keep9 = A9(1, 2, 3, 4, 5, 6, 7, 8, 9)
       churned = churn(10000, 0)
-      # Fresh allocations reuse freelist blocks left by the churn garbage;
+      # Fresh allocations reuse holes left by the churn garbage;
       # fields must round-trip in every arity class.
       fresh0 = A0
       fresh2 = A2(11, 31)
@@ -40,7 +40,7 @@ fn main() -> Unit !{IO} =
     check_true("arity-1 field survives churn", spectrum_sum(keep1) == 7),
     check_true("arity-9 fields survive churn", spectrum_sum(keep9) == 45),
 
-    check_true("arity-0 after freelist reuse", spectrum_sum(fresh0) == 0),
-    check_true("arity-2 fields after freelist reuse", spectrum_sum(fresh2) == 42),
-    check_true("arity-9 fields after freelist reuse", spectrum_sum(fresh9) == 45)
+    check_true("arity-0 after hole reuse", spectrum_sum(fresh0) == 0),
+    check_true("arity-2 fields after hole reuse", spectrum_sum(fresh2) == 42),
+    check_true("arity-9 fields after hole reuse", spectrum_sum(fresh9) == 45)
   ])

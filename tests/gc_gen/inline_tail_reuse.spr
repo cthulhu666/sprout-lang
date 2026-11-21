@@ -3,8 +3,8 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_push, mutvec_fold)
 
 # Run by `just gc-gen-check`. `mutvec_new(n, x)` is inline, so its first push past n moves the
 # elements out and frees the tail of the object's slot (`sprout_vec_release_inline_tail`) onto
-# the free list. The cells and records built right after are the same size class, so they take
-# those slots. Everything stays live and the checksum reads it all back: a tail handed out
+# the freed-tail list (`g_hole_tails`). The cells and records built right after are the same
+# size class, so they take those slots. Everything stays live and the checksum reads it all back: a tail handed out
 # while the vector still owned it would corrupt a sum.
 
 type Quad = Quad Int Int Int Int

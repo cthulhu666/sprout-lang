@@ -1,12 +1,12 @@
 import stdlib.test (check_eq, check_true, run_suite)
 
-# Drives the sweep state that `test_gc_freelist_reuse.spr` cannot reach: Pass 2
-# actually RELEASING regions, which is the case the freelist staging exists for.
+# Drives the sweep state that `test_gc_freelist_reuse.spr` cannot reach:
+# `sprout_sweep_release_regions` actually RELEASING regions.
 #
 # When a region ends the sweep with nothing live it is handed back to the OS, and
-# any freelist entry staged for it must have been rolled back — otherwise the
-# allocator later pops a slot inside a free()d 1 MiB block and writes a header
-# into memory this process no longer owns.
+# no hole cursor or freed-tail entry (`g_hole_tails`) may still point into it —
+# otherwise `sprout_holes_take` later hands out a slot inside a free()d 1 MiB
+# block and the allocator writes a header into memory this process no longer owns.
 #
 # Reaching that state needs a heap SPANNING SEVERAL REGIONS that then dies
 # wholesale, which is why this is a separate file: it wants a large heap at the
@@ -15,9 +15,10 @@ import stdlib.test (check_eq, check_true, run_suite)
 # is quadratic. Verified to produce region releases rather than assumed to —
 # see `just test-freelist-verify`, which runs this under SPROUT_FL_VERIFY=1.
 #
-# As with the reuse test, a wrong freelist is not observable from Sprout as a
+# As with the reuse test, a stale hole is not observable from Sprout as a
 # wrong value, so the assertions below only confirm the workload ran and its data
-# survived; the freelist invariant itself is checked by the runtime oracle.
+# survived; the cursor and tail invariants are checked by the runtime oracle
+# (`g_holes_verify`).
 
 type Chain (..) =
   | End
@@ -40,7 +41,7 @@ fn chain_head(c: Chain) -> Int =
 
 # Each round builds a multi-region chain, consumes it, and drops it. The next
 # round's allocations then collect it, leaving whole regions with nothing live
-# for Pass 2 to release.
+# for `sprout_sweep_release_regions` to release.
 fn build_and_drop(rounds: Int, n: Int, acc: Int) -> Int =
   if rounds <= 0 then acc
   else build_and_drop(rounds - 1, n, acc + chain_len(build(n, End), 0))
@@ -52,7 +53,7 @@ fn main() -> Unit !{IO} =
       anchor_len = chain_len(anchor, 0)
       # 6 rounds x 120k links: each round is several 1 MiB regions of garbage.
       total = build_and_drop(6, 120000, 0)
-      # Allocated after all that releasing, out of whatever the freelist holds.
+      # Allocated after all that releasing, out of the holes the sweeps left.
       fresh = build(48, End)
   in
   run_suite("gc_region_release", [
