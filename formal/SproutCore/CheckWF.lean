@@ -322,8 +322,10 @@ theorem CState.WF.bind {s s' : CState} (hs : s.WF) {n : Nat} {t : Ty} (hn : n < 
 /-! ### Proof automation
 
 `wp_tac` walks a `do` block forward. A leaf lemma is
-`pre → (∀ a s', post → Q a s') → Wp x Q s`, its continuation hypothesis named `h`; `wp_step` applies one, closes the preconditions with
-`wf_close`, and introduces the postconditions. Later `macro_rules` add leaf lemmas. -/
+`pre → (∀ a s', post → Q a s') → Wp x Q s`, its continuation hypothesis named `h`; `wp_step`
+applies one, closes the preconditions with `wf_close`, and introduces the postconditions. Later
+`macro_rules` add leaf lemmas. `wf_close` is tried before the continuation is introduced: a
+pre-goal's tag can carry the prefix `h`, which `case' h` would take for the continuation. -/
 
 syntax "wf_close" : tactic
 syntax "wp_step" : tactic
@@ -1846,5 +1848,138 @@ theorem bindMeta_set_eq {s : CState} {n : Nat} (h : Ty.WF s.sz 0 (.mv n)) (v : O
 theorem instTy_idx {ms : Array Ty} {sz n i : Nat} (hm : ms.size = n) (h : Ty.WF sz n (.gen i)) :
     ∃ hi : i < ms.size, instTy ms (.gen i) = ms[i] :=
   ⟨hm ▸ Ty.WF_gen.mp h, instTy_gen_eq ms i (hm ▸ Ty.WF_gen.mp h)⟩
+
+/-! ### Canonical arrows
+
+One arrow form (spec §7 rule 9, `Judgment.lean`'s `Ty.mergeable`): a pure arrow with parameters
+whose result is an arrow with parameters is one longer arrow, and `mkArr` merges it; an empty
+parameter list never merges. `Ty.Canon t` says no arrow inside `t` is mergeable. -/
+
+mutual
+def Ty.Canon : Ty → Prop
+  | .tup ts => Ty.CanonList ts
+  | .arr ps r e => Ty.CanonList ps ∧ r.Canon ∧ Ty.mergeable ps r e = false
+  | _ => True
+
+def Ty.CanonList : List Ty → Prop
+  | [] => True
+  | t :: ts => t.Canon ∧ Ty.CanonList ts
+end
+
+theorem Ty.CanonList.append {ps qs : List Ty} (h1 : Ty.CanonList ps) (h2 : Ty.CanonList qs) :
+    Ty.CanonList (ps ++ qs) := by
+  induction ps with
+  | nil => simpa [Ty.CanonList] using h2
+  | cons t ps ih => exact ⟨h1.1, ih h1.2⟩
+
+theorem Ty.CanonList.mem {ts : List Ty} (h : Ty.CanonList ts) : ∀ t ∈ ts, t.Canon := by
+  induction ts with
+  | nil => simp
+  | cons t ts ih =>
+    intro u hu
+    rcases List.mem_cons.mp hu with rfl | hu
+    · exact h.1
+    · exact ih h.2 u hu
+
+theorem Ty.CanonList.of_mem {ts : List Ty} (h : ∀ t ∈ ts, t.Canon) : Ty.CanonList ts := by
+  induction ts with
+  | nil => trivial
+  | cons t ts ih =>
+    exact ⟨h t (List.mem_cons_self ..), ih fun u hu => h u (List.mem_cons_of_mem _ hu)⟩
+
+/-- `mkArr` of canonical parts is canonical. -/
+theorem mkArr_canon {ps : List Ty} {r : Ty} {e : Eff} (hps : Ty.CanonList ps) (hr : r.Canon) :
+    (mkArr ps r e).Canon := by
+  unfold mkArr
+  split
+  · rename_i ps' r' e'
+    obtain ⟨hps', hr', hm'⟩ := hr
+    split
+    · rename_i hemp
+      refine ⟨hps, ⟨hps', hr', hm'⟩, ?_⟩
+      rcases ps with _ | ⟨p, ps⟩
+      · rfl
+      · rcases ps' with _ | ⟨q, qs⟩
+        · simp [Ty.mergeable]
+        · simp at hemp
+    · rename_i hne
+      have hps'ne : ps'.isEmpty = false := by
+        rcases ps' with _ | ⟨q, qs⟩
+        · simp at hne
+        · rfl
+      refine ⟨hps.append hps', hr', ?_⟩
+      have hne' : (ps ++ ps').isEmpty = false := by
+        rcases ps with _ | ⟨p, ps⟩
+        · simp at hne
+        · rfl
+      simpa [Ty.mergeable, hne', hps'ne] using hm'
+  · rename_i hn
+    refine ⟨hps, hr, ?_⟩
+    cases r with
+    | arr ps' r' e' =>
+      cases e with
+      | pure => exact (hn ps' r' e' rfl rfl).elim
+      | io => unfold Ty.mergeable; rfl
+    | _ => simp [Ty.mergeable]
+
+theorem shallowF_eq :
+    ∀ (k : Nat) (t : Ty) (s : CState), Wp (shallowF k t) (fun _ s' => s' = s) s := by
+  intro k
+  induction k with
+  | zero => intro t s; exact Wp.fuel'
+  | succ k ih =>
+    intro t s
+    cases t with
+    | mv n =>
+      simp only [shallowF]
+      refine Wp.bind (Wp.get' ?_)
+      split
+      · exact ih _ s
+      · exact Wp.pure' rfl
+    | _ => simp only [shallowF]; exact Wp.pure' rfl
+
+/-- `zonk`'s result is canonical, whatever the state: every arrow it builds goes through `mkArr`,
+and the other types it returns are atoms. -/
+theorem zonkF_canon : ∀ (k : Nat) (t : Ty) (s : CState),
+    Wp (zonkF k t) (fun r s' => r.Canon ∧ s' = s) s := by
+  intro k
+  induction k with
+  | zero => intro t s; exact Wp.fuel'
+  | succ k ih =>
+    intro t s
+    simp only [zonkF]
+    refine Wp.bind (Wp.mono (shallowF_eq k t s) ?_)
+    intro t' s1 e1
+    subst e1
+    have hlist : ∀ ts : List Ty, Wp (ts.mapM (zonkF k))
+        (fun bs s2 => s2 = s1 ∧ Ty.CanonList bs) s1 := by
+      intro ts
+      refine Wp.mono (Wp.mapM (f := zonkF k) (l := ts) (s := s1) (fun s2 => s2 = s1)
+        (fun _ b => b.Canon) (fun _ _ _ _ hb => hb) rfl ?_)
+        fun bs s2 ⟨e2, _, hb⟩ => ⟨e2, Ty.CanonList.of_mem hb⟩
+      intro a ha s2 hs2 _
+      subst hs2
+      exact Wp.mono (ih a s2) fun r s' ⟨hr, hs'⟩ => ⟨hs', by subst hs'; exact Nat.le_refl _, hr⟩
+    cases t' with
+    | tup ts =>
+      dsimp only
+      refine Wp.bind (Wp.mono (hlist ts) ?_)
+      intro bs s2 ⟨e2, hb⟩
+      subst e2
+      exact Wp.pure' ⟨hb, rfl⟩
+    | arr ps r e =>
+      dsimp only
+      refine Wp.bind (Wp.mono (hlist ps) ?_)
+      intro bs s2 ⟨e2, hb⟩
+      subst e2
+      refine Wp.bind (Wp.mono (ih r s2) ?_)
+      intro r' s3 ⟨hr', e3⟩
+      subst e3
+      exact Wp.pure' ⟨mkArr_canon hb hr', rfl⟩
+    | _ => dsimp only; exact Wp.pure' ⟨trivial, rfl⟩
+
+theorem zonk_canon (t : Ty) (s : CState) : Wp (zonk t) (fun r s' => r.Canon ∧ s' = s) s := by
+  unfold zonk
+  exact Wp.bind (Wp.read' fun n => zonkF_canon n t s)
 
 end SproutCore
