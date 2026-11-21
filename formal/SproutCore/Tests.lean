@@ -120,6 +120,26 @@ private def ap0Decl : Decl :=
 #guard rejectKey ⟨[.mainFn (some (.unit, .io)) (.doB [.exprS (.app (.var "print_str") [])] .unit)]⟩
   == "arity"
 
+/-! ### `print_str` takes one parameter (`preludeEnv` holds it as `.fnPoly 1 0`) -/
+
+-- `print_str("a", "b")`: two arguments to a one-parameter prelude function. Rejected.
+#guard rejectKey ⟨[.mainFn (some (.unit, .io))
+  (.doB [.exprS (.app (.var "print_str") [.str "a", .str "b"])] .unit)]⟩ == "arity"
+
+-- `print_str("a")`: one argument. Accepted.
+#guard accepts ⟨[.mainFn (some (.unit, .io)) (.doB [.exprS (printStr "a")] .unit)]⟩
+
+-- A bare `print_str` is a value of type `String -> Unit !{IO}`, whatever its arity.
+-- `fn g() -> Unit !{IO} = let p = print_str in p("a")`. Accepted.
+#guard accepts ⟨[.fn "g" [] (some (.unit, .io))
+  (.letIn "p" (.var "print_str") (.app (.var "p") [.str "a"]))]⟩
+
+-- `fn ap(f: String -> Unit !{IO}) -> String -> Unit !{IO} = f` and
+-- `fn g() -> String -> Unit !{IO} = ap(print_str)`. Accepted.
+#guard accepts ⟨[
+  .fn "ap" [("f", some (.arr [.str] .unit .io))] (some (.arr [.str] .unit .io, .pure)) (.var "f"),
+  .fn "g" [] (some (.arr [.str] .unit .io, .pure)) (.app (.var "ap") [.var "print_str"])]⟩
+
 /-! ### A peer join of arrows of different stored arity (spec §7 rule 8) -/
 
 private def lam2 (b : Expr) : Expr := .lam "x" none (.lam "y" none b)
