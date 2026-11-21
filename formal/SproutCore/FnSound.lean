@@ -295,13 +295,12 @@ theorem fresh_leaf_sk {Q : Ty → CState → Prop} {s : CState} (hs : s.WF)
   refine h _ _ ?_ ⟨_, rfl⟩ (Ext.push rfl) (hs.push rfl) rfl
   simp [CState.sz]
 
-/-- `elabTy` with a map of in-range, named-free, `ok g` values that are not arrows. -/
+/-- `elabTy` with a map of in-range, named-free, `ok g` values. -/
 theorem elabTy_leaf_gen {Q : Ty → CState → Prop} {s : CState} {a : Ty} {f : String → Ty} {g : Nat}
-    (hArr : ∀ x, (f x).isArr = false) (hwf : ∀ x, Ty.WF s.sz g (f x)) (hnf : ∀ x, (f x).NF)
-    (hok : ∀ x, (f x).ok g = true) (hsf : Ty.surf a = true)
+    (hwf : ∀ x, Ty.WF s.sz g (f x)) (hnf : ∀ x, (f x).NF) (hok : ∀ x, (f x).ok g = true) (hsf : Ty.surf a = true)
     (h : ∀ r, a.elab f = some r → Ty.WF s.sz g r → r.NF → r.ok g = true → Q r s) :
     Wp (elabTy f a) Q s := by
-  refine elabTy_elab f hArr a Q s hsf fun r s' e he => ?_
+  refine elabTy_elab f a Q s hsf fun r s' e he => ?_
   subst e
   exact h r he (Ty.elab_wf hwf a r he) (Ty.elab_nf hnf a r he) (Ty.elab_ok hok a r he)
 
@@ -313,8 +312,7 @@ def RetB (m : String → Ty) (sig : Option (Ty × Eff)) (r : Ty) (e : Eff) : Pro
 
 theorem build_sound {Q : List Ty × Ty × Eff × Ty → CState → Prop} {s : CState} {f : FnInfo}
     {m : String → Ty} {g : Nat} (hs : s.WF)
-    (hArr : ∀ x, (m x).isArr = false) (hwf : ∀ x, Ty.WF s.sz g (m x)) (hnf : ∀ x, (m x).NF)
-    (hok : ∀ x, (m x).ok g = true)
+    (hwf : ∀ x, Ty.WF s.sz g (m x)) (hnf : ∀ x, (m x).NF) (hok : ∀ x, (m x).ok g = true)
     (hsp : ∀ p ∈ f.params, ∀ t, p.2 = some t → t.surf = true)
     (hsr : ∀ r e, f.sig = some (r, e) → r.surf = true)
     (h : ∀ ps r e t s', Ext s s' → s'.WF → s'.nextSk = s.nextSk →
@@ -343,7 +341,7 @@ theorem build_sound {Q : List Ty × Ty × Eff × Ty → CState → Prop} {s : CS
     | some t0 =>
       have hsf := hsp (x, some t0) hmem t0 rfl
       dsimp only
-      refine Wp.bind (elabTy_leaf_gen (g := g) hArr (fun x => (hwf x).mono e1.sz (Nat.le_refl _))
+      refine Wp.bind (elabTy_leaf_gen (g := g) (fun x => (hwf x).mono e1.sz (Nat.le_refl _))
         hnf hok hsf ?_)
       intro p hel hwp hnp hokp
       refine Wp.pure' ⟨_, rfl, e1, h1, hnk, by simp [hlen], ?_, ?_, ?_⟩
@@ -399,7 +397,7 @@ theorem build_sound {Q : List Ty × Ty × Eff × Ty → CState → Prop} {s : CS
       · rw [hsig]; unfold RetB; exact ⟨rfl, j, rfl⟩
       · intro hc
         simp [FnInfo.complete, hsig] at hc
-    · refine Wp.bind (elabTy_leaf_gen (g := g) hArr
+    · refine Wp.bind (elabTy_leaf_gen (g := g)
         (fun x => (hwf x).mono e1.sz (Nat.le_refl _)) hnf hok
         (hsr a0 e0 hsig) ?_)
       intro r hel hwr hnr hokr
@@ -442,16 +440,16 @@ def FnInfo.gmap (f : FnInfo) : String → Ty :=
   fun s => match f.writtenVars.findIdx? (· == s) with | some i => Ty.gen i | none => Ty.unit
 
 theorem gmap_props (f : FnInfo) (sz : Nat) :
-    (∀ x, (f.gmap x).isArr = false) ∧ (∀ x, Ty.WF sz f.writtenVars.length (f.gmap x)) ∧
+    (∀ x, Ty.WF sz f.writtenVars.length (f.gmap x)) ∧
       (∀ x, (f.gmap x).NF) ∧ (∀ x, (f.gmap x).ok f.writtenVars.length = true) ∧
       (∀ x, (f.gmap x).noSk = true) := by
-  refine ⟨fun x => ?_, fun x => writtenMap_wf _ _ x, fun x => ?_, fun x => ?_, fun x => ?_⟩ <;>
+  refine ⟨fun x => writtenMap_wf _ _ x, fun x => ?_, fun x => ?_, fun x => ?_⟩ <;>
     unfold FnInfo.gmap <;> split <;> rename_i hi
   all_goals first
     | rfl
     | (have := (List.findIdx?_eq_some_iff_findIdx_eq.mp hi).1
        simp [Ty.ok, this])
-    | simp [Ty.NF, namedIn, Ty.ok, Ty.noSk, Ty.isArr]
+    | simp [Ty.NF, namedIn, Ty.ok, Ty.noSk]
 
 theorem scheme_sound {Q : Nat × Ty → CState → Prop} {s : CState} {f : FnInfo} (hs : s.WF)
     (hsp : ∀ p ∈ f.params, ∀ t, p.2 = some t → t.surf = true)
@@ -463,8 +461,8 @@ theorem scheme_sound {Q : Nat × Ty → CState → Prop} {s : CState} {f : FnInf
     Wp f.scheme Q s := by
   unfold FnInfo.scheme
   dsimp only
-  obtain ⟨hA, hW, hN, hO, hS⟩ := gmap_props f s.sz
-  refine Wp.bind (build_sound (g := f.writtenVars.length) (m := f.gmap) hs hA hW hN hO hsp hsr ?_)
+  obtain ⟨hW, hN, hO, hS⟩ := gmap_props f s.sz
+  refine Wp.bind (build_sound (g := f.writtenVars.length) (m := f.gmap) hs hW hN hO hsp hsr ?_)
   intro ps r e t s' e1 w1 hnk hps hr ht hlen hP1 hRB hno hcomp
   obtain ⟨rfl, hP, hokps, hokr⟩ := hcomp hc
   have hw : AllWritten f.params := by
@@ -556,7 +554,7 @@ def BuiltT.sch (b : BuiltT) : Option (Nat × Ty) := b.2.2.2.2.2
 def skMap (sks : List (String × Ty)) : String → Ty := fun s => (sks.lookup s).getD .unit
 
 theorem skMap_props {sks : List (String × Ty)} (h : ∀ q ∈ sks, ∃ k, q.2 = .skolem k) (sz g : Nat) :
-    (∀ x, (skMap sks x).isArr = false) ∧ (∀ x, Ty.WF sz g (skMap sks x)) ∧
+    (∀ x, Ty.WF sz g (skMap sks x)) ∧
       (∀ x, (skMap sks x).NF) ∧ (∀ x, (skMap sks x).ok g = true) := by
   have key : ∀ x, skMap sks x = .unit ∨ ∃ k, skMap sks x = .skolem k := by
     intro x
@@ -567,8 +565,8 @@ theorem skMap_props {sks : List (String × Ty)} (h : ∀ q ∈ sks, ∃ k, q.2 =
       obtain ⟨l1, l2, hsks, _⟩ := List.lookup_eq_some_iff.mp hl
       obtain ⟨k, hk⟩ := h (x, b) (by rw [hsks]; simp)
       exact Or.inr ⟨k, by simpa using hk⟩
-  refine ⟨fun x => ?_, fun x => ?_, fun x => ?_, fun x => ?_⟩ <;> rcases key x with e | ⟨k, e⟩ <;>
-    simp [e, Ty.isArr, Ty.NF, namedIn, Ty.ok]
+  refine ⟨fun x => ?_, fun x => ?_, fun x => ?_⟩ <;> rcases key x with e | ⟨k, e⟩ <;>
+    simp [e, Ty.NF, namedIn, Ty.ok]
 
 theorem lookup_findIdx : ∀ (sks : List (String × Ty)) (v : String) (i : Nat),
     (sks.map Prod.fst).findIdx? (· == v) = some i →
@@ -1002,8 +1000,8 @@ theorem inferFnGroup_sound {Q : Env → CState → Prop} {s : CState} {base : En
     intro sks s2 e2 h2 hsub hkeys hrng2 hnd2 hle2
     have hsks : ∀ q ∈ sks, ∃ k, q.2 = .skolem k := fun q hq => by
       obtain ⟨k, hk, _⟩ := hrng2 q hq; exact ⟨k, hk⟩
-    obtain ⟨hA, hW, hN, hO⟩ := skMap_props hsks s2.sz 0
-    refine Wp.bind (build_sound (m := skMap sks) (g := 0) h2 hA hW hN hO hfs.1 hfs.2.1 ?_)
+    obtain ⟨hW, hN, hO⟩ := skMap_props hsks s2.sz 0
+    refine Wp.bind (build_sound (m := skMap sks) (g := 0) h2 hW hN hO hfs.1 hfs.2.1 ?_)
     intro ps r e t s3 e3 h3 hnk3 hps hr ht hlen hP1 hRB hno hcomp
     have fin : ∀ sch : Option (Nat × Ty), sch.isSome = f.complete →
         (∀ n sc, sch = some (n, sc) → n = sks.length ∧ sc.ok n = true ∧ sc.noSk = true ∧
@@ -1069,7 +1067,7 @@ theorem inferFnGroup_sound {Q : Env → CState → Prop} {s : CState} {base : En
         | some p =>
           obtain ⟨n, sc⟩ := p
           show Ty.NF sc
-          exact Ty.nf_of_okn sc (hsch n sc rfl).2.1
+          exact Ty.nf_of_ok sc (hsch n sc rfl).2.1
     split
     · rename_i hc
       refine Wp.bind (Wp.map' _ (scheme_sound h3 hfs.1 hfs.2.1 hc ?_))

@@ -200,8 +200,7 @@ range and named-free. -/
 theorem elabTy_map_leaf {Q : Ty → CState → Prop} {s : CState} {a : Ty} {f : String → Ty}
     (hf : ∀ x, (f x = .unit) ∨ ∃ j, f x = .mv j ∧ j < s.sz) (hsf : Ty.surf a = true)
     (h : ∀ r, a.elab f = some r → Ty.WF s.sz 0 r → r.NF → Q r s) : Wp (elabTy f a) Q s := by
-  have hArr : ∀ x, (f x).isArr = false := fun x => by rcases hf x with e | ⟨j, e, _⟩ <;> simp [e, Ty.isArr]
-  refine elabTy_elab f hArr a Q s hsf fun r s' e he => ?_
+  refine elabTy_elab f a Q s hsf fun r s' e he => ?_
   subst e
   refine h r he (Ty.elab_wf (fun x => ?_) a r he) (Ty.elab_nf (fun x => ?_) a r he)
   · rcases hf x with e | ⟨j, e, hj⟩

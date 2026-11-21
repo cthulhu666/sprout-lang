@@ -436,33 +436,6 @@ theorem Ty.wfList_of_okn {n : Nat} : ∀ (ts : List Ty), Ty.okList n ts = true �
     · exact Ty.wfList_of_okn ts h.2 sz u hu
 end
 
-mutual
-theorem Ty.nf_of_okn {n : Nat} : ∀ (t : Ty), t.ok n = true → Ty.NF t
-  | .named _, h => by simp [Ty.ok] at h
-  | .mv _, _ => Ty.NF_mv
-  | .gen _, _ => by simp [Ty.NF, namedIn]
-  | .skolem _, _ => Ty.NF_skolem
-  | .int, _ => Ty.NF_int
-  | .bool, _ => Ty.NF_bool
-  | .str, _ => Ty.NF_str
-  | .unit, _ => Ty.NF_unit
-  | .tup ts, h => by
-    simp only [Ty.ok] at h
-    exact Ty.NF_tup.mpr (Ty.nfList_of_okn ts h)
-  | .arr ps r e, h => by
-    simp only [Ty.ok, Bool.and_eq_true, Bool.not_eq_true'] at h
-    exact Ty.NF_arr.mpr ⟨Ty.nfList_of_okn ps h.1.1, Ty.nf_of_okn r h.1.2⟩
-
-theorem Ty.nfList_of_okn {n : Nat} : ∀ (ts : List Ty), Ty.okList n ts = true → ∀ t ∈ ts, Ty.NF t
-  | [], _ => by simp
-  | t :: ts, h => by
-    simp only [Ty.okList, Bool.and_eq_true] at h
-    intro u hu
-    rcases List.mem_cons.mp hu with e | hu
-    · rw [e]; exact Ty.nf_of_okn t h.1
-    · exact Ty.nfList_of_okn ts h.2 u hu
-end
-
 /-- A top-level binding after its group: a closed scheme. -/
 def Bind.Closed : Bind → Prop
   | .mono _ => False
@@ -499,9 +472,9 @@ theorem Bind.Closed.wf {b : Bind} (h : b.Closed) (sz : Nat) : Bind.WF sz b := by
 theorem Bind.Closed.nf {b : Bind} (h : b.Closed) : Bind.NF b := by
   cases b with
   | mono t => exact False.elim h
-  | poly n t => exact Ty.nf_of_okn _ h
+  | poly n t => exact Ty.nf_of_ok _ h
   | fnMono k t => exact False.elim h
-  | fnPoly k n t => exact Ty.nf_of_okn _ h
+  | fnPoly k n t => exact Ty.nf_of_ok _ h
 
 theorem Env.Closed.wf {env : Env} (h : Env.Closed env) (sz : Nat) : Env.WF sz env :=
   fun p hp => (h p hp).wf sz

@@ -297,8 +297,9 @@ def elabTy (f : String → Ty) : Ty → M Ty
   | .arr ps r e => do
     let r' ← elabTy f r
     -- spec §7 rule 9: the annotation attaches to the innermost arrow; an `!{IO}` outer arrow
-    -- with an arrow result has no spelling.
-    match r', e with
+    -- with a WRITTEN arrow result has no spelling. The test is on `r`, as `Ty.elab` does: a
+    -- variable that `f` maps to an arrow does not trip it.
+    match r, e with
     | .arr .., .io => reject "ill-formed" "effect on an arrow whose result is an arrow"
     | _, _ => pure (mkArr (← elabTyList f ps) r' e)
   | t => pure t
