@@ -1,0 +1,7 @@
+{
+  "name": "sprout",
+  "owner": { "name": "Jakub Głuszecki" },
+  "plugins": [
+    { "name": "pr-tracker", "source": "./.claude/skills/pr-tracker" }
+  ]
+}

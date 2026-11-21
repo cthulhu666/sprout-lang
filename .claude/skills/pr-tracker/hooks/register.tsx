@@ -136,10 +136,10 @@ async function refreshPrs($: Dollar, round: PrRound): Promise<void> {
 /** The repo root, so the script resolves from a subdirectory, and the dirs it reads. */
 type Ledger = { root: string; dirs: string[] }
 
-/** Runs the ledger script from the repo root; null when it fails or times out. */
+/** Runs the plugin's ledger script with the repo root as cwd; null when it fails or times out. */
 async function ledgerScript($: Dollar, root: string, args: string[], timeoutMs: number) {
   const r = await $.process
-    .run(['bash', `${root}/scripts/review_ledger.sh`, ...args], { cwd: root, timeoutMs })
+    .run(['bash', `${$.plugin.root}/scripts/review_ledger.sh`, ...args], { cwd: root, timeoutMs })
     .catch(() => null)
   return r !== null && r.exitCode === 0 ? r.stdout : null
 }

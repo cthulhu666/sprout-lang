@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Tests for scripts/review_ledger.sh. Runs against throwaway repos, never the
-# caller's, so it can be run from anywhere without touching real ledger state.
+# Tests for .claude/skills/pr-tracker/scripts/review_ledger.sh. Runs against throwaway repos,
+# never the caller's, so it can be run from anywhere without touching real ledger state.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-LEDGER="$ROOT/scripts/review_ledger.sh"
+LEDGER="$ROOT/.claude/skills/pr-tracker/scripts/review_ledger.sh"
 
 fail=0
 check() {

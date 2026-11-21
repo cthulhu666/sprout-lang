@@ -2,6 +2,9 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 
+/** The plugin directory the harness gives the mod as `$.plugin.root` (the test sits in `hooks/`). */
+const PLUGIN_ROOT = import.meta.dir.replace(/\/hooks$/, '')
+
 const PANE = {
   plugin: 'pr-tracker',
   component: 'Pane',
@@ -171,7 +174,7 @@ const wire = (on: On, runs = RUNS, stored: Record<string, unknown> = {}, cwd = '
       return ok(prJson(n, `old-${n}`, w.states[n], w.rollups[n]))
     }
     if (a === 'gh') return out(1, '', 'no pull requests found\n')
-    if (a === 'bash' && b === '/repo/scripts/review_ledger.sh') {
+    if (a === 'bash' && b === `${PLUGIN_ROOT}/scripts/review_ledger.sh`) {
       if (e.argv[2] === 'dir') return ok(`${LEDGER}\n`)
       if (e.argv[2] === 'runs') return ok(doneRows(runs))
       if (e.argv[2] === 'issues') {
