@@ -714,11 +714,8 @@ def contraWit : FnWit :=
       (.arr [.arr [.str] .unit .pure] .unit .pure) .pure⟩⟩
 
 theorem okContra_typed : okContra.Typed := by
-  refine ⟨[contraWit.entryOut] ++ Ctx.prelude, ?_, fun sg body hm => by simp [okContra] at hm⟩
-  have hn : okContra.nodes = [contraWit.f.toDecl] := rfl
-  rw [hn]
-  refine Groups.cons1 (GroupTy.fn1_novars (Γ := Ctx.prelude) contraWit (by decide)
-    ⟨by decide, by decide, [], rfl, by decide, rfl⟩ ?_) (Groups.nil _)
+  refine Program.typed_single_fn contraWit rfl (by simp [okContra]) (by decide)
+    ⟨by decide, by decide, [], rfl, by decide, rfl⟩ ?_
   have flowFG : Flows (.arr [.str] .unit .pure) (.arr [.str] .unit .io) :=
     Flows.arr _ _ _ _ _ _ _ _ rfl rfl Flows.str rfl Flows.unit
   refine ⟨[.arr [.arr [.str] .unit .io] .unit .pure], .arr [.arr [.str] .unit .pure] .unit .pure,
@@ -899,11 +896,8 @@ def retIOWit : FnWit :=
     ⟨0, mkArr [.int] (.arr [.int] .int .io) .pure⟩⟩
 
 theorem okRetIO_typed : okRetIO.Typed := by
-  refine ⟨[retIOWit.entryOut] ++ Ctx.prelude, ?_, fun sg body hm => by simp [okRetIO] at hm⟩
-  have hn : okRetIO.nodes = [retIOWit.f.toDecl] := rfl
-  rw [hn]
-  refine Groups.cons1 (GroupTy.fn1_novars (Γ := Ctx.prelude) retIOWit (by decide)
-    ⟨by decide, by decide, [], rfl, by decide, rfl⟩ ?_) (Groups.nil _)
+  refine Program.typed_single_fn retIOWit rfl (by simp [okRetIO]) (by decide)
+    ⟨by decide, by decide, [], rfl, by decide, rfl⟩ ?_
   refine ⟨[.int], .arr [.int] .int .io, .pure, mkArr [.int] .int .pure, .pure,
     ParamsTy.written _ _ _ _ _ rfl ParamsTy.nil,
     RetTy.writtenInner _ (.arr [.int] .int .pure) _ rfl rfl, rfl,
@@ -936,11 +930,8 @@ def c9Wit : FnWit :=
     mkArr [.arr [] .int .pure] .int .pure, ⟨0, mkArr [.arr [] .int .pure] .int .pure⟩⟩
 
 theorem c9_typed : c9.Typed := by
-  refine ⟨[c9Wit.entryOut] ++ Ctx.prelude, ?_, fun sg body hm => by simp [c9] at hm⟩
-  have hn : c9.nodes = [c9Wit.f.toDecl] := rfl
-  rw [hn]
-  refine Groups.cons1 (GroupTy.fn1_novars (Γ := Ctx.prelude) c9Wit (by decide)
-    ⟨by decide, by decide, [], rfl, by decide, rfl⟩ ?_) (Groups.nil _)
+  refine Program.typed_single_fn c9Wit rfl (by simp [c9]) (by decide)
+    ⟨by decide, by decide, [], rfl, by decide, rfl⟩ ?_
   exact ⟨[.arr [] .int .pure], .int, .pure, .int, .pure,
     ParamsTy.written _ _ _ _ _ rfl ParamsTy.nil, RetTy.written _ _ _ rfl (by simp), rfl,
     localCall (x := "k") rfl rfl (Peel.exact [] .int .pure) (HasExprs.nil _) FlowsAll.nil,
@@ -958,11 +949,8 @@ def c11Wit : FnWit :=
     ⟨0, mkArr [.arr [.str] .unit .io] .unit .io⟩⟩
 
 theorem c11_typed : c11.Typed := by
-  refine ⟨[c11Wit.entryOut] ++ Ctx.prelude, ?_, fun sg body hm => by simp [c11] at hm⟩
-  have hn : c11.nodes = [c11Wit.f.toDecl] := rfl
-  rw [hn]
-  refine Groups.cons1 (GroupTy.fn1_novars (Γ := Ctx.prelude) c11Wit (by decide)
-    ⟨by decide, by decide, [], rfl, by decide, rfl⟩ ?_) (Groups.nil _)
+  refine Program.typed_single_fn c11Wit rfl (by simp [c11]) (by decide)
+    ⟨by decide, by decide, [], rfl, by decide, rfl⟩ ?_
   exact ⟨[.arr [.str] .unit .io], .unit, .io, .unit, .io,
     ParamsTy.written _ _ _ _ _ rfl ParamsTy.nil,
     RetTy.written _ _ _ rfl (fun h => by simp [Ty.isArr] at h), rfl,
@@ -980,11 +968,8 @@ def c15Wit : FnWit :=
     mkArr [.int] .int .pure, ⟨0, mkArr [.int] .int .pure⟩⟩
 
 theorem c15_typed : c15.Typed := by
-  refine ⟨[c15Wit.entryOut] ++ Ctx.prelude, ?_, fun sg body hm => by simp [c15] at hm⟩
-  have hn : c15.nodes = [c15Wit.f.toDecl] := rfl
-  rw [hn]
-  refine Groups.cons1 (GroupTy.fn1_novars (Γ := Ctx.prelude) c15Wit (by decide)
-    ⟨by decide, by decide, [], rfl, by decide, rfl⟩ ?_) (Groups.nil _)
+  refine Program.typed_single_fn c15Wit rfl (by simp [c15]) (by decide)
+    ⟨by decide, by decide, [], rfl, by decide, rfl⟩ ?_
   exact ⟨[.int], .int, .pure, .int, .pure, ParamsTy.omitted _ _ _ _ rfl ParamsTy.nil,
     RetTy.written _ _ _ rfl (by simp), rfl, HasType.var _ _ (.local .int) _ rfl rfl, Flows.int,
     rfl⟩
@@ -1003,11 +988,8 @@ def c8Wit : FnWit :=
       .pure⟩⟩
 
 theorem c8_typed : c8.Typed := by
-  refine ⟨[c8Wit.entryOut] ++ Ctx.prelude, ?_, fun sg body hm => by simp [c8] at hm⟩
-  have hn : c8.nodes = [c8Wit.f.toDecl] := rfl
-  rw [hn]
-  refine Groups.cons1 (GroupTy.fn1_novars (Γ := Ctx.prelude) c8Wit (by decide)
-    ⟨by decide, by decide, [], rfl, by decide, rfl⟩ ?_) (Groups.nil _)
+  refine Program.typed_single_fn c8Wit rfl (by simp [c8]) (by decide)
+    ⟨by decide, by decide, [], rfl, by decide, rfl⟩ ?_
   exact ⟨[.arr [.arr [.str] .unit .pure] .unit .pure, .arr [.str] .unit .pure], .unit, .pure,
     .unit,
     .pure, ParamsTy.written _ _ _ _ _ rfl (ParamsTy.written _ _ _ _ _ rfl ParamsTy.nil),
@@ -1031,11 +1013,8 @@ def c56Wit : FnWit :=
     .arr [] (.tup [.int, .int]) .pure, ⟨0, .arr [] (.tup [.int, .int]) .pure⟩⟩
 
 theorem c56_typed : c56.Typed := by
-  refine ⟨[c56Wit.entryOut] ++ Ctx.prelude, ?_, fun sg body hm => by simp [c56] at hm⟩
-  have hn : c56.nodes = [c56Wit.f.toDecl] := rfl
-  rw [hn]
-  refine Groups.cons1 (GroupTy.fn1_novars (Γ := Ctx.prelude) c56Wit (by decide)
-    ⟨by decide, by decide, [], rfl, by decide, rfl⟩ ?_) (Groups.nil _)
+  refine Program.typed_single_fn c56Wit rfl (by simp [c56]) (by decide)
+    ⟨by decide, by decide, [], rfl, by decide, rfl⟩ ?_
   have call : ∀ n : Nat,
       HasType (("id", Binding.local (.arr [.int] .int .pure)) :: [c56Wit.entryIn] ++ Ctx.prelude)
       (.app (.var "id") [.int n]) .int .pure := fun n =>
