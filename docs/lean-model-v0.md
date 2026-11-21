@@ -279,9 +279,18 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
        (§7). The plan code reads arrays by total functions; an index out of range where it picks
        a node or an edge list is an `internal` rejection, not a default node. 3b needs the
        index invariants proved (below).
-     - **3a.** `infer` is sound: under a well-formed state and environment, its result, with the
-       final substitution applied, is derivable. Instantiation and effects are included; they
-       cannot be split off.
+     - ~~**3a.**~~ Landed. `infer_sound_run` (`formal/SproutCore/InferSound.lean`): a successful
+       `infer {} env e` from a well-formed state and environment, on a source expression, gives a
+       type and effect that every grounding `θ` solving the final state turns into
+       `HasType (Env.app θ env) e (Ty.app θ t) ε`. The layers: `Subst.lean` (`Ty.app`, `Solves`,
+       `Ext`), `FlowsLemmas.lean` and `FlowSound.lean` (the curried-level bridge, then `flow`,
+       `joinTy`, `peel`, `expectBool`), `InferHelpers.lean`, `SolvesExists.lean` (a well-formed
+       state has a solving `θ`, so the quantifier is not empty). No counterexample: every case
+       derives. What 3b must discharge: lambda annotations are surface types (`Expr.Surf`: no `.mv`,
+       `.skolem`, `.gen`; the parser builds none); `Env.app` sends `.poly` to `.val`, but
+       `Ctx.prelude` has `print_str` as `.fn 1`, so a derivation using it needs the transfer (only
+       `Peel.exact` at one argument applies to `String -> Unit !{IO}`); `.named` grounds to `.unit`
+       (the checker builds none); `rules.localLetMono = true`.
      - **3b.** `inferLet`, `inferFnGroup` and `checkProgram`: an accepted program is derivable.
        It needs `Plan`'s index invariants (`edges.size = n`, every index `< n`), which step 2
        left out: its array reads are total instead.
