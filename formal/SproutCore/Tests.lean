@@ -10,16 +10,24 @@ in the model breaks `just lean-model` without a compiler or an oracle run.
 
 namespace SproutCore.Tests
 
+/-- Running out of fuel is no verdict: `accepts` and `rejects` are both false on it, so a
+`#guard` of either fails. Write `rejects p`, never `!accepts p`. -/
 def accepts (p : Program) : Bool :=
   match checkProgram {} p with
   | .ok _ => true
   | .error _ => false
 
-/-- The rejection key (the text before the first colon), or `""` for an accept. -/
+def rejects (p : Program) : Bool :=
+  match checkProgram {} p with
+  | .error (.reject ..) => true
+  | _ => false
+
+/-- The rejection key, `""` for an accept, `"<fuel>"` when the run was cut off (no test names
+it, so a `#guard` on a key fails). -/
 def rejectKey (p : Program) : String :=
   match checkProgram {} p with
   | .ok _ => ""
-  | .error e => msgKey e
+  | .error e => e.key?.getD "<fuel>"
 
 private def printStr (s : String) : Expr := .app (.var "print_str") [.str s]
 

@@ -26,10 +26,33 @@ structure CState where
   subst : Array (Option Ty) := #[]
   nextSk : Nat := 0
 
-abbrev M := StateT CState (Except String)
+/-- A checker failure. `fuel` is not a verdict: it means a run was cut off, and every consumer
+reports it as a harness error. `expectBool` is the only handler and it re-throws `fuel`. -/
+inductive CErr where
+  /-- A rejection; `key` is what the oracle's allowlist names. -/
+  | reject (key detail : String)
+  | fuel
+  deriving Repr, Inhabited
+
+/-- The message of a rejection, `<key>: <detail>`. -/
+def CErr.render : CErr → String
+  | .reject key detail => s!"{key}: {detail}"
+  | .fuel => "fuel exhausted"
+
+/-- The rejection key, or `none` for running out of fuel. -/
+def CErr.key? : CErr → Option String
+  | .reject key _ => some key
+  | .fuel => none
+
+/-- The depth budget of one `shallow`/`zonk`/`flow`/`joinTy`/`peel` call. It is read from the
+reader, not kept in `CState`, which `try` rolls back; each such call starts afresh from it. -/
+def defaultFuel : Nat := 10000
+
+/-- The budget is the reader; the state rolls back under `try`, the error is `CErr`. -/
+abbrev M := ReaderT Nat (StateT CState (Except CErr))
 
 /-- Reject with `<key>: <detail>`; the key is what the oracle's allowlist names. -/
-def reject {α : Type} (key detail : String) : M α := throw s!"{key}: {detail}"
+def reject {α : Type} (key detail : String) : M α := throw (CErr.reject key detail)
 
 /-- The key of a rejection message (the text before the first colon). -/
 def msgKey (e : String) : String := (e.splitOn ":").head!
@@ -53,24 +76,39 @@ def mkArr (ps : List Ty) (r : Ty) (e : Eff) : Ty :=
   | .arr ps' r' e', .pure => if ps.isEmpty || ps'.isEmpty then .arr ps r e else .arr (ps ++ ps') r' e'
   | _, _ => .arr ps r e
 
-partial def shallow : Ty → M Ty
-  | .mv n => do
+/-- Follow metavariable bindings. Each step spends one unit of fuel; `0` throws `.fuel`. -/
+def shallowF : Nat → Ty → M Ty
+  | 0, _ => throw .fuel
+  | k + 1, .mv n => do
     match (← get).subst[n]? with
-    | some (some t) => shallow t
+    | some (some t) => shallowF k t
     | _ => pure (.mv n)
-  | t => pure t
+  | _ + 1, t => pure t
 
-partial def zonk (t : Ty) : M Ty := do
-  match ← shallow t with
-  | .tup ts => return .tup (← ts.mapM zonk)
-  | .arr ps r e => return mkArr (← ps.mapM zonk) (← zonk r) e
-  | t => return t
+def shallow (t : Ty) : M Ty := do shallowF (← read) t
 
-partial def metasOf : Ty → List Nat
+/-- Substitute under the type. Fuel bounds the depth, binding chains included. -/
+def zonkF : Nat → Ty → M Ty
+  | 0, _ => throw .fuel
+  | k + 1, t => do
+    match ← shallowF k t with
+    | .tup ts => return .tup (← ts.mapM (zonkF k))
+    | .arr ps r e => return mkArr (← ps.mapM (zonkF k)) (← zonkF k r) e
+    | t => return t
+
+def zonk (t : Ty) : M Ty := do zonkF (← read) t
+
+mutual
+def metasOf : Ty → List Nat
   | .mv n => [n]
-  | .tup ts => ts.flatMap metasOf
-  | .arr ps r _ => ps.flatMap metasOf ++ metasOf r
+  | .tup ts => metasOfList ts
+  | .arr ps r _ => metasOfList ps ++ metasOf r
   | _ => []
+
+def metasOfList : List Ty → List Nat
+  | [] => []
+  | t :: ts => metasOf t ++ metasOfList ts
+end
 
 def occursIn (n : Nat) (t : Ty) : Bool := (metasOf t).contains n
 
@@ -81,9 +119,11 @@ def bindMeta (n : Nat) (t : Ty) : M Unit := do
 
 /-- `flow actual expected`: shape unification plus the directional effect comparison of
 spec §7 rule 8. The direction reverses under an arrow's parameter. -/
-partial def flow (a e : Ty) : M Unit := do
-  let a ← shallow a
-  let e ← shallow e
+def flowF : Nat → Ty → Ty → M Unit
+  | 0, _, _ => throw .fuel
+  | k + 1, a, e => do
+  let a ← shallowF k a
+  let e ← shallowF k e
   match a, e with
   | .mv n, .mv m => if n == m then pure () else bindMeta n (.mv m)
   | .mv n, t => bindMeta n t
@@ -97,32 +137,36 @@ partial def flow (a e : Ty) : M Unit := do
     if n == m then pure () else reject "rigid" "two written type variables merged"
   | .tup as, .tup es =>
     if as.length == es.length then
-      for (x, y) in as.zip es do flow x y
+      for (x, y) in as.zip es do flowF k x y
     else reject "mismatch" "tuple arity"
   | .arr aps ar ae, .arr eps er ee =>
     -- spec §7 rule 9: `() -> T` and `Unit -> T` are distinct, and neither is assignable to the other
     if aps.isEmpty != eps.isEmpty then reject "mismatch" "arrow arity" else
-    let k := min aps.length eps.length
-    for (ap, ep) in (aps.take k).zip (eps.take k) do flow ep ap
+    let m := min aps.length eps.length
+    for (ap, ep) in (aps.take m).zip (eps.take m) do flowF k ep ap
     if aps.length == eps.length then
-      flow ar er
+      flowF k ar er
       -- spec §7 rule 8: a function VALUE may not enter a slot that permits less effect
       unless ae.le ee do reject "effect-slot" "IO function where a pure one is required"
     else if aps.length > eps.length then
       -- the expected arrow's result is itself the rest of the actual arrow; the effect sits on
       -- the innermost arrow, so the outer one is pure and this inner `flow` compares the effect
-      flow (.arr (aps.drop k) ar ae) er
+      flowF k (.arr (aps.drop m) ar ae) er
     else
       unless ae.le .pure do reject "effect-slot" "IO function where a pure one is required"
-      flow ar (.arr (eps.drop k) er ee)
+      flowF k ar (.arr (eps.drop m) er ee)
   | _, _ => reject "mismatch" "type mismatch"
+
+def flow (a e : Ty) : M Unit := do flowF (← read) a e
 
 /-- Peer join, with the polarity that reverses under a parameter: the least upper bound at
 positive depth, the greatest lower bound at negative depth (spec §7 rule 8, "A peer join is
 covered too"). -/
-partial def joinTy (pos : Bool) (a b : Ty) : M Ty := do
-  let a ← shallow a
-  let b ← shallow b
+def joinTyF : Nat → Bool → Ty → Ty → M Ty
+  | 0, _, _, _ => throw .fuel
+  | k + 1, pos, a, b => do
+  let a ← shallowF k a
+  let b ← shallowF k b
   match a, b with
   | .mv n, .mv m => if n == m then pure a else do bindMeta n b; pure b
   | .mv n, t => do bindMeta n t; pure t
@@ -135,12 +179,12 @@ partial def joinTy (pos : Bool) (a b : Ty) : M Ty := do
     if n == m then pure a else reject "rigid" "two written type variables merged"
   | .tup as, .tup bs =>
     if as.length == bs.length then
-      return .tup (← (as.zip bs).mapM fun (x, y) => joinTy pos x y)
+      return .tup (← (as.zip bs).mapM fun (x, y) => joinTyF k pos x y)
     else reject "mismatch" "tuple arity"
   | .arr aps ar ae, .arr bps br be =>
     if aps.length == bps.length then
-      let ps ← (aps.zip bps).mapM fun (x, y) => joinTy (!pos) x y
-      let r ← joinTy pos ar br
+      let ps ← (aps.zip bps).mapM fun (x, y) => joinTyF k (!pos) x y
+      let r ← joinTyF k pos ar br
       return mkArr ps r (if pos then ae.join be else ae.meet be)
     else if aps.isEmpty || bps.isEmpty then
       -- spec §7 rule 9: `() -> T` is not `Unit -> T`
@@ -149,15 +193,17 @@ partial def joinTy (pos : Bool) (a b : Ty) : M Ty := do
       -- the stored arities differ when a result variable was later solved to an arrow: split the
       -- longer arrow, as `flow` does. The shorter one's result joins the longer one's rest, which
       -- is an arrow whose outer effect is pure.
-      let k := min aps.length bps.length
-      let ps ← ((aps.take k).zip (bps.take k)).mapM fun (x, y) => joinTy (!pos) x y
+      let m := min aps.length bps.length
+      let ps ← ((aps.take m).zip (bps.take m)).mapM fun (x, y) => joinTyF k (!pos) x y
       if aps.length > bps.length then
-        let r ← joinTy pos (.arr (aps.drop k) ar ae) br
+        let r ← joinTyF k pos (.arr (aps.drop m) ar ae) br
         return mkArr ps r (if pos then be else .pure)
       else
-        let r ← joinTy pos ar (.arr (bps.drop k) br be)
+        let r ← joinTyF k pos ar (.arr (bps.drop m) br be)
         return mkArr ps r (if pos then ae else .pure)
   | _, _ => reject "mismatch" "branch types differ"
+
+def joinTy (pos : Bool) (a b : Ty) : M Ty := do joinTyF (← read) pos a b
 
 /-! ### Environments and schemes -/
 
@@ -172,36 +218,50 @@ inductive Bind where
 
 abbrev Env := List (String × Bind)
 
-partial def instTy (ms : Array Ty) : Ty → Ty
+mutual
+def instTy (ms : Array Ty) : Ty → Ty
   | .gen i => ms[i]!
-  | .tup ts => .tup (ts.map (instTy ms))
-  | .arr ps r e => .arr (ps.map (instTy ms)) (instTy ms r) e
+  | .tup ts => .tup (instTyList ms ts)
+  | .arr ps r e => .arr (instTyList ms ps) (instTy ms r) e
   | t => t
+
+def instTyList (ms : Array Ty) : List Ty → List Ty
+  | [] => []
+  | t :: ts => instTy ms t :: instTyList ms ts
+end
 
 def instantiate (n : Nat) (t : Ty) : M Ty := do
   let mut ms : Array Ty := #[]
   for _ in [0:n] do ms := ms.push (← fresh)
   return instTy ms t
 
+/-- The `gen` index of `t` in `tab`, adding it when new. -/
+def genSlot (tab : Array Ty) (t : Ty) : Array Ty × Ty :=
+  match tab.findIdx? (· == t) with
+  | some i => (tab, .gen i)
+  | none => (tab.push t, .gen tab.size)
+
+mutual
 /-- Replace the metas not in `keep` and every skolem by `gen` variables. -/
-partial def genGo (keep : List Nat) (tab : Array Ty) : Ty → Array Ty × Ty
-  | t@(.mv n) => if keep.contains n then (tab, t) else slot tab t
-  | t@(.skolem _) => slot tab t
+def genGo (keep : List Nat) (tab : Array Ty) : Ty → Array Ty × Ty
+  | t@(.mv n) => if keep.contains n then (tab, t) else genSlot tab t
+  | t@(.skolem _) => genSlot tab t
   | .tup ts =>
-    let (tab, ts') := ts.foldl (fun (tab, acc) t =>
-      let (tab, t') := genGo keep tab t; (tab, acc ++ [t'])) (tab, [])
+    let (tab, ts') := genGoList keep tab ts
     (tab, .tup ts')
   | .arr ps r e =>
-    let (tab, ps') := ps.foldl (fun (tab, acc) t =>
-      let (tab, t') := genGo keep tab t; (tab, acc ++ [t'])) (tab, [])
+    let (tab, ps') := genGoList keep tab ps
     let (tab, r') := genGo keep tab r
     (tab, .arr ps' r' e)
   | t => (tab, t)
-where
-  slot (tab : Array Ty) (t : Ty) : Array Ty × Ty :=
-    match tab.findIdx? (· == t) with
-    | some i => (tab, .gen i)
-    | none => (tab.push t, .gen tab.size)
+
+def genGoList (keep : List Nat) (tab : Array Ty) : List Ty → Array Ty × List Ty
+  | [] => (tab, [])
+  | t :: ts =>
+    let (tab, t') := genGo keep tab t
+    let (tab, ts') := genGoList keep tab ts
+    (tab, t' :: ts')
+end
 
 def generalize (keep : List Nat) (t : Ty) : M (Nat × Ty) := do
   let t ← zonk t
@@ -218,44 +278,68 @@ def envMetas (env : Env) : M (List Nat) := do
 
 /-! ### Written types -/
 
-partial def namedIn : Ty → List String
+mutual
+def namedIn : Ty → List String
   | .named s => [s]
-  | .tup ts => ts.flatMap namedIn
-  | .arr ps r _ => ps.flatMap namedIn ++ namedIn r
+  | .tup ts => namedInList ts
+  | .arr ps r _ => namedInList ps ++ namedIn r
   | _ => []
+
+def namedInList : List Ty → List String
+  | [] => []
+  | t :: ts => namedIn t ++ namedInList ts
+end
 
 def hasNamed (t : Ty) : Bool := !(namedIn t).isEmpty
 
+mutual
 /-- Read a written type, mapping each type variable through `f`, and normalise arrows. -/
-partial def elabTy (f : String → Ty) : Ty → M Ty
+def elabTy (f : String → Ty) : Ty → M Ty
   | .named s => pure (f s)
-  | .tup ts => return .tup (← ts.mapM (elabTy f))
+  | .tup ts => return .tup (← elabTyList f ts)
   | .arr ps r e => do
     let r' ← elabTy f r
     -- spec §7 rule 9: the annotation attaches to the innermost arrow; an `!{IO}` outer arrow
     -- with an arrow result has no spelling.
     match r', e with
     | .arr .., .io => reject "ill-formed" "effect on an arrow whose result is an arrow"
-    | _, _ => pure (mkArr (← ps.mapM (elabTy f)) r' e)
+    | _, _ => pure (mkArr (← elabTyList f ps) r' e)
   | t => pure t
+
+def elabTyList (f : String → Ty) : List Ty → M (List Ty)
+  | [] => pure []
+  | t :: ts => do
+    let t' ← elabTy f t
+    return t' :: (← elabTyList f ts)
+end
 
 /-! ### Free variables -/
 
-mutual
-partial def fvStep (bound : List String) : List Step → Expr → List String
-  | [], final => fv bound final
-  | .letS x rhs :: rest, final => fv bound rhs ++ fvStep (x :: bound) rest final
-  | .exprS e :: rest, final => fv bound e ++ fvStep bound rest final
+/-- The names a `do` block's steps bind, added to `bound` (the scope of its final expression). -/
+def stepBound : List String → List Step → List String
+  | bound, [] => bound
+  | bound, .letS x _ :: rest => stepBound (x :: bound) rest
+  | bound, .exprS _ :: rest => stepBound bound rest
 
-partial def fv (bound : List String) : Expr → List String
+mutual
+def fvStep (bound : List String) : List Step → List String
+  | [] => []
+  | .letS x rhs :: rest => fv bound rhs ++ fvStep (x :: bound) rest
+  | .exprS e :: rest => fv bound e ++ fvStep bound rest
+
+def fvList (bound : List String) : List Expr → List String
+  | [] => []
+  | e :: es => fv bound e ++ fvList bound es
+
+def fv (bound : List String) : Expr → List String
   | .var x => if bound.contains x then [] else [x]
   | .lam x _ b => fv (x :: bound) b
-  | .app f as => fv bound f ++ as.flatMap (fv bound)
+  | .app f as => fv bound f ++ fvList bound as
   | .letIn x r b => fv bound r ++ fv (x :: bound) b
   | .ite c t e => fv bound c ++ fv bound t ++ fv bound e
-  | .tup es => es.flatMap (fv bound)
+  | .tup es => fvList bound es
   | .notE e => fv bound e
-  | .doB steps final => fvStep bound steps final
+  | .doB steps final => fvStep bound steps ++ fv (stepBound bound steps) final
   | _ => []
 end
 
@@ -280,11 +364,16 @@ def bindLocal (rules : Rules) (env : Env) (x : String) (t : Ty) : M Env := do
 
 /-- `t` flows into `Bool`, or reject with `key`. -/
 def expectBool (t : Ty) (key detail : String) : M Unit := do
-  unless (← try flow t .bool; pure true catch _ => pure false) do reject key detail
+  let ok ← try flow t .bool; pure true catch
+    | .reject .. => pure false
+    | .fuel => throw .fuel
+  unless ok do reject key detail
 
 /-- The slots of a call, its result type and the effect the call itself performs. -/
-partial def peel (t : Ty) (n : Nat) : M (List Ty × Ty × Eff) := do
-  match ← shallow t with
+def peelF : Nat → Ty → Nat → M (List Ty × Ty × Eff)
+  | 0, _, _ => throw .fuel
+  | k + 1, t, n => do
+  match ← shallowF k t with
   | .arr ps r e =>
     if n == ps.length then pure (ps, r, e)
     -- spec §7 rule 9: calling a `() -> T` requires the empty argument list
@@ -297,7 +386,7 @@ partial def peel (t : Ty) (n : Nat) : M (List Ty × Ty × Eff) := do
       -- spec §5.3: applying a function-typed value is checked at run time; typed as the rest
       pure (ps.take n, mkArr (ps.drop n) r e, .pure)
     else
-      let (s2, r2, e2) ← peel r (n - ps.length)
+      let (s2, r2, e2) ← peelF k r (n - ps.length)
       pure (ps ++ s2, r2, e.join e2)
   | .mv m => do
     let mut ps := []
@@ -307,8 +396,36 @@ partial def peel (t : Ty) (n : Nat) : M (List Ty × Ty × Eff) := do
     pure (ps, r, .pure)
   | _ => reject "mismatch" "call of a non-function"
 
+def peel (t : Ty) (n : Nat) : M (List Ty × Ty × Eff) := do peelF (← read) t n
+
+/-- A call of a known `fn` passes exactly its parameter count (spec §5.3). -/
+def arityCheck (env : Env) (f : Expr) (n : Nat) : M Unit :=
+  match f with
+  | .var x =>
+    match env.lookup x with
+    | some (.fnMono k _) | some (.fnPoly k _ _) =>
+      if k != n then reject "arity" s!"{x} expects {k} arguments" else pure ()
+    | _ => pure ()
+  | _ => pure ()
+
+/-- A lambda's parameter type: the annotation, else fresh. In argument position it is then tied
+to the callee's slot. -/
+def lamParam (slot : Option Ty) (ann : Option Ty) : M Ty := do
+  let pt ← match ann with
+    | some t =>
+      -- spec §5.3: a type variable in a lambda parameter annotation is rejected in v0
+      if hasNamed t then reject "lam-ann-var" "type variable in a lambda parameter annotation"
+      elabTy (fun _ => .unit) t
+    | none => fresh
+  -- spec §7 rule 4: in argument position the parameter type comes from the callee's slot
+  if let some s := slot then
+    match ← shallow s with
+    | .arr (p :: _) _ _ => flow p pt
+    | _ => pure ()
+  pure pt
+
 mutual
-partial def infer (rules : Rules) (env : Env) : Expr → M (Ty × Eff)
+def infer (rules : Rules) (env : Env) : Expr → M (Ty × Eff)
   | .var x =>
     match env.lookup x with
     | none => reject "unknown-var" s!"unknown variable {x}"
@@ -320,32 +437,20 @@ partial def infer (rules : Rules) (env : Env) : Expr → M (Ty × Eff)
   | .bool _ => pure (.bool, .pure)
   | .str _ => pure (.str, .pure)
   | .unit => pure (.unit, .pure)
-  | .lam x ann body => inferLam rules env none x ann body
+  | .lam x ann body => do
+    let pt ← lamParam none ann
+    let (tb, eb) ← infer rules ((x, .mono pt) :: env) body
+    -- a lambda is a value: it is pure, and its arrow carries the body's effect
+    pure (mkArr [pt] tb eb, .pure)
   | .app f args => do
     -- spec §5.3: a call saturates a known function; under- and over-application is an error
-    let (tf, ef) ← match f with
-      | .var x =>
-        match env.lookup x with
-        | some (.fnMono k _) | some (.fnPoly k _ _) =>
-          if k != args.length then reject "arity" s!"{x} expects {k} arguments" else infer rules env f
-        | _ => infer rules env f
-      | _ => infer rules env f
+    arityCheck env f args.length
+    let (tf, ef) ← infer rules env f
     let (slots, res, callEff) ← peel tf args.length
-    let mut eff := ef.join callEff
     -- spec §7 rule 3: non-lambda arguments are unified against their slots first
-    for (a, s) in args.zip slots do
-      unless isLam a do
-        let (ta, ea) ← infer rules env a
-        flow ta s
-        eff := eff.join ea
+    let eff ← inferPlainArgs rules env args slots (ef.join callEff)
     -- spec §7 rule 3: then each lambda is inferred with its parameter type from the slot
-    for (a, s) in args.zip slots do
-      match a with
-      | .lam x ann body =>
-        let (ta, ea) ← inferLam rules env (some s) x ann body
-        flow ta s
-        eff := eff.join ea
-      | _ => pure ()
+    let eff ← inferLamArgs rules env args slots eff
     pure (res, eff)
   | .letIn x rhs body => do
     let (t, e) ← infer rules env rhs
@@ -364,12 +469,7 @@ partial def infer (rules : Rules) (env : Env) : Expr → M (Ty × Eff)
     pure (ty, ec.join (et.join ee))
   | .tup es => do
     -- spec §7 rule 12: tuples are structural, exact arity
-    let mut ts := []
-    let mut eff := Eff.pure
-    for e in es do
-      let (t, ef) ← infer rules env e
-      ts := ts ++ [t]
-      eff := eff.join ef
+    let (ts, eff) ← inferTuple rules env es
     pure (.tup ts, eff)
   | .notE e => do
     -- spec §5.3b: the operand of `!` must be Bool
@@ -377,37 +477,51 @@ partial def infer (rules : Rules) (env : Env) : Expr → M (Ty × Eff)
     expectBool t "not-bool" "operand of ! is not Bool"
     pure (.bool, eff)
   | .doB steps final => do
-    let mut env' := env
-    let mut eff := Eff.pure
-    for st in steps do
-      match st with
-      | .letS x rhs =>
-        let (t, e) ← infer rules env' rhs
-        -- spec §5.2.1a: a `do` let binds like `let … in`; its right-hand side must be pure
-        unless e == .pure do reject "let-rhs-io" "effectful right-hand side"
-        env' ← bindLocal rules env' x t
-      | .exprS e =>
-        let (_, ef) ← infer rules env' e
-        eff := eff.join ef
+    let (env', eff) ← inferSteps rules env steps
     let (t, ef) ← infer rules env' final
     pure (t, eff.join ef)
 
-partial def inferLam (rules : Rules) (env : Env) (slot : Option Ty) (x : String)
-    (ann : Option Ty) (body : Expr) : M (Ty × Eff) := do
-  let pt ← match ann with
-    | some t =>
-      -- spec §5.3: a type variable in a lambda parameter annotation is rejected in v0
-      if hasNamed t then reject "lam-ann-var" "type variable in a lambda parameter annotation"
-      elabTy (fun _ => .unit) t
-    | none => fresh
-  -- spec §7 rule 4: in argument position the parameter type comes from the callee's slot
-  if let some s := slot then
-    match ← shallow s with
-    | .arr (p :: _) _ _ => flow p pt
-    | _ => pure ()
-  let (tb, eb) ← infer rules ((x, .mono pt) :: env) body
-  -- a lambda is a value: it is pure, and its arrow carries the body's effect
-  pure (mkArr [pt] tb eb, .pure)
+/-- The non-lambda arguments against their slots, in order, joining their effects into `eff`. -/
+def inferPlainArgs (rules : Rules) (env : Env) : List Expr → List Ty → Eff → M Eff
+  | a :: as, s :: ss, eff => do
+    if isLam a then inferPlainArgs rules env as ss eff else
+    let (ta, ea) ← infer rules env a
+    flow ta s
+    inferPlainArgs rules env as ss (eff.join ea)
+  | _, _, eff => pure eff
+
+/-- The lambda arguments, in order, each inferred with its slot. -/
+def inferLamArgs (rules : Rules) (env : Env) : List Expr → List Ty → Eff → M Eff
+  | .lam x ann body :: as, s :: ss, eff => do
+    let pt ← lamParam (some s) ann
+    let (tb, eb) ← infer rules ((x, .mono pt) :: env) body
+    flow (mkArr [pt] tb eb) s
+    inferLamArgs rules env as ss eff
+  | _ :: as, _ :: ss, eff => inferLamArgs rules env as ss eff
+  | _, _, eff => pure eff
+
+/-- The element types of a tuple, left to right, and their joined effect. -/
+def inferTuple (rules : Rules) (env : Env) : List Expr → M (List Ty × Eff)
+  | [] => pure ([], .pure)
+  | e :: es => do
+    let (t, ef) ← infer rules env e
+    let (ts, eff) ← inferTuple rules env es
+    pure (t :: ts, ef.join eff)
+
+/-- The steps of a `do` block: the environment for its final expression, and the effect of its
+bare expressions. -/
+def inferSteps (rules : Rules) (env : Env) : List Step → M (Env × Eff)
+  | [] => pure (env, .pure)
+  | .letS x rhs :: rest => do
+    let (t, e) ← infer rules env rhs
+    -- spec §5.2.1a: a `do` let binds like `let … in`; its right-hand side must be pure
+    unless e == .pure do reject "let-rhs-io" "effectful right-hand side"
+    let env' ← bindLocal rules env x t
+    inferSteps rules env' rest
+  | .exprS e :: rest => do
+    let (_, ef) ← infer rules env e
+    let (env', eff) ← inferSteps rules env rest
+    pure (env', ef.join eff)
 end
 
 /-! ### Declarations -/
@@ -521,8 +635,24 @@ def Node.refs (names : List String) : Node → List String
   | .fnN f => (fv (f.params.map (·.1)) f.body).filter names.contains
   | .letN _ _ i => (fv [] i).filter names.contains
 
-/-- The checker. `accept` is `ok ()`; a rejection carries `<key>: <detail>`. -/
-def checkProgram (rules : Rules := {}) (p : Program) : Except String Unit := do
+/-- Group order, dependencies first: repeatedly take the first group whose references are its own
+members or already placed. The last argument bounds the recursion: a group goes in per step,
+so `#groups + 1` never runs out with groups pending. -/
+def orderGroups (edges : Array (List Nat)) (pending order : List (List Nat)) :
+    Nat → Except CErr (List (List Nat))
+  | 0 => pure order
+  | b + 1 =>
+    if pending.isEmpty then pure order else
+    let ready := pending.filter fun g =>
+      g.all fun i => (edges[i]!).all fun j => g.contains j || order.any (·.contains j)
+    match ready with
+    | [] => throw (.reject "internal" "no group order")
+    | g :: _ => orderGroups edges (pending.filter (· != g)) (order ++ [g]) b
+
+/-- The checker. `accept` is `ok ()`; a rejection carries `<key>: <detail>`, and `fuel` means a
+run was cut off at `fuel` (never a verdict). -/
+def checkProgram (rules : Rules := {}) (p : Program) (fuel : Nat := defaultFuel) :
+    Except CErr Unit := do
   let mut nodes : Array Node := #[]
   -- each `main` with the number of nodes declared above it
   let mut mains : List (Nat × Option (Ty × Eff) × Expr) := []
@@ -535,8 +665,8 @@ def checkProgram (rules : Rules := {}) (p : Program) : Except String Unit := do
   -- spec §5.1: a name may be declared at most once at a module's top level
   for (n, i) in names.zipIdx do
     if names.zipIdx.any (fun (m, j) => m == n && j != i) then
-      throw s!"duplicate: {n} is defined more than once"
-  if mains.length > 1 then throw "duplicate: main is defined more than once"
+      throw (.reject "duplicate" s!"{n} is defined more than once")
+  if mains.length > 1 then throw (.reject "duplicate" "main is defined more than once")
   let idx (n : String) : Option Nat := names.findIdx? (· == n)
   -- reference edges, and the declaration-order rules
   let mut edges : Array (List Nat) := #[]
@@ -548,10 +678,11 @@ def checkProgram (rules : Rules := {}) (p : Program) : Except String Unit := do
       match nd, nodes[j]! with
       | .fnN _, .letN .. =>
         -- spec §7 rule 16: a `fn` may not be moved above a top-level `let` it depends on
-        if j > i then throw s!"fn-before-let: {nd.name} precedes the `let` {r} it uses"
+        if j > i then throw (.reject "fn-before-let" s!"{nd.name} precedes the `let` {r} it uses")
       | .letN .., .letN .. =>
         -- spec §7 rule 16: a `let` must already be in scope where it is used
-        if j ≥ i then throw s!"unknown-var: let {nd.name} uses {r} before its declaration"
+        if j ≥ i then
+          throw (.reject "unknown-var" s!"let {nd.name} uses {r} before its declaration")
       | _, _ => pure ()
       es := es ++ [j]
     edges := edges.push es
@@ -559,7 +690,7 @@ def checkProgram (rules : Rules := {}) (p : Program) : Except String Unit := do
     for r in (fv [] body).filter names.contains do
       -- spec §7 rule 16: `main` is a `fn`, so it may not sit above a top-level `let` it uses
       if (idx r).getD 0 ≥ pos && (nodes[(idx r).getD 0]!.isLet) then
-        throw s!"fn-before-let: main precedes the `let` {r} it uses"
+        throw (.reject "fn-before-let" s!"main precedes the `let` {r} it uses")
   -- reachability, to find binding groups (minimal mutually dependent sets)
   let n := nodes.size
   let mut reach : Array (Array Bool) := Array.replicate n (Array.replicate n false)
@@ -579,18 +710,7 @@ def checkProgram (rules : Rules := {}) (p : Program) : Except String Unit := do
       seen := seen ++ g
       groups := groups ++ [g]
   -- groups in dependency order: a group runs after every group it reaches
-  let mut order : List (List Nat) := []
-  let mut pending := groups
-  let mut guardN := n + 1
-  while !pending.isEmpty && guardN > 0 do
-    guardN := guardN - 1
-    let ready := pending.filter fun g =>
-      g.all fun i => (edges[i]!).all fun j => g.contains j || order.any (·.contains j)
-    match ready with
-    | [] => throw "internal: no group order"
-    | g :: _ =>
-      order := order ++ [g]
-      pending := pending.filter (· != g)
+  let order ← orderGroups edges groups [] (n + 1)
   let act : M Unit := do
     let mut env := preludeEnv
     for g in order do
@@ -613,8 +733,8 @@ def checkProgram (rules : Rules := {}) (p : Program) : Except String Unit := do
         unless r == .unit || r == .int do reject "main-sig" "main must return Unit or Int"
         unless e == .io do reject "main-sig" "main must declare the IO effect"
         checkBody rules env [] r e body
-  match (act.run {}) with
+  match (act.run fuel).run {} with
   | .ok _ => pure ()
-  | .error msg => throw msg
+  | .error e => throw e
 
 end SproutCore
