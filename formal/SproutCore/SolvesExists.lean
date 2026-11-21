@@ -9,6 +9,10 @@ along `CState.Dep` (the acyclicity half of `CState.WF`): an unbound variable goe
 bound one to the grounding of its type. That type must be named-free (`CState.NF`): `Ty.app` keeps
 a `.named`, which has no solved grounding. Without this, the soundness theorem could hold by there
 being no `θ`.
+
+`exists_solves_with` also chooses the grounding of the unbound variables, any family of solved
+types `d n`. Step 3b picks `d n = .skolem (B + n)`: `generalize` turns each unbound variable into a
+`.gen`, and `Generalises` wants it back as a distinct skolem (`Ground.lean`).
 -/
 
 namespace SproutCore
@@ -41,17 +45,19 @@ theorem Ty.appList_congr {θ1 θ2 : Nat → Ty} :
       Ty.appList_congr ts (fun m hm => h m (Or.inr hm))]
 end
 
-/-- One step of the recursion: an unbound variable is `.unit`, a bound one is its type, grounded by
+/-- One step of the recursion: an unbound variable is `d n`, a bound one is its type, grounded by
 the values already chosen for the variables it mentions. -/
-noncomputable def solveStep (s : CState) (n : Nat) (ih : ∀ m, s.Dep m n → Ty) : Ty :=
+noncomputable def solveStep (d : Nat → Ty) (s : CState) (n : Nat) (ih : ∀ m, s.Dep m n → Ty) : Ty :=
   match hb : s.subst[n]? with
   | some (some t) => Ty.app (fun m => if hm : m ∈ metasOf t then ih m ⟨t, hb, hm⟩ else .unit) t
-  | _ => .unit
+  | _ => d n
 
-theorem exists_solves {s : CState} (hs : s.WF) (hn : s.NF) : ∃ θ, Solves θ s := by
+/-- A solving grounding that sends every unbound variable to `d n`, any family of solved types. -/
+theorem exists_solves_with {s : CState} (hs : s.WF) (hn : s.NF) (d : Nat → Ty)
+    (hd : ∀ n, (d n).ok 0 = true) : ∃ θ, Solves θ s ∧ ∀ n, s.Unbound n → θ n = d n := by
   have wf : WellFounded s.Dep := ⟨hs.acyc⟩
-  let θ : Nat → Ty := fun n => wf.fix (solveStep s) n
-  have heq : ∀ n, θ n = solveStep s n (fun m _ => θ m) := fun n => wf.fix_eq (solveStep s) n
+  let θ : Nat → Ty := fun n => wf.fix (solveStep d s) n
+  have heq : ∀ n, θ n = solveStep d s n (fun m _ => θ m) := fun n => wf.fix_eq (solveStep d s) n
   have hsolved : ∀ n, (θ n).ok 0 = true := by
     intro n
     induction n using wf.induction with
@@ -64,18 +70,28 @@ theorem exists_solves {s : CState} (hs : s.WF) (hn : s.NF) : ∃ θ, Solves θ s
         by_cases hm : m ∈ metasOf t
         · simp only [hm, dite_true]; exact ih m ⟨t, hb, hm⟩
         · simp only [hm, dite_false]; rfl
-      · rfl
-  refine ⟨θ, ?_, hsolved⟩
-  intro n t hb
-  rw [heq n]
-  unfold solveStep
-  split
-  · rename_i t' hb'
-    rw [hb] at hb'
-    cases hb'
-    refine Ty.app_congr t (fun m hm => ?_)
-    simp [hm]
-  · rename_i hne
-    exact absurd hb (hne t)
+      · exact hd n
+  refine ⟨θ, ⟨?_, hsolved⟩, ?_⟩
+  · intro n t hb
+    rw [heq n]
+    unfold solveStep
+    split
+    · rename_i t' hb'
+      rw [hb] at hb'
+      cases hb'
+      refine Ty.app_congr t (fun m hm => ?_)
+      simp [hm]
+    · rename_i hne
+      exact absurd hb (hne t)
+  · intro n hu
+    rw [heq n]
+    unfold solveStep
+    split
+    · rename_i t' hb'
+      exact absurd hb' (hu t')
+    · rfl
+
+theorem exists_solves {s : CState} (hs : s.WF) (hn : s.NF) : ∃ θ, Solves θ s :=
+  (exists_solves_with hs hn (fun _ => .unit) (fun _ => rfl)).imp fun _ h => h.1
 
 end SproutCore

@@ -15,6 +15,7 @@ import SproutCore.FlowSound
 import SproutCore.InferHelpers
 import SproutCore.InferSound
 import SproutCore.SolvesExists
+import SproutCore.Ground
 import SproutCore.JudgmentLemmas
 import SproutCore.JudgmentExamples
 import SproutCore.Witnesses
