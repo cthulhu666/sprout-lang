@@ -283,10 +283,11 @@ theorem elabTy_unit_leaf {Q : Ty → CState → Prop} {s : CState} {a : Ty} (hsf
       (Ty.wf_of_ok (Ty.elab_ok (fun _ => rfl) a r he) _ _)
 
 macro_rules
-  | `(tactic| wp_step) => `(tactic| leaf elabTy_unit_leaf)
+  | `(tactic| sound_step) => `(tactic| leaf elabTy_unit_leaf)
 
+-- local: it names this file's hypothesis `hann`
 set_option hygiene false in
-macro_rules
+local macro_rules
   | `(tactic| wf_close) =>
     `(tactic| (show Ty.surf _ = true; exact hann _ rfl))
 
@@ -299,7 +300,7 @@ theorem lamParam_sound {Q : Ty → CState → Prop} {s : CState} {slot ann : Opt
   rcases ann with _ | a0 <;> rcases slot with _ | s0 <;> unfold lamParam <;> dsimp only
   all_goals (try have := hann a0 rfl)
   all_goals (try have := hslot s0 rfl)
-  all_goals repeat' wp_step
+  all_goals repeat' sound_step
   all_goals refine h _ _ (by ext_close) ‹CState.WF _› (by wf_close) ?_
   all_goals intro θ hθ
   · exact Ty.app_solved hθ.solved ‹Ty.WF _ 0 _›

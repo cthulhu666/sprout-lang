@@ -5,7 +5,7 @@ import SproutCore.FlowsLemmas
 
 Each statement has the shape `Wp (f …) Q s` with a continuation `h`: the state grows (`Ext`), stays
 well formed, and for every grounding `θ` that solves the new state the judgment's relation holds
-between the grounded arguments and result. The continuation form lets `wp_tac` walk a `do` block
+between the grounded arguments and result. The continuation form lets `sound_step` walk a `do` block
 forward (`CheckWF.lean`), the facts of earlier steps staying in context.
 
 * `flow a e` ok ⇒ `Flows (app θ a) (app θ e)`.
@@ -21,9 +21,10 @@ open Judgment
 
 set_option linter.unusedVariables false
 
--- the unbound-variable facts `shallow` hands back (named `hua`, `hue` by the proofs below)
+-- the unbound-variable facts `shallow` hands back (named `hua`, `hue` by the proofs below); local,
+-- since it names hypotheses of this file's proofs
 set_option hygiene false in
-macro_rules
+local macro_rules
   | `(tactic| wf_close) =>
     `(tactic| (show CState.Unbound _ _;
                first | exact hua _ rfl | exact hue _ rfl | exact hub _ rfl))
@@ -38,19 +39,15 @@ theorem shallowF_leaf {Q : Ty → CState → Prop} {s : CState} {k : Nat} {t : T
   exact Wp.mono (Wp.and' h1 (shallowF_app k t s)) fun r s' ⟨⟨e, hr, hu⟩, _, hf⟩ => h r s' e hr hu hf
 
 macro_rules
-  | `(tactic| wp_step) => `(tactic| leaf shallowF_leaf)
+  | `(tactic| sound_step) => `(tactic| leaf shallowF_leaf)
 macro_rules
-  | `(tactic| wp_step) => `(tactic| leaf shallow_leaf)
+  | `(tactic| sound_step) => `(tactic| leaf shallow_leaf)
 macro_rules
-  | `(tactic| wp_step) => `(tactic| leaf zonk_leaf)
+  | `(tactic| sound_step) => `(tactic| leaf zonk_leaf)
 macro_rules
-  | `(tactic| wp_step) => `(tactic| leaf bindMeta_leaf)
+  | `(tactic| sound_step) => `(tactic| leaf bindMeta_leaf)
 macro_rules
-  | `(tactic| wp_step) => `(tactic| leaf fresh_leaf)
-macro_rules
-  | `(tactic| wp_step) => `(tactic| leaf freshSkolem_leaf)
-macro_rules
-  | `(tactic| wp_step) => `(tactic| leaf instantiate_leaf)
+  | `(tactic| sound_step) => `(tactic| leaf instantiate_leaf)
 
 /-- Pointwise `Flows` between zipped lists gives `FlowsAll` of the images. -/
 theorem flowsAll_of_zip {f : Ty → Ty} :
@@ -254,7 +251,7 @@ theorem flowF_sound : ∀ (k : Nat) (a e : Ty) (Q : PUnit → CState → Prop) (
           flowF k x.snd x.fst; pure (ForInStep.yield PUnit.unit)) Q s :=
       fun hs hxs hys h => flowzip'_sound flowk hs hxs hys h
     split
-    all_goals repeat' (first | wp_step | leaf flowk | leaf flowzip | leaf flowzip')
+    all_goals repeat' (first | sound_step | leaf flowk | leaf flowzip | leaf flowzip')
     all_goals refine h _ (by ext_close) ‹CState.WF _› ?_
     all_goals intro θ hθ
     all_goals have hs2 : Solves θ s2 := by solves_close
@@ -305,7 +302,7 @@ theorem flow_sound {Q : PUnit → CState → Prop} {s : CState} {a e : Ty} (hs :
   exact Wp.bind (Wp.read' fun n => flowF_sound n a e Q s hs ha he h)
 
 macro_rules
-  | `(tactic| wp_step) => `(tactic| leaf flow_sound)
+  | `(tactic| sound_step) => `(tactic| leaf flow_sound)
 
 /-! ### `joinTy` -/
 
@@ -524,7 +521,7 @@ theorem joinzip_sound {k : Nat} {pos : Bool} {xs ys : List Ty} {Q : List Ty → 
 
 -- the tuple and arrow cases, run on the goals the walk leaves; hypothesis names are the proof's
 set_option hygiene false in
-macro "join_close" : tactic => `(tactic| (
+local macro "join_close" : tactic => `(tactic| (
   · rename_i _ _ as es hl bs s1 _ _ _ hall
     exact join_tup _ θ as es bs (Nat.eq_of_beq_eq_true hl) (hall θ hθ)
   · rename_i _ _ aps ar ae eps er ee hlen bs s1 e1 _ _ hps r s3 e3 _ _ hr
@@ -538,7 +535,6 @@ macro "join_close" : tactic => `(tactic| (
     exact join_arr_lt _ θ aps eps bs ar er r ae ee hlt (ne_left_of_not_or hemp)
       (hps θ (hθ.back e3)) (hr θ hθ)))
 
-set_option maxHeartbeats 800000 in
 theorem joinTyF_sound : ∀ (k : Nat) (pos : Bool) (a b : Ty) (Q : Ty → CState → Prop) (s : CState),
     s.WF → Ty.WF s.sz 0 a → Ty.WF s.sz 0 b →
     (∀ r s', Ext s s' → s'.WF → Ty.WF s'.sz 0 r →
@@ -574,7 +570,7 @@ theorem joinTyF_sound : ∀ (k : Nat) (pos : Bool) (a b : Ty) (Q : Ty → CState
     all_goals simp only [Bool.false_eq_true, ite_false, ite_true, Bool.not_false,
       Bool.not_true] at *
     all_goals split
-    all_goals repeat' (first | wp_step | leaf joink | leaf joinzip)
+    all_goals repeat' (first | sound_step | leaf joink | leaf joinzip)
     all_goals refine h _ _ (by ext_close) ‹CState.WF _› (by wf_close) ?_
     all_goals intro θ hθ
     all_goals have hs2 : Solves θ s2 := by solves_close
@@ -603,7 +599,7 @@ theorem joinTy_sound {Q : Ty → CState → Prop} {s : CState} {pos : Bool} {a b
   exact Wp.bind (Wp.read' fun n => joinTyF_sound n pos a b Q s hs ha hb h)
 
 macro_rules
-  | `(tactic| wp_step) => `(tactic| leaf joinTy_sound)
+  | `(tactic| sound_step) => `(tactic| leaf joinTy_sound)
 
 /-! ### `peel` -/
 
@@ -635,7 +631,7 @@ theorem peel_mv_leaf {Q : List Ty × Ty × Eff → CState → Prop} {s : CState}
     hl hb)
 
 macro_rules
-  | `(tactic| wp_step) => `(tactic| leaf peel_mv_leaf)
+  | `(tactic| sound_step) => `(tactic| leaf peel_mv_leaf)
 
 theorem peelF_sound : ∀ (k : Nat) (t : Ty) (n : Nat) (Q : List Ty × Ty × Eff → CState → Prop)
     (s : CState), s.WF → Ty.WF s.sz 0 t →
@@ -661,7 +657,7 @@ theorem peelF_sound : ∀ (k : Nat) (t : Ty) (n : Nat) (Q : List Ty × Ty × Eff
           Q (ps, r, e) s'),
         Wp (peelF k t n) Q s := fun hs ht h => ih _ _ _ _ hs ht h
     split
-    all_goals repeat' (first | wp_step | leaf peelk)
+    all_goals repeat' (first | sound_step | leaf peelk)
     · rename_i _ ps r e hn
       refine h ps r e s1 (Ext.refl _) hs (Ty.WF.arr_params ht' (Nat.le_refl _))
         (Ty.WF.arr_res ht' (Nat.le_refl _)) ?_
@@ -717,7 +713,7 @@ theorem peel_sound {Q : List Ty × Ty × Eff → CState → Prop} {s : CState} {
   exact Wp.bind (Wp.read' fun k => peelF_sound k t n Q s hs ht h)
 
 macro_rules
-  | `(tactic| wp_step) => `(tactic| leaf peel_sound)
+  | `(tactic| sound_step) => `(tactic| leaf peel_sound)
 
 /-! ### `expectBool` -/
 
@@ -741,6 +737,6 @@ theorem expectBool_sound {Q : PUnit → CState → Prop} {s : CState} {t : Ty} {
       exact Wp.pure' (h s1 e hw hf)
 
 macro_rules
-  | `(tactic| wp_step) => `(tactic| leaf expectBool_sound)
+  | `(tactic| sound_step) => `(tactic| leaf expectBool_sound)
 
 end SproutCore
