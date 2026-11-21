@@ -1195,6 +1195,17 @@ major, which moves them to the free pool: on the free-list collector the adversa
 139,623 → 175,944 at its first major after the build while free plus heap stayed at ~177,600. The
 divisor-1 floor failed in both minor modes there (212,145 → 720,005).
 
+### Deleting code can leave a check green and empty
+
+Removing the free-list collector (#897) kept every gate green while two checks lost what they
+tested. The walk bound was this gate's only "floor is ON" answer, and it went with the per-slot
+walk, so nothing checked the floor binds until review found it; the `walk_sparse` probe above
+replaced it. `tests/c_runtime/nullary_ctor_interning.c`'s `case_weak` read a stale singleton back
+and passed because the old sweep wrote a FREE header into the dead slot; with no header written, it
+passed for the wrong reason until it was made to require a live slot. After deleting code, list the
+checks whose answer depended on it, restate each in the new units, and break the runtime to see each
+one fail.
+
 ## Adaptive threshold — `just gc-adapt-check`
 
 Pins the policy in [development.md](development.md) §Adaptive threshold. The factor assertions
