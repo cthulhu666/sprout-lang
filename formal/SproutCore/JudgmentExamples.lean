@@ -25,6 +25,7 @@ cannot come from the judgment being empty.
 | `r5let_rejected` | `let boom = print_str("x")` | §5.2 |
 | `r5arity_rejected` | `print_str()`: a named `fn` is called with exactly its arity | §5.3 |
 | `r5zero_rejected` | `h()` for `h: Int -> Int`: no arguments to an arrow that takes some | §5.3 |
+| `okLetAnnIO_typed` | `let f : a -> a !{IO} = \(h: Int -> Int) -> h` (accepted) | §7 rule 9 |
 | `r9ret_rejected` | `fn f(x: Int) -> Int -> Int !{IO} = do print_str("a"); \y -> y` | §7 rule 9 |
 
 Rule 15's first example, `fn f(x: a) -> Int = x + 1`, needs `+`, which Core does not have. `x`
@@ -1048,6 +1049,37 @@ theorem c5_typed : c5.Typed := by
 
 /-! ### The checker agrees on every program above, except one -/
 
+/-- `let f : a -> a !{IO} = \(h: Int -> Int) -> h` and a unit `main`. The initialiser forces the
+annotation's variable `a` to `Int -> Int`, so the written `a -> a !{IO}` reads as an `!{IO}` arrow
+whose result is an arrow. `Ty.elab` refuses an `!{IO}` arrow whose WRITTEN result is an arrow, not
+one that a variable is solved to (spec §7 rule 9 is a rule about spelling). The checker and the
+compiler accept it, and the judgment once did not: the regression test for that change. -/
+def okLetAnnIO : Program :=
+  ⟨[.letD "f" (some (.arr [.named "a"] (.named "a") .io))
+      (.lam "h" (some (.arr [.int] .int .pure)) (.var "h")),
+    .mainFn (some (.unit, .io)) .unit]⟩
+
+theorem okLetAnnIO_typed : okLetAnnIO.Typed := by
+  have hA : Flows (.arr [.int] .int .pure) (.arr [.int] .int .pure) :=
+    Flows.arr _ _ _ _ _ _ _ _ rfl rfl Flows.int rfl Flows.int
+  refine ⟨("f", .val ⟨0, .arr [.arr [.int] .int .pure, .int] .int .pure⟩) :: Ctx.prelude, ?_, ?_⟩
+  · refine Groups.cons1
+      (GroupTy.letG _ "f" _ _ (.arr [.arr [.int] .int .pure, .int] .int .pure)
+        ⟨0, .arr [.arr [.int] .int .pure, .int] .int .pure⟩ ?lam ?ann
+        ⟨rfl, rfl, [], rfl, by decide, rfl⟩)
+      (Groups.nil _)
+    case lam =>
+      exact HasType.lam _ "h" _ _ (.arr [.int] .int .pure) (.arr [.int] .int .pure) .pure
+        ⟨rfl, rfl⟩ (HasType.var _ _ (.local _) _ rfl rfl)
+    case ann =>
+      refine ⟨fun _ => .arr [.int] .int .pure,
+        .arr [.arr [.int] .int .pure] (.arr [.int] .int .pure) .io, fun _ => rfl, rfl, ?_⟩
+      exact Flows.arr _ _ _ _ _ _ _ _ rfl rfl hA rfl hA
+  · intro sg body hm
+    simp [okLetAnnIO] at hm
+    obtain ⟨rfl, rfl⟩ := hm
+    exact ⟨.unit, rfl, Or.inl rfl, .unit, .pure, HasType.unit _, Flows.unit⟩
+
 section agree
 
 open SproutCore.Tests
@@ -1069,6 +1101,7 @@ open SproutCore.Tests
 #guard rejects r56
 
 #guard accepts okLetGen
+#guard accepts okLetAnnIO
 #guard accepts okFnGen
 #guard accepts okFnGenW
 #guard accepts okJoin
