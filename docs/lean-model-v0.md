@@ -272,7 +272,9 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
        `print_str`.
      - **Provable checker.** Every `partial def` becomes total: termination proofs for the
        structural ones, a fuel argument (not in `CState`, which `try` rolls back) for `shallow`,
-       `zonk`, `flow`, `joinTy` and `peel`. The `for` loops in `infer` become recursive helpers,
+       `zonk`, `flow`, `joinTy` and `peel`. It also gives `print_str` its declared arity: the
+       checker accepts `print_str()`, the judgment does not, so T2 is false until then
+       (`BACKLOG.md`). The `for` loops in `infer` become recursive helpers,
        arrows get one canonical form (`zonk` reshapes them through `mkArr` today), and
        well-formedness invariants on the state and the environment back every `!` accessor.
        Running out of fuel is never a verdict: `expectBool` passes it through instead of turning
