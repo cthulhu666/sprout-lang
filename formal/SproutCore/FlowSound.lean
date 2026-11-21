@@ -76,7 +76,7 @@ theorem flowzip_sound {k : Nat} {xs ys : List Ty} {Q : PUnit → CState → Prop
       (∀ p ∈ xs.zip ys, ∀ θ, Solves θ s' → Flows (Ty.app θ p.1) (Ty.app θ p.2)) → Q ⟨⟩ s') :
     Wp (forIn (xs.zip ys) PUnit.unit fun x _ => do
       flowF k x.fst x.snd; pure (ForInStep.yield PUnit.unit)) Q s := by
-  refine Wp.mono (Wp.forIn_unit_rel (s := s) (fun s1 => s1.WF)
+  refine Wp.mono (Wp.forIn_unit_ext (s := s) (fun s1 => s1.WF)
     (fun s1 p => ∀ θ, Solves θ s1 → Flows (Ty.app θ p.1) (Ty.app θ p.2)) ?_ hs ?_) ?_
   · intro s1 s2 p e r θ hθ; exact r θ (hθ.back e)
   · intro p hp s1 h1 e1
@@ -100,7 +100,7 @@ theorem flowzip'_sound {k : Nat} {xs ys : List Ty} {Q : PUnit → CState → Pro
       (∀ p ∈ xs.zip ys, ∀ θ, Solves θ s' → Flows (Ty.app θ p.2) (Ty.app θ p.1)) → Q ⟨⟩ s') :
     Wp (forIn (xs.zip ys) PUnit.unit fun x _ => do
       flowF k x.snd x.fst; pure (ForInStep.yield PUnit.unit)) Q s := by
-  refine Wp.mono (Wp.forIn_unit_rel (s := s) (fun s1 => s1.WF)
+  refine Wp.mono (Wp.forIn_unit_ext (s := s) (fun s1 => s1.WF)
     (fun s1 p => ∀ θ, Solves θ s1 → Flows (Ty.app θ p.2) (Ty.app θ p.1)) ?_ hs ?_) ?_
   · intro s1 s2 p e r θ hθ; exact r θ (hθ.back e)
   · intro p hp s1 h1 e1
@@ -491,14 +491,6 @@ theorem join_arr_lt (pos : Bool) (θ : Nat → Ty) (aps bps ps : List Ty) (ar br
     · rw [flows_mkArr_right, flows_arr_app, hsplit]
       exact flows_arr_longer _ _ be ae _ hB2 hr2 _ _ hl2.symm hPs hall.2
 
-theorem All2.forall_right {α β : Type} {R : α → β → Prop} {P : β → Prop}
-    (h : ∀ a b, R a b → P b) : ∀ {as : List α} {bs : List β}, All2 R as bs → ∀ b ∈ bs, P b
-  | _, _, All2.nil, _, hb => by simp at hb
-  | _, _, All2.cons h1 h2, b, hb => by
-    rcases List.mem_cons.mp hb with rfl | hb
-    · exact h _ _ h1
-    · exact All2.forall_right h h2 b hb
-
 /-- A mapped loop of `joinTyF` over zipped lists. -/
 theorem joinzip_sound {k : Nat} {pos : Bool} {xs ys : List Ty} {Q : List Ty → CState → Prop}
     {s : CState}
@@ -513,7 +505,7 @@ theorem joinzip_sound {k : Nat} {pos : Bool} {xs ys : List Ty} {Q : List Ty → 
         All2 (fun p r => JoinR pos (Ty.app θ p.1) (Ty.app θ p.2) (Ty.app θ r)) (xs.zip ys) bs) →
       Q bs s') :
     Wp ((xs.zip ys).mapM fun (x, y) => joinTyF k pos x y) Q s := by
-  refine Wp.mono (Wp.mapM_rel (f := fun (p : Ty × Ty) => joinTyF k pos p.1 p.2) (l := xs.zip ys)
+  refine Wp.mono (Wp.mapM_ext (f := fun (p : Ty × Ty) => joinTyF k pos p.1 p.2) (l := xs.zip ys)
     (s := s) (fun s1 => s1.WF)
     (fun s1 p r => Ty.WF s1.sz 0 r ∧
       ∀ θ, Solves θ s1 → JoinR pos (Ty.app θ p.1) (Ty.app θ p.2) (Ty.app θ r)) ?_ hs ?_) ?_
@@ -614,48 +606,6 @@ macro_rules
   | `(tactic| wp_step) => `(tactic| leaf joinTy_sound)
 
 /-! ### `peel` -/
-
-/-- `n` fresh variables, collected. -/
-theorem fresh_loop_sound (n : Nat) {Q : List Ty → CState → Prop} {s : CState} (hs : s.WF)
-    (h : ∀ ps s', Ext s s' → s'.WF → ps.length = n →
-      (∀ t ∈ ps, Ty.WF s'.sz 0 t) → (∀ m, s.Unbound m → s'.Unbound m) → Q ps s') :
-    Wp (forIn [0:n] ([] : List Ty) fun _ acc => do
-      let d ← fresh
-      pure (ForInStep.yield (acc ++ [d]))) Q s := by
-  simp only [Std.Legacy.Range.forIn_eq_forIn_range']
-  have gen : ∀ (l : List Nat) (acc : List Ty) (s : CState), s.WF → (∀ t ∈ acc, Ty.WF s.sz 0 t) →
-      (∀ ps s', Ext s s' → s'.WF → ps.length = acc.length + l.length →
-        (∀ t ∈ ps, Ty.WF s'.sz 0 t) → (∀ m, s.Unbound m → s'.Unbound m) → Q ps s') →
-      Wp (forIn l acc fun _ acc => do
-        let d ← fresh
-        pure (ForInStep.yield (acc ++ [d]))) Q s := by
-    intro l
-    induction l with
-    | nil =>
-      intro acc s hs ha h
-      simp only [List.forIn_nil]
-      exact Wp.pure' (h acc s (Ext.refl _) hs (by simp) ha (fun _ hu => hu))
-    | cons a l ih =>
-      intro acc s hs ha h
-      simp only [List.forIn_cons]
-      refine Wp.bind (Wp.bind (fresh_leaf hs ?_))
-      intro d s1 hd _ g1 e1 h1 hu1
-      refine Wp.pure' ?_
-      dsimp only
-      refine ih (acc ++ [d]) s1 h1 ?_ ?_
-      · intro t ht
-        rcases List.mem_append.mp ht with ht | ht
-        · exact (ha t ht).mono (by omega) (Nat.le_refl _)
-        · rcases List.mem_singleton.mp ht with rfl; exact hd
-      · intro ps s2 e2 h2 hl hps hu2
-        refine h ps s2 (e1.trans e2) h2 ?_ hps (fun m hu => hu2 m (hu1 m hu))
-        simp only [List.length_append, List.length_cons, List.length_nil] at hl ⊢
-        omega
-  exact gen _ [] s hs (by simp) fun ps s' e h' hl hp hu =>
-    h ps s' e h' (by simpa using hl) hp hu
-
-macro_rules
-  | `(tactic| wp_step) => `(tactic| leaf fresh_loop_sound)
 
 /-- The `.mv` case of `peelF`: a call of an unsolved variable solves it to a pure arrow of `n`
 fresh parameters. -/

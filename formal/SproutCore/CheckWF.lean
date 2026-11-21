@@ -216,30 +216,95 @@ theorem Wp.forIn_range {β : Type} {f : Nat → β → M (ForInStep β)} {Q : β
   simp only [Std.Legacy.Range.forIn_eq_forIn_range']
   exact Wp.forIn_list I _ init h0 (fun a _ => hf a) hq
 
+/-- Two lists related pointwise (core Lean has no `List.Forall₂`). -/
+inductive All2 {α β : Type} (R : α → β → Prop) : List α → List β → Prop
+  | nil : All2 R [] []
+  | cons {a : α} {b : β} {as : List α} {bs : List β} : R a b → All2 R as bs →
+      All2 R (a :: as) (b :: bs)
+
+theorem All2.imp {α β : Type} {R R' : α → β → Prop} (h : ∀ a b, R a b → R' a b) :
+    ∀ {as : List α} {bs : List β}, All2 R as bs → All2 R' as bs
+  | _, _, All2.nil => All2.nil
+  | _, _, All2.cons h1 h2 => All2.cons (h _ _ h1) (All2.imp h h2)
+
+theorem All2.length_eq {α β : Type} {R : α → β → Prop} :
+    ∀ {as : List α} {bs : List β}, All2 R as bs → as.length = bs.length
+  | _, _, All2.nil => rfl
+  | _, _, All2.cons _ h2 => by simp [All2.length_eq h2]
+
+theorem All2.forall_right {α β : Type} {R : α → β → Prop} {P : β → Prop}
+    (h : ∀ a b, R a b → P b) : ∀ {as : List α} {bs : List β}, All2 R as bs → ∀ b ∈ bs, P b
+  | _, _, All2.nil, _, hb => by simp at hb
+  | _, _, All2.cons h1 h2, b, hb => by
+    rcases List.mem_cons.mp hb with rfl | hb
+    · exact h _ _ h1
+    · exact All2.forall_right h h2 b hb
+
+/-- `mapM`, with an invariant `I` on the state and a relation `R` between each input and its result,
+kept true along `Step`, a reflexive and transitive relation on states: `sz ≤` for the invariants of
+this file, `Ext` for the soundness layer. -/
+theorem Wp.mapM_rel {α β : Type} {f : α → M β} {l : List α} {s : CState}
+    (Step : CState → CState → Prop) (hrefl : ∀ s, Step s s)
+    (htrans : ∀ a b c, Step a b → Step b c → Step a c)
+    (I : CState → Prop) (R : CState → α → β → Prop)
+    (hR : ∀ s1 s2 a b, Step s1 s2 → R s1 a b → R s2 a b) (h0 : I s)
+    (hf : ∀ a ∈ l, ∀ s1, I s1 → Step s s1 →
+      Wp (f a) (fun b s2 => I s2 ∧ Step s1 s2 ∧ R s2 a b) s1) :
+    Wp (l.mapM f) (fun bs s2 => I s2 ∧ Step s s2 ∧ All2 (R s2) l bs) s := by
+  induction l generalizing s with
+  | nil =>
+    simp only [List.mapM_nil]
+    exact Wp.pure' ⟨h0, hrefl _, All2.nil⟩
+  | cons a l ih =>
+    simp only [List.mapM_cons]
+    refine Wp.bind ?_
+    refine Wp.mono (hf a (List.mem_cons_self ..) s h0 (hrefl _)) fun b s1 ⟨i1, e1, r1⟩ => ?_
+    refine Wp.bind ?_
+    refine Wp.mono (ih (s := s1) i1 (fun a ha s2 i2 e2 => ?_)) fun bs s2 ⟨i2, e2, r2⟩ => ?_
+    · exact Wp.mono (hf a (List.mem_cons_of_mem _ ha) s2 i2 (htrans _ _ _ e1 e2))
+        fun b s3 ⟨i3, e3, r3⟩ => ⟨i3, e3, r3⟩
+    · exact Wp.pure' ⟨i2, htrans _ _ _ e1 e2, All2.cons (hR _ _ _ _ e2 r1) r2⟩
+
 /-- `mapM`, with an invariant on the state and a predicate on each result. -/
 theorem Wp.mapM {α β : Type} {f : α → M β} {l : List α} {s : CState}
     (I : CState → Prop) (P : CState → β → Prop)
     (hP : ∀ s1 s2 b, s1.sz ≤ s2.sz → P s1 b → P s2 b) (h0 : I s)
     (hf : ∀ a ∈ l, ∀ s1, I s1 → s.sz ≤ s1.sz →
       Wp (f a) (fun b s2 => I s2 ∧ s1.sz ≤ s2.sz ∧ P s2 b) s1) :
-    Wp (l.mapM f) (fun bs s2 => I s2 ∧ s.sz ≤ s2.sz ∧ ∀ b ∈ bs, P s2 b) s := by
+    Wp (l.mapM f) (fun bs s2 => I s2 ∧ s.sz ≤ s2.sz ∧ ∀ b ∈ bs, P s2 b) s :=
+  Wp.mono (Wp.mapM_rel (fun a b : CState => a.sz ≤ b.sz) (fun _ => Nat.le_refl _)
+    (fun _ _ _ => Nat.le_trans) I (fun s1 _ b => P s1 b) (fun s1 s2 _ b g => hP s1 s2 b g) h0 hf)
+    fun _ s2 ⟨i, g, r⟩ => ⟨i, g, All2.forall_right (P := P s2) (fun _ _ h => h) r⟩
+
+/-- A loop over a list whose body is a unit computation, with an invariant `I` on the state and a
+fact `R` about each element, kept true along `Step` (as in `Wp.mapM_rel`). -/
+theorem Wp.forIn_unit_rel {α : Type} {body : α → M PUnit} {l : List α} {s : CState}
+    (Step : CState → CState → Prop) (hrefl : ∀ s, Step s s)
+    (htrans : ∀ a b c, Step a b → Step b c → Step a c)
+    (I : CState → Prop) (R : CState → α → Prop) (hR : ∀ s1 s2 a, Step s1 s2 → R s1 a → R s2 a)
+    (h0 : I s)
+    (hb : ∀ a ∈ l, ∀ s1, I s1 → Step s s1 →
+      Wp (body a) (fun _ s2 => I s2 ∧ Step s1 s2 ∧ R s2 a) s1) :
+    Wp (forIn l PUnit.unit fun x _ => do body x; pure (ForInStep.yield PUnit.unit))
+      (fun _ s2 => I s2 ∧ Step s s2 ∧ ∀ a ∈ l, R s2 a) s := by
   induction l generalizing s with
   | nil =>
-    simp only [List.mapM_nil]
-    exact Wp.pure' ⟨h0, Nat.le_refl _, by simp⟩
+    simp only [List.forIn_nil]
+    exact Wp.pure' ⟨h0, hrefl _, by simp⟩
   | cons a l ih =>
-    simp only [List.mapM_cons]
+    simp only [List.forIn_cons]
     refine Wp.bind ?_
-    refine Wp.mono (hf a (List.mem_cons_self ..) s h0 (Nat.le_refl _)) fun b s1 ⟨i1, g1, p1⟩ => ?_
-    refine Wp.bind ?_
-    refine Wp.mono (ih (s := s1) i1 (fun a ha s2 i2 g2 => ?_)) fun bs s2 ⟨i2, g2, p2⟩ => ?_
-    · exact Wp.mono (hf a (List.mem_cons_of_mem _ ha) s2 i2 (by omega)) fun b s3 ⟨i3, g3, p3⟩ =>
-        ⟨i3, by omega, p3⟩
-    · exact Wp.pure' ⟨i2, by omega, by
-        intro c hc
-        rcases List.mem_cons.mp hc with rfl | hc
-        · exact hP _ _ _ g2 p1
-        · exact p2 c hc⟩
+    refine Wp.bind (Wp.mono (hb a (List.mem_cons_self ..) s h0 (hrefl _)) ?_)
+    intro u s1 ⟨i1, e1, r1⟩
+    refine Wp.pure' ?_
+    refine Wp.mono (ih (s := s1) i1 (fun a ha s2 i2 e2 => ?_)) fun u s2 ⟨i2, e2, r2⟩ => ?_
+    · exact Wp.mono (hb a (List.mem_cons_of_mem _ ha) s2 i2 (htrans _ _ _ e1 e2))
+        fun u s3 ⟨i3, e3, r3⟩ => ⟨i3, e3, r3⟩
+    · refine ⟨i2, htrans _ _ _ e1 e2, ?_⟩
+      intro c hc
+      rcases List.mem_cons.mp hc with rfl | hc
+      · exact hR _ _ _ e2 r1
+      · exact r2 c hc
 
 /-! ### The state invariant -/
 
@@ -423,15 +488,171 @@ theorem Wp.forIn_unit {α : Type} {body : α → M PUnit} {l : List α} {Q : PUn
     (hb : ∀ a ∈ l, ∀ s1, s1.WF → s.sz ≤ s1.sz →
       Wp (body a) (fun _ s2 => s2.WF ∧ s1.sz ≤ s2.sz) s1)
     (h : ∀ s', s.sz ≤ s'.sz → s'.WF → Q ⟨⟩ s') :
-    Wp (forIn l PUnit.unit fun x _ => do body x; pure (ForInStep.yield PUnit.unit)) Q s := by
-  refine Wp.forIn_list (fun (_ : PUnit) s1 => s1.WF ∧ s.sz ≤ s1.sz) l PUnit.unit
-    ⟨hs, Nat.le_refl _⟩ ?_ ?_
-  · intro a ha b s1 ⟨h1, g1⟩
-    refine Wp.bind (Wp.mono (hb a ha s1 h1 g1) ?_)
-    intro u s2 ⟨h2, g2⟩
-    exact Wp.pure' ⟨h2, by omega⟩
-  · intro b s1 ⟨h1, g1⟩
-    exact h s1 g1 h1
+    Wp (forIn l PUnit.unit fun x _ => do body x; pure (ForInStep.yield PUnit.unit)) Q s :=
+  Wp.mono (Wp.forIn_unit_rel (fun a b : CState => a.sz ≤ b.sz) (fun _ => Nat.le_refl _)
+    (fun _ _ _ => Nat.le_trans) (fun s1 => s1.WF) (fun _ _ => True) (fun _ _ _ _ _ => trivial) hs
+    (fun a ha s1 i1 g1 => Wp.mono (hb a ha s1 i1 g1) fun _ _ ⟨w, g⟩ => ⟨w, g, trivial⟩))
+    fun _ s2 ⟨i, g, _⟩ => h s2 g i
+
+/-! ### Growing states
+
+`Ext s s'`: the state only grows. This is the relation the soundness layer (`Subst.lean` on) keeps
+along every step; `fresh_leaf` and the loops over it carry it, and `fresh_wp`'s `sz ≤` is its size
+half. -/
+
+/-- `s'` extends `s`: the size does not shrink and no binding is changed or removed. Reducible, so
+`omega` reads the size fact. -/
+@[reducible] def Ext (s s' : CState) : Prop :=
+  s.sz ≤ s'.sz ∧ ∀ (n : Nat) (t : Ty), s.subst[n]? = some (some t) → s'.subst[n]? = some (some t)
+
+theorem Ext.refl (s : CState) : Ext s s := ⟨Nat.le_refl _, fun _ _ h => h⟩
+
+theorem Ext.trans {s1 s2 s3 : CState} (h1 : Ext s1 s2) (h2 : Ext s2 s3) : Ext s1 s3 :=
+  ⟨Nat.le_trans h1.1 h2.1, fun n t h => h2.2 n t (h1.2 n t h)⟩
+
+theorem Ext.sz {s s' : CState} (h : Ext s s') : s.sz ≤ s'.sz := h.1
+
+theorem Ext.push {s s' : CState} (h : s'.subst = s.subst.push none) : Ext s s' := by
+  refine ⟨by simp [CState.sz, h], fun n t hn => ?_⟩
+  rw [h, Array.getElem?_push]
+  split
+  · simp_all
+  · exact hn
+
+theorem Ext.of_subst {s s' : CState} (h : s'.subst = s.subst) : Ext s s' :=
+  ⟨by simp [CState.sz, h], fun n t hn => by rw [h]; exact hn⟩
+
+/-- Binding an unbound variable only adds a binding. -/
+theorem Ext.set {s s' : CState} {n : Nat} {v : Option Ty} (hu : s.Unbound n)
+    (h : s'.subst = s.subst.set! n v) : Ext s s' := by
+  refine ⟨by simp [CState.sz, h], fun j t hj => ?_⟩
+  rw [h, Array.set!_eq_setIfInBounds, Array.getElem?_setIfInBounds]
+  by_cases hnj : n = j
+  · subst hnj; exact absurd hj (hu t)
+  · simp [hnj, hj]
+
+/-- A pushed entry is unbound, and an unbound variable stays so. -/
+theorem Unbound.push {s s' : CState} (h : s'.subst = s.subst.push none) {m : Nat}
+    (hu : s.Unbound m) : s'.Unbound m := by
+  intro t ht
+  rw [h, Array.getElem?_push] at ht
+  split at ht
+  · simp at ht
+  · exact hu t ht
+
+theorem fresh_leaf {Q : Ty → CState → Prop} {s : CState} (hs : s.WF)
+    (h : ∀ a s', Ty.WF s'.sz 0 a → (∃ j, a = .mv j) → s.sz + 1 = s'.sz → Ext s s' → s'.WF →
+      (∀ m, s.Unbound m → s'.Unbound m) → Q a s') :
+    Wp fresh Q s := by
+  intro n a s' hr
+  have h2 : (Except.ok (.mv s.sz, { s with subst := s.subst.push none }) :
+      Except CErr (Ty × CState)) = .ok (a, s') := hr
+  cases h2
+  refine h _ _ ?_ ⟨_, rfl⟩ ?_ (Ext.push rfl) (hs.push rfl) (fun m hu => Unbound.push rfl hu)
+  · simp [CState.sz]
+  · simp [CState.sz]
+
+theorem freshSkolem_leaf {Q : Ty → CState → Prop} {s : CState} (hs : s.WF)
+    (h : ∀ a s', (∀ sz g, Ty.WF sz g a) → s.sz = s'.sz → Ext s s' → s'.WF → Q a s') :
+    Wp freshSkolem Q s := by
+  intro n a s' hr
+  have h2 : (Except.ok (.skolem s.nextSk, { s with nextSk := s.nextSk + 1 }) :
+      Except CErr (Ty × CState)) = .ok (a, s') := hr
+  cases h2
+  exact h _ _ (fun _ _ => Ty.WF_skolem) rfl (Ext.of_subst rfl) (hs.of_subst rfl)
+
+/-- `Wp.mapM_rel` along `Ext`. -/
+theorem Wp.mapM_ext {α β : Type} {f : α → M β} {l : List α} {s : CState}
+    (I : CState → Prop) (R : CState → α → β → Prop)
+    (hR : ∀ s1 s2 a b, Ext s1 s2 → R s1 a b → R s2 a b) (h0 : I s)
+    (hf : ∀ a ∈ l, ∀ s1, I s1 → Ext s s1 →
+      Wp (f a) (fun b s2 => I s2 ∧ Ext s1 s2 ∧ R s2 a b) s1) :
+    Wp (l.mapM f) (fun bs s2 => I s2 ∧ Ext s s2 ∧ All2 (R s2) l bs) s :=
+  Wp.mapM_rel Ext Ext.refl (fun _ _ _ => Ext.trans) I R hR h0 hf
+
+/-- `Wp.forIn_unit_rel` along `Ext`. -/
+theorem Wp.forIn_unit_ext {α : Type} {body : α → M PUnit} {l : List α} {s : CState}
+    (I : CState → Prop) (R : CState → α → Prop) (hR : ∀ s1 s2 a, Ext s1 s2 → R s1 a → R s2 a)
+    (h0 : I s)
+    (hb : ∀ a ∈ l, ∀ s1, I s1 → Ext s s1 →
+      Wp (body a) (fun _ s2 => I s2 ∧ Ext s1 s2 ∧ R s2 a) s1) :
+    Wp (forIn l PUnit.unit fun x _ => do body x; pure (ForInStep.yield PUnit.unit))
+      (fun _ s2 => I s2 ∧ Ext s s2 ∧ ∀ a ∈ l, R s2 a) s :=
+  Wp.forIn_unit_rel Ext Ext.refl (fun _ _ _ => Ext.trans) I R hR h0 hb
+
+theorem fresh_push_loop_sound {α : Type} (l : List α) :
+    ∀ (ms0 : Array Ty) {Q : Array Ty → CState → Prop} {s : CState}, s.WF →
+      (∀ u ∈ ms0, ∃ j, u = .mv j) → (∀ t ∈ ms0, Ty.WF s.sz 0 t) →
+      (∀ ms s', Ext s s' → s'.WF → ms.size = ms0.size + l.length →
+        (∀ u ∈ ms, ∃ j, u = .mv j) → (∀ t ∈ ms, Ty.WF s'.sz 0 t) → Q ms s') →
+      Wp (forIn l ms0 fun _ ms => do
+        let d ← fresh
+        pure (ForInStep.yield (ms.push d))) Q s := by
+  induction l with
+  | nil =>
+    intro ms0 Q s hs hm h0 h
+    simp only [List.forIn_nil]
+    exact Wp.pure' (h ms0 s (Ext.refl _) hs (by simp) hm h0)
+  | cons a l ih =>
+    intro ms0 Q s hs hm h0 h
+    simp only [List.forIn_cons]
+    refine Wp.bind (Wp.bind (fresh_leaf hs ?_))
+    intro d s1 hd hdm g1 e1 h1 _
+    refine Wp.pure' ?_
+    dsimp only
+    refine ih (ms0.push d) h1 ?_ ?_ ?_
+    · intro u hu
+      rcases Array.mem_push.mp hu with hu | rfl
+      · exact hm u hu
+      · exact hdm
+    · intro t ht
+      rcases Array.mem_push.mp ht with ht | rfl
+      · exact (h0 t ht).mono (by omega) (Nat.le_refl _)
+      · exact hd
+    · intro ms s2 e2 h2 hsz hm2 hms
+      refine h ms s2 (e1.trans e2) h2 ?_ hm2 hms
+      simp only [Array.size_push] at hsz
+      simp only [List.length_cons]
+      omega
+
+/-- `n` fresh variables, collected. -/
+theorem fresh_loop_sound (n : Nat) {Q : List Ty → CState → Prop} {s : CState} (hs : s.WF)
+    (h : ∀ ps s', Ext s s' → s'.WF → ps.length = n →
+      (∀ t ∈ ps, Ty.WF s'.sz 0 t) → (∀ m, s.Unbound m → s'.Unbound m) → Q ps s') :
+    Wp (forIn [0:n] ([] : List Ty) fun _ acc => do
+      let d ← fresh
+      pure (ForInStep.yield (acc ++ [d]))) Q s := by
+  simp only [Std.Legacy.Range.forIn_eq_forIn_range']
+  have gen : ∀ (l : List Nat) (acc : List Ty) (s : CState), s.WF → (∀ t ∈ acc, Ty.WF s.sz 0 t) →
+      (∀ ps s', Ext s s' → s'.WF → ps.length = acc.length + l.length →
+        (∀ t ∈ ps, Ty.WF s'.sz 0 t) → (∀ m, s.Unbound m → s'.Unbound m) → Q ps s') →
+      Wp (forIn l acc fun _ acc => do
+        let d ← fresh
+        pure (ForInStep.yield (acc ++ [d]))) Q s := by
+    intro l
+    induction l with
+    | nil =>
+      intro acc s hs ha h
+      simp only [List.forIn_nil]
+      exact Wp.pure' (h acc s (Ext.refl _) hs (by simp) ha (fun _ hu => hu))
+    | cons a l ih =>
+      intro acc s hs ha h
+      simp only [List.forIn_cons]
+      refine Wp.bind (Wp.bind (fresh_leaf hs ?_))
+      intro d s1 hd _ g1 e1 h1 hu1
+      refine Wp.pure' ?_
+      dsimp only
+      refine ih (acc ++ [d]) s1 h1 ?_ ?_
+      · intro t ht
+        rcases List.mem_append.mp ht with ht | ht
+        · exact (ha t ht).mono (by omega) (Nat.le_refl _)
+        · rcases List.mem_singleton.mp ht with rfl; exact hd
+      · intro ps s2 e2 h2 hl hps hu2
+        refine h ps s2 (e1.trans e2) h2 ?_ hps (fun m hu => hu2 m (hu1 m hu))
+        simp only [List.length_append, List.length_cons, List.length_nil] at hl ⊢
+        omega
+  exact gen _ [] s hs (by simp) fun ps s' e h' hl hp hu =>
+    h ps s' e h' (by simpa using hl) hp hu
 
 /-! ### Fresh variables and binding -/
 
@@ -746,28 +967,8 @@ theorem joinTy_wp {Q : Ty → CState → Prop} {s : CState} {pos : Bool} {a b : 
 macro_rules
   | `(tactic| wp_step) => `(tactic| leaf joinTy_wp)
 
-/-- Append `n` fresh variables to a list (`peelF`'s parameter slots). -/
-theorem fresh_loop_wp {r : Std.Legacy.Range} {Q : List Ty → CState → Prop} {s : CState}
-    (hs : s.WF)
-    (h : ∀ ps s', s.sz ≤ s'.sz → s'.WF → (∀ t ∈ ps, Ty.WF s'.sz 0 t) → Q ps s') :
-    Wp (forIn r ([] : List Ty) fun _ acc => do
-      let d ← fresh
-      pure (ForInStep.yield (acc ++ [d]))) Q s := by
-  refine Wp.forIn_range (fun (ps : List Ty) s1 =>
-    s1.WF ∧ s.sz ≤ s1.sz ∧ ∀ t ∈ ps, Ty.WF s1.sz 0 t) r [] ⟨hs, Nat.le_refl _, by simp⟩ ?_ ?_
-  · intro a ps s1 ⟨h1, g1, hp⟩
-    refine Wp.bind (fresh_wp h1 ?_)
-    intro d s2 hd g2 h2
-    refine Wp.pure' ⟨h2, by omega, ?_⟩
-    intro t ht
-    rcases List.mem_append.mp ht with ht | ht
-    · exact (hp t ht).mono (by omega) (Nat.le_refl _)
-    · rcases List.mem_singleton.mp ht with rfl; exact hd
-  · intro ps s1 ⟨h1, g1, hp⟩
-    exact h ps s1 g1 h1 hp
-
 macro_rules
-  | `(tactic| wp_step) => `(tactic| leaf fresh_loop_wp)
+  | `(tactic| wp_step) => `(tactic| leaf fresh_loop_sound)
 
 theorem peelF_wp : ∀ (k : Nat) (t : Ty) (n : Nat) (Q : List Ty × Ty × Eff → CState → Prop)
     (s : CState), s.WF → Ty.WF s.sz 0 t →
@@ -860,38 +1061,6 @@ theorem instTyList_wf {ms : Array Ty} {sz n : Nat} (hm : ms.size = n)
     · exact instTyList_wf hm hms ts (fun t ht => h t (List.mem_cons_of_mem _ ht)) u hu
 end
 
-/-- Push `l.length` fresh variables onto an array. -/
-theorem fresh_push_loop_wp {α : Type} (l : List α) :
-    ∀ (ms0 : Array Ty) {Q : Array Ty → CState → Prop} {s : CState}, s.WF →
-      (∀ t ∈ ms0, Ty.WF s.sz 0 t) →
-      (∀ ms s', s.sz ≤ s'.sz → s'.WF → ms.size = ms0.size + l.length →
-        (∀ t ∈ ms, Ty.WF s'.sz 0 t) → Q ms s') →
-      Wp (forIn l ms0 fun _ ms => do
-        let d ← fresh
-        pure (ForInStep.yield (ms.push d))) Q s := by
-  induction l with
-  | nil =>
-    intro ms0 Q s hs h0 h
-    simp only [List.forIn_nil]
-    exact Wp.pure' (h ms0 s (Nat.le_refl _) hs (by simp) h0)
-  | cons a l ih =>
-    intro ms0 Q s hs h0 h
-    simp only [List.forIn_cons]
-    refine Wp.bind (Wp.bind (fresh_wp hs ?_))
-    intro d s1 hd g1 h1
-    refine Wp.pure' ?_
-    dsimp only
-    refine ih (ms0.push d) h1 ?_ ?_
-    · intro t ht
-      rcases Array.mem_push.mp ht with ht | rfl
-      · exact (h0 t ht).mono (by omega) (Nat.le_refl _)
-      · exact hd
-    · intro ms s2 g2 h2 hsz hms
-      refine h ms s2 (by omega) h2 ?_ hms
-      simp only [Array.size_push] at hsz
-      simp only [List.length_cons]
-      omega
-
 theorem instantiate_wp {Q : Ty → CState → Prop} {s : CState} {n : Nat} {t : Ty} (hs : s.WF)
     (ht : Ty.WF s.sz n t)
     (h : ∀ r s', s.sz ≤ s'.sz → s'.WF → Ty.WF s'.sz 0 r → Q r s') :
@@ -899,10 +1068,10 @@ theorem instantiate_wp {Q : Ty → CState → Prop} {s : CState} {n : Nat} {t : 
   unfold instantiate
   dsimp only
   simp only [Std.Legacy.Range.forIn_eq_forIn_range']
-  refine Wp.bind (fresh_push_loop_wp _ #[] hs (by simp) ?_)
-  intro ms s1 g1 h1 hsz hms
-  refine Wp.pure' (h _ s1 g1 h1 ?_)
-  refine instTy_wf (n := n) ?_ hms t (ht.mono g1 (Nat.le_refl _))
+  refine Wp.bind (fresh_push_loop_sound _ #[] hs (by simp) (by simp) ?_)
+  intro ms s1 e1 h1 hsz hm hms
+  refine Wp.pure' (h _ s1 e1.sz h1 ?_)
+  refine instTy_wf (n := n) ?_ hms t (ht.mono e1.sz (Nat.le_refl _))
   simpa using hsz
 
 macro_rules
