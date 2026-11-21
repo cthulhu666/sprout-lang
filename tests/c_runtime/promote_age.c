@@ -194,7 +194,7 @@ static long long nursery_target(void) {
   return imax(g_gc_threshold_base, g_heap + imax((long long)raw, nursery_min()));
 }
 
-static long long footprint_floor(void) { return g_heap + (g_heap + g_gc_freelist_len) / g_gc_footprint_k; }
+static long long footprint_floor(void) { return g_heap + (g_heap + g_gc_free_slots) / g_gc_footprint_k; }
 
 /* The shipped defaults, at the default K=3: minors on, s = 1.0, c = 2.0, and the rule is live. */
 static int defaults(void) {

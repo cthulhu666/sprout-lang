@@ -2480,8 +2480,9 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   released only when it holds none. `sprout_holes_sweep_region` reads every word below each held
   region's bump (`region_bump_words`, up to 1,024 per region), live or free, so a major costs
   words in proportion to the peak heap. Measured on the free-list collector (265k slots per major:
-  p50 1,057 µs, max 1,945, 49 per 1,200 frames); the bitmap sweep is unmeasured. Minors skip
-  regions with no young object. If it matters: skip all-zero runs of `occ`, or move survivors.
+  p50 1,057 µs, max 1,945, 49 per 1,200 frames). The bitmap sweep on `test_gc_walk_sparse` (7
+  regions, 6,581 words) takes 16-26 µs per major (`sweep_us=`). Minors skip regions with no young
+  object. If it matters: skip all-zero runs of `occ`, or move survivors.
   `bench/results-2026-11-09-galaxy-gc.md`.
 - [ ] `P3` **`http_log_middleware` overflows in `wall_loop`.** The bench sums `time.wall_micros()`
   (~1.76e15) over 1,000,000 iterations in `bench/http_log_middleware/`, so the fifth of its six
@@ -2507,8 +2508,9 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
 - [ ] `P3` **`sprout_heap_lookup_region` still rejects a FREE header.** Nothing writes
   `SPROUT_HEAP_FREE` since the free-list sweep went, so that branch is dead on a hot, inlined
   path (mark, drain, write barrier). Removing it, and the FREE kind if nothing else needs it (the
-  census name, GENCHECK and HDRCHECK read it), changes every inlined lookup and needs a perf A/B
-  (`bench/gc_minor/ab.sh`). `runtime/sprout_word.h`, `runtime/sprout_runtime.c`.
+  census name and GENCHECK's "FREE header" check read it; HDRCHECK rejects a zero kind as unknown),
+  changes every inlined lookup and needs a perf A/B (`bench/gc_minor/ab.sh`).
+  `runtime/sprout_word.h`, `runtime/sprout_runtime.c`.
 - [ ] `P3` **A program cannot place a collection in its own frame — `sprout_gc_collect` is
   `static`.** A game with a 17.1 ms budget would rather take a major (~1 ms on the galaxy client)
   after present than wherever the allocation threshold lands, and OCaml exposes exactly this as

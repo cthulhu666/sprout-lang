@@ -34,7 +34,7 @@
  *                          young-only sweep (GC_KIND_* below; 3, a minor with the full sweep, was
  *                          recorded by the removed free-list collector).
  *                          heap_after is the live object count, free_slots the runtime's free
- *                          count (g_gc_freelist_len): the granules over the mean live slot size
+ *                          count (g_gc_free_slots): the granules over the mean live slot size
  *                          (slots in a trace from the removed free-list collector).  --check
  *                          does not read it; the policy replay compares it with its own free
  *                          slots only to calibrate, so that figure is meaningful for slot-unit
@@ -777,7 +777,7 @@ typedef struct {
   uint64_t seq_next, hint_seq;   /* regions opened; the seq an H record named */
   int hint_dirty;   /* hint is stale: resolve hint_seq at the next bump, when its region exists */
   uint32_t cursor[NCLS];
-  uint64_t free;   /* free slots over the used regions: the runtime's g_gc_freelist_len */
+  uint64_t free;   /* free slots over the used regions: the runtime's g_gc_free_slots */
   uint64_t bump_allocs, hint_tests, scans, scan_regions;   /* the bump path: allocations, hint tests, downward scans and regions they test */
 } Base;
 

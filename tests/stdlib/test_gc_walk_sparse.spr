@@ -1,14 +1,18 @@
 import stdlib.test (check_eq, run_suite)
 
-# Workload: sparse regions pinned by a few survivors.
+# Workload: a pool of free slots in regions pinned by a few survivors.
 #
-# Shape: regions left mostly free after their Wides die, each pinned by a few
-# survivors so it is never released. Every later major sweeps those regions and
-# reclaims little from them — #407's shape in miniature: a live set shrank and the
-# heap held did not. `walked=` under SPROUT_DEBUG_GC=1 counts the bitmap words the
-# sweep reads, so no per-slot bound is checked on it.
-# The assertions below only confirm the workload ran; the runtime counters carry
-# the measurement.
+# Shape: the 100,000 Wides die, leaving 7 regions held by ~1,560 Links and a free
+# pool far above the live set — #407's shape in miniature: a live set shrank and
+# the heap held did not. The churn refills those holes, since a hole takes any
+# request that fits: `free=` under SPROUT_DEBUG_GC=1 stays near 209,160 across
+# the churn cycles and the region count stays at 7.
+#
+# KNOWN ANSWER: with minors off and the default trigger, the footprint floor
+# sets the threshold from that pool: 7 collections before the exit one. With
+# SPROUT_GC_THRESHOLD pinned (floor off) it is 87. `just gc-trigger-check` asserts
+# the separation.
+# The assertions below only confirm the workload ran.
 
 # Arity 6, so a different slot size from Chain's arity 2.
 type Wide (..) =

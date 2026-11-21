@@ -338,11 +338,14 @@ echo "==> c runtime: every nullary constructor is interned, keyed on its tag"
 # POISONS a reclaimed slot instead of letting the allocator reuse it, so a singleton
 # cache left pointing at freed memory aborts in sprout_tag rather than reading back
 # whatever the next occupant happens to hold. Verified by mutation — with
-# sprout_gc_invalidate_singleton stubbed to `return;`, `weak` fails in all four
-# combinations below (exit 1 on the tag readback, 134 on the poison abort), while the
-# real runtime passes all sixteen.
+# sprout_holes_sweep_singletons (the sweep's clearing of a dead singleton) stubbed to
+# `return;`, `weak` fails in all four combinations below (exit 1 on the plain runs, 134 on
+# the poison abort), while the real runtime passes all sixteen. The plain runs' second
+# phase fails on the live-slot check alone: the tag readback of an untouched dead slot
+# still reads 7.
 NCI="$TMP_DIR/nullary_ctor_interning"
-compile_sanitized nullary_ctor_interning.c "$NCI"
+clang "$ROOT/tests/c_runtime/nullary_ctor_interning.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
+  "${CLANG_EXTRA[@]}" -O0 -g ${SAN[@]+"${SAN[@]}"} -o "$NCI"
 for sel in intern distinct arity weak; do
   for stress in 0 1; do
    for lineage in 0 1; do
@@ -614,6 +617,8 @@ abort_check "$HC" bad_fl_tails_at_sweep "${FLV}tail list not empty when the swee
 abort_check "$HC" bad_fl_cursor_not_reset "${FLV}cursor not reset after a collection"
 abort_check "$HC" bad_hdr_too_long "${HDR}header too long"
 abort_check "$HC" bad_hdr_too_short "${HDR}header too short"
+abort_check "$HC" bad_hdr_free "${HDR}unknown header kind"
+abort_check "$HC" bad_bit13_before_major "${GCK}remembered bit set before a major"
 abort_check "$HC" bad_corpse_not_in_oldocc "${GCK}corpse outside oldocc"
 abort_check "$HC" bad_corpse_count "${GCK}poison count"
 abort_check "$HC" bad_poison_no_lineage "${GCK}poison header"
@@ -641,7 +646,7 @@ grep -q "owner: kind=REF .* field=0" "$TMP_DIR/promote_age_unremembered_edge.err
   exit 1
 }
 abort_check "$PA" stray_bit13 "GENCHECK: remembered bits differ from the remembered set" bad_stray_bit13
-# A retired switch aborts at startup with a removal message, at any value and with minors off too.
+# A retired switch exits 1 at startup with a removal message, at any value and with minors off too.
 abort_check "$PA" retired_age "SPROUT_GC_PROMOTE_AGE was removed: promotion age is fixed at 3" bad_env SPROUT_GC_PROMOTE_AGE 2
 abort_check "$PA" retired_nursery "SPROUT_GC_NURSERY was removed: .*SPROUT_GC_NURSERY_SHARE" bad_env SPROUT_GC_NURSERY 1
 abort_check "$PA" retired_survive "SPROUT_GC_NURSERY_SURVIVE was removed: the survivor floor is fixed at 2" bad_env SPROUT_GC_NURSERY_SURVIVE 4
