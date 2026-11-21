@@ -5,4 +5,7 @@ import SproutCore.Gen
 import SproutCore.GenProgram
 import SproutCore.Shrink
 import SproutCore.Tests
+import SproutCore.Judgment
+import SproutCore.JudgmentLemmas
+import SproutCore.JudgmentExamples
 import SproutCore.Witnesses
