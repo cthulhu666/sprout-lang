@@ -272,18 +272,49 @@ theorem Ty.wf_of_ok {t : Ty} (h : t.ok 0 = true) (sz g : Nat) : Ty.WF sz g t := 
   obtain ⟨h1, h2⟩ := Ty.mg_of_ok t h
   exact ⟨fun m hm => by simp [h1] at hm, fun i hi => by simp [h2] at hi⟩
 
+-- A solved type has no `.named`.
+mutual
+theorem Ty.nf_of_ok : ∀ t : Ty, t.ok 0 = true → Ty.NF t
+  | .named _, h => by simp [Ty.ok] at h
+  | .mv _, _ => Ty.NF_mv
+  | .gen _, _ => by simp [Ty.NF, namedIn]
+  | .skolem _, _ => Ty.NF_skolem
+  | .int, _ => Ty.NF_int
+  | .bool, _ => Ty.NF_bool
+  | .str, _ => Ty.NF_str
+  | .unit, _ => Ty.NF_unit
+  | .tup ts, h => by
+    simp only [Ty.ok] at h
+    exact Ty.NF_tup.mpr (Ty.nfList_of_ok ts h)
+  | .arr ps r e, h => by
+    simp only [Ty.ok, Bool.and_eq_true, Bool.not_eq_true'] at h
+    exact Ty.NF_arr.mpr ⟨Ty.nfList_of_ok ps h.1.1, Ty.nf_of_ok r h.1.2⟩
+
+theorem Ty.nfList_of_ok : ∀ ts : List Ty, Ty.okList 0 ts = true → ∀ t ∈ ts, Ty.NF t
+  | [], _ => by simp
+  | t :: ts, h => by
+    simp only [Ty.okList, Bool.and_eq_true] at h
+    have h1 := Ty.nf_of_ok t h.1
+    have h2 := Ty.nfList_of_ok ts h.2
+    intro u hu
+    rcases List.mem_cons.mp hu with e | hu
+    · rw [e]; exact h1
+    · exact h2 u hu
+end
+
 /-! ### Lambda parameters, arity, local bindings -/
 
 theorem elabTy_unit_leaf {Q : Ty → CState → Prop} {s : CState} {a : Ty} (hsf : Ty.surf a = true)
     (h : ∀ r s', s' = s → Ty.elab (fun _ => Ty.unit) a = some r → r.ok 0 = true →
-      Ty.WF s.sz 0 r → Q r s') :
+      Ty.WF s.sz 0 r → r.NF → Q r s') :
     Wp (elabTy (fun _ => .unit) a) Q s :=
   elabTy_elab _ a Q s hsf fun r s' e he =>
     h r s' e he (Ty.elab_ok (fun _ => rfl) a r he)
       (Ty.wf_of_ok (Ty.elab_ok (fun _ => rfl) a r he) _ _)
+      (Ty.nf_of_ok _ (Ty.elab_ok (fun _ => rfl) a r he))
 
 macro_rules
-  | `(tactic| sound_step) => `(tactic| leaf elabTy_unit_leaf)
+  | `(tactic| sound_step) => `(tactic| sleaf elabTy_unit_leaf)
 
 -- local: it names this file's hypothesis `hann`
 set_option hygiene false in
@@ -292,20 +323,21 @@ local macro_rules
     `(tactic| (show Ty.surf _ = true; exact hann _ rfl))
 
 theorem lamParam_sound {Q : Ty → CState → Prop} {s : CState} {slot ann : Option Ty}
-    (hs : s.WF) (hslot : ∀ t, slot = some t → Ty.WF s.sz 0 t)
-    (hann : ∀ t, ann = some t → Ty.surf t = true)
-    (h : ∀ r s', Ext s s' → s'.WF → Ty.WF s'.sz 0 r →
+    (hs : s.WF) (hnf : s.NF) (hslot : ∀ t, slot = some t → Ty.WF s.sz 0 t)
+    (hslotn : ∀ t, slot = some t → t.NF) (hann : ∀ t, ann = some t → Ty.surf t = true)
+    (h : ∀ r s', Ext s s' → s'.WF → Ty.WF s'.sz 0 r → r.NF →
       (∀ θ, Solves θ s' → LamParam ann (Ty.app θ r)) → Q r s') :
     Wp (lamParam slot ann) Q s := by
   rcases ann with _ | a0 <;> rcases slot with _ | s0 <;> unfold lamParam <;> dsimp only
   all_goals (try have := hann a0 rfl)
   all_goals (try have := hslot s0 rfl)
+  all_goals (try have := hslotn s0 rfl)
   all_goals repeat' sound_step
-  all_goals refine h _ _ (by ext_close) ‹CState.WF _› (by wf_close) ?_
+  all_goals refine h _ _ (by ext_close) ‹CState.WF _› (by wf_close) (by nf_close) ?_
   all_goals intro θ hθ
-  · exact Ty.app_solved hθ.solved ‹Ty.WF _ 0 _›
-  · exact Ty.app_solved hθ.solved ‹Ty.WF _ 0 _›
-  · exact Ty.app_solved hθ.solved ‹Ty.WF _ 0 _›
+  · exact Ty.app_solved hθ.solved ‹Ty.WF _ 0 _› (by nf_close)
+  · exact Ty.app_solved hθ.solved ‹Ty.WF _ 0 _› (by nf_close)
+  · exact Ty.app_solved hθ.solved ‹Ty.WF _ 0 _› (by nf_close)
   all_goals (
     simp only [LamParam]
     rw [Ty.app_of_ok θ _ ‹Ty.ok 0 _ = true›]

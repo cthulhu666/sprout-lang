@@ -1447,7 +1447,10 @@ PATH. It installs on first use, so nothing changes for a contributor who never t
   makes the checker's remaining `!` accessors (`instTy`, `bindMeta`'s `set!`) in-range; the plan
   code reads its arrays with total accessors, and `zonk`'s arrows are proved canonical there.
   `formal/SproutCore/InferSound.lean` proves `infer_sound_run`, T2 for expressions: every grounding
-  that solves the final state turns a run of `infer` into a `HasType` derivation.
+  that solves the final state turns a run of `infer` into a `HasType` derivation; its corollary
+  `infer_sound_exists` adds `exists_solves` (`SolvesExists.lean`), so an accepted expression has
+  some `θ` with a derivation. The start state and environment must be named-free (`CState.NF`,
+  `Env.NF`), and `infer` keeps them so.
 - Spec snapshot: `formal/spec-snapshot/` holds spec §5.1–5.5, the intro of §5.6 (up to
   `### 5.6.1`), §5.8, §7 and §10.10, cut by heading (`scripts/lean_spec_snapshot.py`). Any change
   to them fails `lean-model` until the model has been re-checked against the new text and

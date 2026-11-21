@@ -494,42 +494,154 @@ theorem Wp.forIn_unit {α : Type} {body : α → M PUnit} {l : List α} {Q : PUn
     (fun a ha s1 i1 g1 => Wp.mono (hb a ha s1 i1 g1) fun _ _ ⟨w, g⟩ => ⟨w, g, trivial⟩))
     fun _ s2 ⟨i, g, _⟩ => h s2 g i
 
+/-! ### Named-free types
+
+`Ty.NF t`: no `.named` anywhere in `t`. The checker never builds one: `elabTy` maps each written
+variable away, and every other function builds types from the ones it is given. A `.named` in the
+start state or environment is kept, and `Ty.ok` rejects it, so no grounding of it is solved. The
+soundness layer (`Subst.lean` on) takes `NF` of the start state and environment as hypotheses and
+proves that `infer` keeps it. -/
+
+def Ty.NF (t : Ty) : Prop := namedIn t = []
+
+/-- Every bound entry of the substitution is named-free. -/
+def CState.NF (s : CState) : Prop :=
+  ∀ (n : Nat) (t : Ty), s.subst[n]? = some (some t) → Ty.NF t
+
+theorem CState.NF.init : CState.NF {} := fun n t h => by simp at h
+
+theorem namedInList_eq_nil {ts : List Ty} : namedInList ts = [] ↔ ∀ t ∈ ts, namedIn t = [] := by
+  induction ts with
+  | nil => simp [namedInList]
+  | cons t ts ih => simp [namedInList, ih]
+
+theorem namedInList_append (a b : List Ty) :
+    namedInList (a ++ b) = namedInList a ++ namedInList b := by
+  induction a with
+  | nil => simp [namedInList]
+  | cons t a ih => simp [namedInList, ih, List.append_assoc]
+
+@[simp] theorem Ty.not_NF_named {s : String} : ¬ Ty.NF (.named s) := by simp [Ty.NF, namedIn]
+@[simp] theorem Ty.NF_mv {n : Nat} : Ty.NF (.mv n) := rfl
+@[simp] theorem Ty.NF_skolem {n : Nat} : Ty.NF (.skolem n) := rfl
+@[simp] theorem Ty.NF_int : Ty.NF .int := rfl
+@[simp] theorem Ty.NF_bool : Ty.NF .bool := rfl
+@[simp] theorem Ty.NF_str : Ty.NF .str := rfl
+@[simp] theorem Ty.NF_unit : Ty.NF .unit := rfl
+
+@[simp] theorem Ty.NF_tup {ts : List Ty} : Ty.NF (.tup ts) ↔ ∀ t ∈ ts, Ty.NF t := by
+  simp [Ty.NF, namedIn, namedInList_eq_nil]
+
+@[simp] theorem Ty.NF_arr {ps : List Ty} {r : Ty} {e : Eff} :
+    Ty.NF (.arr ps r e) ↔ (∀ t ∈ ps, Ty.NF t) ∧ Ty.NF r := by
+  simp [Ty.NF, namedIn, namedInList_eq_nil]
+
+theorem namedIn_mkArr (ps : List Ty) (r : Ty) (e : Eff) :
+    namedIn (mkArr ps r e) = namedIn (.arr ps r e) := by
+  unfold mkArr
+  split
+  · split
+    · rfl
+    · simp [namedIn, namedInList_append, List.append_assoc]
+  · rfl
+
+theorem Ty.NF_mkArr {ps : List Ty} {r : Ty} {e : Eff} :
+    Ty.NF (mkArr ps r e) ↔ (∀ t ∈ ps, Ty.NF t) ∧ Ty.NF r := by
+  simp only [Ty.NF, namedIn_mkArr]
+  exact Ty.NF_arr
+
+/-! The pieces of a named-free arrow or tuple (as `Ty.WF.arr_res` and the others, for `Ty.WF`). -/
+
+theorem Ty.NF.arr_res {ps : List Ty} {r : Ty} {e : Eff} (h : Ty.NF (.arr ps r e)) : Ty.NF r :=
+  (Ty.NF_arr.mp h).2
+
+theorem Ty.NF.arr_params {ps : List Ty} {r : Ty} {e : Eff} (h : Ty.NF (.arr ps r e)) :
+    ∀ t ∈ ps, Ty.NF t :=
+  (Ty.NF_arr.mp h).1
+
+theorem Ty.NF.arr_take {ps : List Ty} {r : Ty} {e : Eff} (h : Ty.NF (.arr ps r e)) (m : Nat) :
+    ∀ t ∈ ps.take m, Ty.NF t :=
+  fun t ht => (Ty.NF_arr.mp h).1 t (List.mem_of_mem_take ht)
+
+theorem Ty.NF.arr_drop {ps : List Ty} {r : Ty} {e : Eff} (h : Ty.NF (.arr ps r e)) (m : Nat) :
+    Ty.NF (.arr (ps.drop m) r e) :=
+  Ty.NF_arr.mpr ⟨fun t ht => (Ty.NF_arr.mp h).1 t (List.mem_of_mem_drop ht), (Ty.NF_arr.mp h).2⟩
+
+theorem Ty.NF.of_mv {t : Ty} (h : ∃ j, t = .mv j) : Ty.NF t := by
+  obtain ⟨j, rfl⟩ := h
+  exact Ty.NF_mv
+
+theorem Ty.NF.tup_params {ts : List Ty} (h : Ty.NF (.tup ts)) : ∀ t ∈ ts, Ty.NF t :=
+  Ty.NF_tup.mp h
+
+theorem Ty.NF.list_cons {t : Ty} {ts : List Ty} (h1 : Ty.NF t) (h2 : ∀ u ∈ ts, Ty.NF u) :
+    ∀ u ∈ t :: ts, Ty.NF u := by
+  intro u hu
+  rcases List.mem_cons.mp hu with rfl | hu
+  · exact h1
+  · exact h2 u hu
+
 /-! ### Growing states
 
 `Ext s s'`: the state only grows. This is the relation the soundness layer (`Subst.lean` on) keeps
 along every step; `fresh_leaf` and the loops over it carry it, and `fresh_wp`'s `sz ≤` is its size
 half. -/
 
-/-- `s'` extends `s`: the size does not shrink and no binding is changed or removed. Reducible, so
-`omega` reads the size fact. -/
+/-- `s'` extends `s`: the size does not shrink, no binding is changed or removed, and a named-free
+substitution stays named-free. Reducible, so `omega` reads the size fact. -/
 @[reducible] def Ext (s s' : CState) : Prop :=
-  s.sz ≤ s'.sz ∧ ∀ (n : Nat) (t : Ty), s.subst[n]? = some (some t) → s'.subst[n]? = some (some t)
+  s.sz ≤ s'.sz ∧
+    (∀ (n : Nat) (t : Ty), s.subst[n]? = some (some t) → s'.subst[n]? = some (some t)) ∧
+    (s.NF → s'.NF)
 
-theorem Ext.refl (s : CState) : Ext s s := ⟨Nat.le_refl _, fun _ _ h => h⟩
+theorem Ext.refl (s : CState) : Ext s s := ⟨Nat.le_refl _, fun _ _ h => h, id⟩
 
 theorem Ext.trans {s1 s2 s3 : CState} (h1 : Ext s1 s2) (h2 : Ext s2 s3) : Ext s1 s3 :=
-  ⟨Nat.le_trans h1.1 h2.1, fun n t h => h2.2 n t (h1.2 n t h)⟩
+  ⟨Nat.le_trans h1.1 h2.1, fun n t h => h2.2.1 n t (h1.2.1 n t h), fun h => h2.2.2 (h1.2.2 h)⟩
 
 theorem Ext.sz {s s' : CState} (h : Ext s s') : s.sz ≤ s'.sz := h.1
 
+theorem Ext.bound {s s' : CState} (h : Ext s s') {n : Nat} {t : Ty}
+    (hn : s.subst[n]? = some (some t)) : s'.subst[n]? = some (some t) := h.2.1 n t hn
+
+theorem Ext.nf {s s' : CState} (h : Ext s s') : s.NF → s'.NF := h.2.2
+
 theorem Ext.push {s s' : CState} (h : s'.subst = s.subst.push none) : Ext s s' := by
-  refine ⟨by simp [CState.sz, h], fun n t hn => ?_⟩
+  have hget : ∀ (n : Nat) (t : Ty), s'.subst[n]? = some (some t) → s.subst[n]? = some (some t) := by
+    intro n t ht
+    rw [h, Array.getElem?_push] at ht
+    split at ht
+    · simp at ht
+    · exact ht
+  refine ⟨by simp [CState.sz, h], fun n t hn => ?_, fun hnf n t ht => hnf n t (hget n t ht)⟩
   rw [h, Array.getElem?_push]
   split
   · simp_all
   · exact hn
 
 theorem Ext.of_subst {s s' : CState} (h : s'.subst = s.subst) : Ext s s' :=
-  ⟨by simp [CState.sz, h], fun n t hn => by rw [h]; exact hn⟩
+  ⟨by simp [CState.sz, h], fun n t hn => by rw [h]; exact hn,
+    fun hnf n t ht => hnf n t (by rw [h] at ht; exact ht)⟩
 
-/-- Binding an unbound variable only adds a binding. -/
+/-- Binding an unbound variable only adds a binding; it stays named-free when the bound type is
+(given that the old substitution was). -/
 theorem Ext.set {s s' : CState} {n : Nat} {v : Option Ty} (hu : s.Unbound n)
+    (hv : s.NF → ∀ t, v = some t → Ty.NF t)
     (h : s'.subst = s.subst.set! n v) : Ext s s' := by
-  refine ⟨by simp [CState.sz, h], fun j t hj => ?_⟩
-  rw [h, Array.set!_eq_setIfInBounds, Array.getElem?_setIfInBounds]
-  by_cases hnj : n = j
-  · subst hnj; exact absurd hj (hu t)
-  · simp [hnj, hj]
+  refine ⟨by simp [CState.sz, h], fun j t hj => ?_, fun hnf j t hj => ?_⟩
+  · rw [h, Array.set!_eq_setIfInBounds, Array.getElem?_setIfInBounds]
+    by_cases hnj : n = j
+    · subst hnj; exact absurd hj (hu t)
+    · simp [hnj, hj]
+  · rw [h, Array.set!_eq_setIfInBounds, Array.getElem?_setIfInBounds] at hj
+    by_cases hnj : n = j
+    · subst hnj
+      simp only [ite_true] at hj
+      split at hj
+      · exact hv hnf t (Option.some.inj hj)
+      · cases hj
+    · simp only [hnj, ite_false] at hj
+      exact hnf j t hj
 
 /-- A pushed entry is unbound, and an unbound variable stays so. -/
 theorem Unbound.push {s s' : CState} (h : s'.subst = s.subst.push none) {m : Nat}
@@ -618,41 +730,48 @@ theorem fresh_push_loop_sound {α : Type} (l : List α) :
 /-- `n` fresh variables, collected. -/
 theorem fresh_loop_sound (n : Nat) {Q : List Ty → CState → Prop} {s : CState} (hs : s.WF)
     (h : ∀ ps s', Ext s s' → s'.WF → ps.length = n →
-      (∀ t ∈ ps, Ty.WF s'.sz 0 t) → (∀ m, s.Unbound m → s'.Unbound m) → Q ps s') :
+      (∀ t ∈ ps, Ty.WF s'.sz 0 t) → (∀ t ∈ ps, ∃ j, t = .mv j) →
+      (∀ m, s.Unbound m → s'.Unbound m) → Q ps s') :
     Wp (forIn [0:n] ([] : List Ty) fun _ acc => do
       let d ← fresh
       pure (ForInStep.yield (acc ++ [d]))) Q s := by
   simp only [Std.Legacy.Range.forIn_eq_forIn_range']
   have gen : ∀ (l : List Nat) (acc : List Ty) (s : CState), s.WF → (∀ t ∈ acc, Ty.WF s.sz 0 t) →
+      (∀ t ∈ acc, ∃ j, t = .mv j) →
       (∀ ps s', Ext s s' → s'.WF → ps.length = acc.length + l.length →
-        (∀ t ∈ ps, Ty.WF s'.sz 0 t) → (∀ m, s.Unbound m → s'.Unbound m) → Q ps s') →
+        (∀ t ∈ ps, Ty.WF s'.sz 0 t) → (∀ t ∈ ps, ∃ j, t = .mv j) →
+        (∀ m, s.Unbound m → s'.Unbound m) → Q ps s') →
       Wp (forIn l acc fun _ acc => do
         let d ← fresh
         pure (ForInStep.yield (acc ++ [d]))) Q s := by
     intro l
     induction l with
     | nil =>
-      intro acc s hs ha h
+      intro acc s hs ha hm h
       simp only [List.forIn_nil]
-      exact Wp.pure' (h acc s (Ext.refl _) hs (by simp) ha (fun _ hu => hu))
+      exact Wp.pure' (h acc s (Ext.refl _) hs (by simp) ha hm (fun _ hu => hu))
     | cons a l ih =>
-      intro acc s hs ha h
+      intro acc s hs ha hm h
       simp only [List.forIn_cons]
       refine Wp.bind (Wp.bind (fresh_leaf hs ?_))
-      intro d s1 hd _ g1 e1 h1 hu1
+      intro d s1 hd hdm g1 e1 h1 hu1
       refine Wp.pure' ?_
       dsimp only
-      refine ih (acc ++ [d]) s1 h1 ?_ ?_
+      refine ih (acc ++ [d]) s1 h1 ?_ ?_ ?_
       · intro t ht
         rcases List.mem_append.mp ht with ht | ht
         · exact (ha t ht).mono (by omega) (Nat.le_refl _)
         · rcases List.mem_singleton.mp ht with rfl; exact hd
-      · intro ps s2 e2 h2 hl hps hu2
-        refine h ps s2 (e1.trans e2) h2 ?_ hps (fun m hu => hu2 m (hu1 m hu))
+      · intro t ht
+        rcases List.mem_append.mp ht with ht | ht
+        · exact hm t ht
+        · rcases List.mem_singleton.mp ht with rfl; exact hdm
+      · intro ps s2 e2 h2 hl hps hpm hu2
+        refine h ps s2 (e1.trans e2) h2 ?_ hps hpm (fun m hu => hu2 m (hu1 m hu))
         simp only [List.length_append, List.length_cons, List.length_nil] at hl ⊢
         omega
-  exact gen _ [] s hs (by simp) fun ps s' e h' hl hp hu =>
-    h ps s' e h' (by simpa using hl) hp hu
+  exact gen _ [] s hs (by simp) (by simp) fun ps s' e h' hl hp hm hu =>
+    h ps s' e h' (by simpa using hl) hp hm hu
 
 /-! ### Fresh variables and binding -/
 
@@ -1264,6 +1383,34 @@ theorem Env.WF.prelude {sz : Nat} : Env.WF sz preludeEnv := by
   simp only [preludeEnv, List.mem_singleton] at hp
   subst hp
   simp [Bind.WF]
+
+/-! ### Named-free environments (see `Ty.NF`) -/
+
+def Bind.NF : Bind → Prop
+  | .mono t => Ty.NF t
+  | .poly _ t => Ty.NF t
+  | .fnMono _ t => Ty.NF t
+  | .fnPoly _ _ t => Ty.NF t
+
+def Env.NF (env : Env) : Prop := ∀ p ∈ env, Bind.NF p.2
+
+theorem Env.NF.cons {env : Env} {x : String} {b : Bind} (h : Env.NF env) (hb : Bind.NF b) :
+    Env.NF ((x, b) :: env) := by
+  intro p hp
+  rcases List.mem_cons.mp hp with rfl | hp
+  · exact hb
+  · exact h p hp
+
+theorem Env.NF.lookup {env : Env} {x : String} {b : Bind} (h : Env.NF env)
+    (hl : env.lookup x = some b) : Bind.NF b := by
+  obtain ⟨l1, l2, rfl, _⟩ := List.lookup_eq_some_iff.mp hl
+  exact h (x, b) (by simp)
+
+theorem Env.NF.prelude : Env.NF preludeEnv := by
+  intro p hp
+  simp only [preludeEnv, List.mem_singleton] at hp
+  subst hp
+  simp [Bind.NF]
 
 /-! ### Source terms: the types a program writes mention no metavariable and no `gen`. -/
 

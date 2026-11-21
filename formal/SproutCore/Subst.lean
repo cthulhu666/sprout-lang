@@ -7,13 +7,15 @@ The soundness theorem (`InferSound.lean`) says: every grounding `θ` that solves
 types the expression. This file is the substitution layer under it.
 
 * `Ty.app θ t` replaces each metavariable `?n` by `θ n` and rebuilds each arrow through `mkArr`,
-  as `zonk` does, so the result is canonical. `.gen` and `.skolem` are left alone. A `.named` is
-  sent to `.unit`: the checker never builds one inside a type it works on (`elabTy` maps every
-  written variable away), and this keeps `app θ t` solved without an invariant about it.
+  as `zonk` does, so the result is canonical. `.gen`, `.skolem` and `.named` are left alone. A
+  `.named` has no solved grounding (`Ty.ok` rejects it), so `app θ t` is solved only for a
+  named-free `t` (`Ty.NF`, `CheckWF.lean`): the soundness theorem takes the start state and
+  environment named-free and proves `infer` keeps them so. Mapping `.named _` to `.unit` instead
+  would let two distinct written names ground alike.
 * `Solves θ s`: every bound `?n := t` of `s` has `θ n = app θ t`, and every `θ n` is solved.
   Unbound metavariables may be grounded to any solved type.
-* `Ext s s'`: the state only grows. Its size does not shrink and no binding is changed or removed.
-  `Solves θ s' → Ext s s' → Solves θ s`.
+* `Ext s s'` (`CheckWF.lean`): the state only grows. Its size does not shrink, no binding is changed
+  or removed, and a named-free substitution stays so. `Solves θ s' → Ext s s' → Solves θ s`.
 
 Every checker function that touches the state keeps `Ext`. The leaf lemmas for the primitive ones
 (`fresh`, `freshSkolem`, `bindMeta`, `shallow`, `zonk`, `instantiate`) are here; the recursive
@@ -28,7 +30,7 @@ namespace SproutCore
 mutual
 def Ty.app (θ : Nat → Ty) : Ty → Ty
   | .mv n => θ n
-  | .named _ => .unit
+  | .named s => .named s
   | .skolem n => .skolem n
   | .gen n => .gen n
   | .int => .int
@@ -42,6 +44,11 @@ def Ty.appList (θ : Nat → Ty) : List Ty → List Ty
   | [] => []
   | t :: ts => Ty.app θ t :: Ty.appList θ ts
 end
+
+/-- Distinct written names stay distinct under any grounding. -/
+theorem Ty.app_named_inj (θ : Nat → Ty) {a b : String}
+    (h : Ty.app θ (.named a) = Ty.app θ (.named b)) : a = b := by
+  simpa [Ty.app] using h
 
 theorem Ty.appList_eq_map (θ : Nat → Ty) (ts : List Ty) : Ty.appList θ ts = ts.map (Ty.app θ) := by
   induction ts with
@@ -195,40 +202,42 @@ theorem Ty.ok_mkArr {n : Nat} {ps : List Ty} {r : Ty} {e : Eff} (hps : Ty.okList
     refine ⟨⟨hps, hr⟩, ?_⟩
     simpa using hm
 
--- The grounding of a type with no `gen` above `g` is `ok g` when the grounding is.
+-- The grounding of a named-free type with no `gen` above `g` is `ok g` when the grounding is.
 mutual
 theorem Ty.app_ok (θ : Nat → Ty) (g : Nat) (hθ : ∀ n, (θ n).ok g = true) :
-    ∀ t : Ty, (∀ i ∈ gensOf t, i < g) → (Ty.app θ t).ok g = true
-  | .mv n, _ => hθ n
-  | .named _, _ => rfl
-  | .skolem _, _ => rfl
-  | .gen i, h => by simpa [Ty.app, Ty.ok, gensOf] using h i (by simp [gensOf])
-  | .int, _ => rfl
-  | .bool, _ => rfl
-  | .str, _ => rfl
-  | .unit, _ => rfl
-  | .tup ts, h => by
+    ∀ t : Ty, Ty.NF t → (∀ i ∈ gensOf t, i < g) → (Ty.app θ t).ok g = true
+  | .mv n, _, _ => hθ n
+  | .named _, hn, _ => by simp at hn
+  | .skolem _, _, _ => rfl
+  | .gen i, _, h => by simpa [Ty.app, Ty.ok, gensOf] using h i (by simp [gensOf])
+  | .int, _, _ => rfl
+  | .bool, _, _ => rfl
+  | .str, _, _ => rfl
+  | .unit, _, _ => rfl
+  | .tup ts, hn, h => by
     simp only [Ty.app, Ty.ok]
-    exact Ty.appList_ok θ g hθ ts (by simpa [gensOf] using h)
-  | .arr ps r e, h => by
+    exact Ty.appList_ok θ g hθ ts (Ty.NF_tup.mp hn) (by simpa [gensOf] using h)
+  | .arr ps r e, hn, h => by
     simp only [Ty.app]
     simp only [gensOf, List.mem_append] at h
-    exact Ty.ok_mkArr (Ty.appList_ok θ g hθ ps (fun i hi => h i (Or.inl hi)))
-      (Ty.app_ok θ g hθ r (fun i hi => h i (Or.inr hi)))
+    exact Ty.ok_mkArr (Ty.appList_ok θ g hθ ps (Ty.NF_arr.mp hn).1 (fun i hi => h i (Or.inl hi)))
+      (Ty.app_ok θ g hθ r (Ty.NF_arr.mp hn).2 (fun i hi => h i (Or.inr hi)))
 
 theorem Ty.appList_ok (θ : Nat → Ty) (g : Nat) (hθ : ∀ n, (θ n).ok g = true) :
-    ∀ ts : List Ty, (∀ i ∈ gensOfList ts, i < g) → Ty.okList g (Ty.appList θ ts) = true
-  | [], _ => rfl
-  | t :: ts, h => by
+    ∀ ts : List Ty, (∀ t ∈ ts, Ty.NF t) → (∀ i ∈ gensOfList ts, i < g) →
+      Ty.okList g (Ty.appList θ ts) = true
+  | [], _, _ => rfl
+  | t :: ts, hn, h => by
     simp only [Ty.appList, Ty.okList, Bool.and_eq_true]
     simp only [gensOfList, List.mem_append] at h
-    exact ⟨Ty.app_ok θ g hθ t (fun i hi => h i (Or.inl hi)),
-      Ty.appList_ok θ g hθ ts (fun i hi => h i (Or.inr hi))⟩
+    exact ⟨Ty.app_ok θ g hθ t (hn t (List.mem_cons_self ..)) (fun i hi => h i (Or.inl hi)),
+      Ty.appList_ok θ g hθ ts (fun u hu => hn u (List.mem_cons_of_mem _ hu))
+        (fun i hi => h i (Or.inr hi))⟩
 end
 
 theorem Ty.app_solved {θ : Nat → Ty} (hθ : ∀ n, (θ n).Solved) {sz g : Nat} {t : Ty}
-    (ht : Ty.WF sz g t) : (Ty.app θ t).ok g = true :=
-  Ty.app_ok θ g (fun n => Ty.ok_mono (Nat.zero_le g) _ (hθ n)) t ht.2
+    (ht : Ty.WF sz g t) (hn : Ty.NF t) : (Ty.app θ t).ok g = true :=
+  Ty.app_ok θ g (fun n => Ty.ok_mono (Nat.zero_le g) _ (hθ n)) t hn ht.2
 
 /-! ### Instantiation commutes with grounding -/
 
@@ -323,7 +332,7 @@ structure Solves (θ : Nat → Ty) (s : CState) : Prop where
 /-- A grounding that solves the later state solves the earlier one. -/
 theorem Solves.back {θ : Nat → Ty} {s1 s2 : CState} (h : Solves θ s2) (e : Ext s1 s2) :
     Solves θ s1 :=
-  ⟨fun n t hn => h.bound n t (e.2 n t hn), h.solved⟩
+  ⟨fun n t hn => h.bound n t (e.bound hn), h.solved⟩
 
 /-- Close a goal `Solves θ s_i` from `Solves θ s_n` and the chain of `Ext` facts in context. -/
 syntax "solves_close" : tactic
@@ -340,6 +349,61 @@ the other, so a failing leaf here cannot fall back to a lemma that says less. `l
 are shared: they close well-formedness goals and know no checker function. -/
 
 syntax "sound_step" : tactic
+
+/-- Close a goal about named-freeness: from a hypothesis, from the pieces of one, or along the chain
+of `Ext` facts in context (`Ext` carries the preservation of a named-free substitution). -/
+syntax "nf_close" : tactic
+syntax "nf_rule" : tactic
+
+macro_rules
+  | `(tactic| nf_rule) => `(tactic| assumption)
+macro_rules
+  | `(tactic| nf_rule) => `(tactic| (refine Ext.nf ‹Ext _ _› ?_; nf_close))
+macro_rules
+  | `(tactic| nf_rule) => `(tactic| exact Ty.NF_bool)
+macro_rules
+  | `(tactic| nf_rule) => `(tactic| exact Ty.NF_int)
+macro_rules
+  | `(tactic| nf_rule) => `(tactic| exact Ty.NF_str)
+macro_rules
+  | `(tactic| nf_rule) => `(tactic| exact Ty.NF_unit)
+macro_rules
+  | `(tactic| nf_rule) => `(tactic| exact Ty.NF_mv)
+macro_rules
+  | `(tactic| nf_rule) => `(tactic| exact Ty.NF_skolem)
+macro_rules
+  | `(tactic| nf_rule) => `(tactic| exact Ty.NF.of_mv ‹_›)
+macro_rules
+  | `(tactic| nf_rule) => `(tactic| exact Ty.NF.arr_res ‹_›)
+macro_rules
+  | `(tactic| nf_rule) => `(tactic| exact Ty.NF.arr_params ‹_›)
+macro_rules
+  | `(tactic| nf_rule) =>
+    `(tactic| exact Ty.NF.arr_params ‹_› _ (List.mem_cons_self ..))
+macro_rules
+  | `(tactic| nf_rule) => `(tactic| exact Ty.NF.arr_take ‹_› _)
+macro_rules
+  | `(tactic| nf_rule) => `(tactic| exact Ty.NF.arr_drop ‹_› _)
+macro_rules
+  | `(tactic| nf_rule) => `(tactic| exact Ty.NF.tup_params ‹_›)
+macro_rules
+  | `(tactic| nf_rule) => `(tactic| (apply Ty.NF_tup.mpr; nf_close))
+macro_rules
+  | `(tactic| nf_rule) => `(tactic| (rw [Ty.NF_mkArr]; constructor <;> nf_close))
+macro_rules
+  | `(tactic| nf_rule) => `(tactic| (refine Ty.NF.list_cons ?_ ?_ <;> nf_close))
+macro_rules
+  | `(tactic| nf_rule) =>
+    `(tactic| (intro t ht; have h1 := List.mem_singleton.mp ht; subst h1; nf_close))
+
+/-- Run the rules with errors thrown, not logged, so a failing rule falls back to the next. -/
+macro_rules
+  | `(tactic| nf_close) => `(tactic| first | nf_rule | fail "nf_close")
+
+/-- `leaf`, with `nf_close` for the named-freeness preconditions. -/
+macro "sleaf " lem:term : tactic =>
+  `(tactic| ((with_reducible apply $lem);
+             (all_goals first | wf_close | nf_close | (case' h => (intro _ _; intros; try subst_vars)))))
 
 macro_rules
   | `(tactic| sound_step) => `(tactic| split)
@@ -358,11 +422,11 @@ macro_rules
 macro_rules
   | `(tactic| sound_step) => `(tactic| with_reducible refine Wp.map' _ ?_)
 macro_rules
-  | `(tactic| sound_step) => `(tactic| leaf fresh_leaf)
+  | `(tactic| sound_step) => `(tactic| sleaf fresh_leaf)
 macro_rules
-  | `(tactic| sound_step) => `(tactic| leaf freshSkolem_leaf)
+  | `(tactic| sound_step) => `(tactic| sleaf freshSkolem_leaf)
 macro_rules
-  | `(tactic| sound_step) => `(tactic| leaf fresh_loop_sound)
+  | `(tactic| sound_step) => `(tactic| sleaf fresh_loop_sound)
 
 theorem Wp.and' {α : Type} {x : M α} {Q1 Q2 : α → CState → Prop} {s : CState} (h1 : Wp x Q1 s)
     (h2 : Wp x Q2 s) : Wp x (fun a s' => Q1 a s' ∧ Q2 a s') s :=
@@ -391,9 +455,27 @@ theorem shallowF_app : ∀ (k : Nat) (t : Ty) (s : CState),
       · exact Wp.pure' ⟨rfl, fun _ _ => rfl⟩
     | _ => simp only [shallowF]; exact Wp.pure' ⟨rfl, fun _ _ => rfl⟩
 
-theorem shallow_leaf {Q : Ty → CState → Prop} {s : CState} {t : Ty} (hs : s.WF)
-    (ht : Ty.WF s.sz 0 t)
-    (h : ∀ r s', s' = s → Ty.WF s.sz 0 r → (∀ m, r = .mv m → s.Unbound m) →
+/-- `shallow`'s result is named-free when its argument and the state are. -/
+theorem shallowF_nf : ∀ (k : Nat) (t : Ty) (s : CState), s.NF → t.NF →
+    Wp (shallowF k t) (fun r s' => s' = s ∧ r.NF) s := by
+  intro k
+  induction k with
+  | zero => intro t s _ _; exact Wp.fuel'
+  | succ k ih =>
+    intro t s hn ht
+    cases t with
+    | mv n =>
+      simp only [shallowF]
+      refine Wp.bind (Wp.get' ?_)
+      split
+      · rename_i t' hb
+        exact ih t' s hn (hn n t' hb)
+      · exact Wp.pure' ⟨rfl, ht⟩
+    | _ => simp only [shallowF]; exact Wp.pure' ⟨rfl, ht⟩
+
+theorem shallow_leaf {Q : Ty → CState → Prop} {s : CState} {t : Ty} (hs : s.WF) (hnf : s.NF)
+    (ht : Ty.WF s.sz 0 t) (htn : t.NF)
+    (h : ∀ r s', s' = s → Ty.WF s.sz 0 r → r.NF → (∀ m, r = .mv m → s.Unbound m) →
       (∀ θ, Solves θ s → Ty.app θ r = Ty.app θ t) → Q r s') : Wp (shallow t) Q s := by
   have h1 := shallow_wp
     (Q := fun r s' => s' = s ∧ Ty.WF s.sz 0 r ∧ (∀ m, r = .mv m → s.Unbound m))
@@ -401,7 +483,11 @@ theorem shallow_leaf {Q : Ty → CState → Prop} {s : CState} {t : Ty} (hs : s.
   have h2 : Wp (shallow t) (fun r s' => s' = s ∧ ∀ θ, Solves θ s → Ty.app θ r = Ty.app θ t) s := by
     unfold shallow
     exact Wp.bind (Wp.read' fun n => shallowF_app n t s)
-  exact Wp.mono (Wp.and' h1 h2) fun r s' ⟨⟨e, hr, hu⟩, _, hf⟩ => h r s' e hr hu hf
+  have h3 : Wp (shallow t) (fun r s' => s' = s ∧ r.NF) s := by
+    unfold shallow
+    exact Wp.bind (Wp.read' fun n => shallowF_nf n t s hnf htn)
+  exact Wp.mono (Wp.and' (Wp.and' h1 h2) h3)
+    fun r s' ⟨⟨⟨e, hr, hu⟩, _, hf⟩, _, hrn⟩ => h r s' e hr hrn hu hf
 
 /-! ### Grounding a mapped list -/
 
@@ -471,38 +557,124 @@ theorem zonk_app (t : Ty) (s : CState) :
   unfold zonk
   exact Wp.bind (Wp.read' fun n => zonkF_app n t s)
 
-theorem zonk_leaf {Q : Ty → CState → Prop} {s : CState} {t : Ty} (hs : s.WF)
-    (ht : Ty.WF s.sz 0 t)
-    (h : ∀ r s', s' = s → Ty.WF s.sz 0 r → (∀ m ∈ metasOf r, s.Unbound m) →
+/-- `zonk`'s result is named-free when its argument and the state are. -/
+theorem zonkF_nf : ∀ (k : Nat) (t : Ty) (s : CState), s.NF → t.NF →
+    Wp (zonkF k t) (fun r s' => s' = s ∧ r.NF) s := by
+  intro k
+  induction k with
+  | zero => intro t s _ _; exact Wp.fuel'
+  | succ k ih =>
+    intro t s hn ht
+    simp only [zonkF]
+    refine Wp.bind (Wp.mono (Wp.and' (shallowF_eq k t s) (shallowF_nf k t s hn ht)) ?_)
+    intro t' s1 ⟨e1, e1', ht'⟩
+    subst e1
+    have hlist : ∀ ts : List Ty, (∀ t ∈ ts, t.NF) →
+        Wp (ts.mapM (zonkF k)) (fun bs s2 => s2 = s1 ∧ ∀ b ∈ bs, b.NF) s1 := by
+      intro ts hts
+      refine Wp.mono (Wp.mapM (f := zonkF k) (l := ts) (s := s1) (fun s2 => s2 = s1)
+        (fun _ b => b.NF) (fun _ _ _ _ hb => hb) rfl ?_) fun _ s2 ⟨i, _, hb⟩ => ⟨i, hb⟩
+      intro a ha s2 hs2 _
+      subst hs2
+      refine Wp.mono (ih a s2 hn (hts a ha)) ?_
+      intro r s' ⟨hs', hr⟩
+      subst hs'
+      exact ⟨rfl, Nat.le_refl _, hr⟩
+    cases t' with
+    | tup ts =>
+      dsimp only
+      refine Wp.bind (Wp.mono (hlist ts (Ty.NF_tup.mp ht')) ?_)
+      intro bs s2 ⟨e2, hb⟩
+      subst e2
+      exact Wp.pure' ⟨rfl, Ty.NF_tup.mpr hb⟩
+    | arr ps r e =>
+      dsimp only
+      refine Wp.bind (Wp.mono (hlist ps (Ty.NF_arr.mp ht').1) ?_)
+      intro bs s2 ⟨e2, hb⟩
+      subst e2
+      refine Wp.bind (Wp.mono (ih r s2 hn (Ty.NF_arr.mp ht').2) ?_)
+      intro r' s3 ⟨e3, hr'⟩
+      subst e3
+      exact Wp.pure' ⟨rfl, Ty.NF_mkArr.mpr ⟨hb, hr'⟩⟩
+    | _ => dsimp only; exact Wp.pure' ⟨rfl, ht'⟩
+
+theorem zonk_nf (t : Ty) (s : CState) (hnf : s.NF) (htn : t.NF) :
+    Wp (zonk t) (fun r s' => s' = s ∧ r.NF) s := by
+  unfold zonk
+  exact Wp.bind (Wp.read' fun n => zonkF_nf n t s hnf htn)
+
+theorem zonk_leaf {Q : Ty → CState → Prop} {s : CState} {t : Ty} (hs : s.WF) (hnf : s.NF)
+    (ht : Ty.WF s.sz 0 t) (htn : t.NF)
+    (h : ∀ r s', s' = s → Ty.WF s.sz 0 r → r.NF → (∀ m ∈ metasOf r, s.Unbound m) →
       (∀ θ, Solves θ s → Ty.app θ r = Ty.app θ t) → Q r s') : Wp (zonk t) Q s := by
   have h1 := zonk_wp
     (Q := fun r s' => s' = s ∧ Ty.WF s.sz 0 r ∧ (∀ m ∈ metasOf r, s.Unbound m))
     hs ht (fun r s' e hr hu => ⟨e, hr, hu⟩)
-  exact Wp.mono (Wp.and' h1 (zonk_app t s)) fun r s' ⟨⟨e, hr, hu⟩, _, hf⟩ => h r s' e hr hu hf
+  exact Wp.mono (Wp.and' (Wp.and' h1 (zonk_app t s)) (zonk_nf t s hnf htn))
+    fun r s' ⟨⟨⟨e, hr, hu⟩, _, hf⟩, _, hrn⟩ => h r s' e hr hrn hu hf
 
 theorem bindMeta_leaf {Q : PUnit → CState → Prop} {s : CState} {n : Nat} {t : Ty} (hs : s.WF)
-    (hn : n < s.sz) (hu : s.Unbound n) (ht : Ty.WF s.sz 0 t)
+    (hnf : s.NF) (hn : n < s.sz) (hu : s.Unbound n) (ht : Ty.WF s.sz 0 t) (htn : t.NF)
     (h : ∀ s', s'.sz = s.sz → Ext s s' → s'.WF → (∀ θ, Solves θ s' → θ n = Ty.app θ t) →
       Q ⟨⟩ s') : Wp (bindMeta n t) Q s := by
   unfold bindMeta
-  refine Wp.bind (zonk_leaf hs ht ?_)
-  intro t' s1 e1 ht' hu' hz
+  refine Wp.bind (zonk_leaf hs hnf ht htn ?_)
+  intro t' s1 e1 ht' htn' hu' hz
   subst e1
   repeat' sound_step
   rename_i hocc
   have hn' : n < s1.subst.size := hn
-  refine h _ ?_ (Ext.set hu rfl) ?_ ?_
+  have hv : s1.NF → ∀ t0, some t' = some t0 → Ty.NF t0 := fun _ t0 e => by cases e; exact htn'
+  have hext : Ext s1 { s1 with subst := s1.subst.set! n (some t') } := Ext.set hu hv rfl
+  refine h _ ?_ hext ?_ ?_
   · simp [CState.sz]
   · exact hs.bind hn ht' hu' (by simpa [occursIn] using hocc) rfl
   · intro θ hθ
     have hb := hθ.bound n t' (by simp [Array.set!_eq_setIfInBounds, hn'])
-    rw [hb, hz θ (hθ.back (Ext.set hu rfl))]
+    rw [hb, hz θ (hθ.back hext)]
 
 /-! ### Instantiation -/
 
+mutual
+/-- Instantiating a named-free type with named-free types is named-free. -/
+theorem instTy_nf {ms : Array Ty} (hms : ∀ u ∈ ms, Ty.NF u) :
+    ∀ t : Ty, Ty.NF t → (∀ i ∈ gensOf t, i < ms.size) → Ty.NF (instTy ms t)
+  | .gen i, _, h => by
+    have hi : i < ms.size := h i (by simp [gensOf])
+    rw [instTy_gen_eq ms i hi]
+    exact hms _ (Array.getElem_mem hi)
+  | .tup ts, hn, h => by
+    simp only [instTy]
+    exact Ty.NF_tup.mpr (instTyList_nf hms ts (Ty.NF_tup.mp hn) (by simpa [gensOf] using h))
+  | .arr ps r e, hn, h => by
+    simp only [instTy]
+    simp only [gensOf, List.mem_append] at h
+    exact Ty.NF_arr.mpr ⟨instTyList_nf hms ps (Ty.NF_arr.mp hn).1 (fun i hi => h i (Or.inl hi)),
+      instTy_nf hms r (Ty.NF_arr.mp hn).2 (fun i hi => h i (Or.inr hi))⟩
+  | .mv _, _, _ => by simp [instTy]
+  | .named _, hn, _ => by simp at hn
+  | .skolem _, _, _ => by simp [instTy]
+  | .int, _, _ => by simp [instTy]
+  | .bool, _, _ => by simp [instTy]
+  | .str, _, _ => by simp [instTy]
+  | .unit, _, _ => by simp [instTy]
+
+theorem instTyList_nf {ms : Array Ty} (hms : ∀ u ∈ ms, Ty.NF u) :
+    ∀ ts : List Ty, (∀ t ∈ ts, Ty.NF t) → (∀ i ∈ gensOfList ts, i < ms.size) →
+      ∀ t ∈ instTyList ms ts, Ty.NF t
+  | [], _, _ => by simp [instTyList]
+  | t :: ts, hn, h => by
+    simp only [gensOfList, List.mem_append] at h
+    simp only [instTyList, List.mem_cons]
+    rintro u (rfl | hu)
+    · exact instTy_nf hms t (hn t (List.mem_cons_self ..)) (fun i hi => h i (Or.inl hi))
+    · exact instTyList_nf hms ts (fun t ht => hn t (List.mem_cons_of_mem _ ht))
+        (fun i hi => h i (Or.inr hi)) u hu
+end
+
 theorem instantiate_leaf {Q : Ty → CState → Prop} {s : CState} {n : Nat} {t : Ty} (hs : s.WF)
-    (ht : Ty.WF s.sz n t)
-    (h : ∀ r s', Ext s s' → s'.WF → Ty.WF s'.sz 0 r →
+    (ht : Ty.WF s.sz n t) (htn : t.NF)
+    (h : ∀ r s', Ext s s' → s'.WF → Ty.WF s'.sz 0 r → r.NF →
       (∃ ms : Array Ty, ms.size = n ∧ (∀ u ∈ ms, ∃ j, u = .mv j) ∧ r = instTy ms t) →
       Q r s') : Wp (instantiate n t) Q s := by
   unfold instantiate
@@ -511,7 +683,10 @@ theorem instantiate_leaf {Q : Ty → CState → Prop} {s : CState} {n : Nat} {t 
   refine Wp.bind (fresh_push_loop_sound _ #[] hs (by simp) (by simp) ?_)
   intro ms s1 e1 h1 hsz hm hms
   have hsz' : ms.size = n := by simpa using hsz
-  refine Wp.pure' (h _ s1 e1 h1 ?_ ⟨ms, hsz', hm, rfl⟩)
-  refine instTy_wf (n := n) hsz' hms t (ht.mono e1.sz (Nat.le_refl _))
+  refine Wp.pure' (h _ s1 e1 h1 ?_ ?_ ⟨ms, hsz', hm, rfl⟩)
+  · exact instTy_wf (n := n) hsz' hms t (ht.mono e1.sz (Nat.le_refl _))
+  · refine instTy_nf (fun u hu => ?_) t htn (hsz' ▸ ht.2)
+    obtain ⟨j, rfl⟩ := hm u hu
+    exact Ty.NF_mv
 
 end SproutCore
