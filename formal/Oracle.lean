@@ -25,6 +25,8 @@ structure Cfg where
   expect : String := ""
   /-- With `--expect disagreement`: some new disagreement shape must contain this text. -/
   expectShape : String := ""
+  /-- A file for one line per program: `<seed> <model verdict> <compiler verdict>`. -/
+  dump : String := ""
 
 inductive CV where
   | accept
@@ -80,6 +82,17 @@ def verdictStr (m : Except String Unit) : String :=
   match m with
   | .ok _ => "accept"
   | .error e => s!"reject ({e})"
+
+/-- A verdict for the dump: `accept`, `reject <key>`, or `harness`. -/
+def modelDump (m : Except String Unit) : String :=
+  match m with
+  | .ok _ => "accept"
+  | .error e => s!"reject {msgKey e}"
+
+def cvDump : CV → String
+  | .accept => "accept"
+  | .reject m => s!"reject {normMsg m}"
+  | .harness _ => "harness"
 
 def cvStr : CV → String
   | .accept => "accept"
@@ -143,6 +156,7 @@ def parseArgs : List String → Cfg → Except String Cfg
   | "--plant" :: v :: r, c => parseArgs r { c with plant := v }
   | "--expect" :: v :: r, c => parseArgs r { c with expect := v }
   | "--expect-shape" :: v :: r, c => parseArgs r { c with expectShape := v }
+  | "--dump-verdicts" :: v :: r, c => parseArgs r { c with dump := v }
   | a :: _, _ => .error s!"unknown argument {a}"
 
 def main (args : List String) : IO UInt32 := do
@@ -170,10 +184,12 @@ def main (args : List String) : IO UInt32 := do
   let mut bad : List String := []
   let mut allowed : List String := []
   let mut disagreements := 0
+  let mut dump : List String := []
   for i in [0:cfg.count] do
     let seed := cfg.seed + i
     let p := programOfSeed seed
     let (m, c) ← evalProg s p
+    if cfg.dump != "" then dump := dump ++ [s!"{seed} {modelDump m} {cvDump c}"]
     match m with
     | .ok _ => nAccept := nAccept + 1
     | .error _ => nReject := nReject + 1
@@ -208,6 +224,7 @@ def main (args : List String) : IO UInt32 := do
         if shapeOf m c != some shape then
           stale := stale ++ [s!"{id}: {shape} (witness: model {verdictStr m}, compiler {cvStr c})"]
   IO.FS.removeDirAll work
+  if cfg.dump != "" then IO.FS.writeFile cfg.dump ("\n".intercalate dump ++ "\n")
   IO.println s!"programs {cfg.count} (model accept {nAccept}, reject {nReject}); disagreements {disagreements} (allowlisted {allowed.length}); harness errors {harness.length}"
   for h in harness.take 5 do IO.println s!"HARNESS ERROR {h}"
   match cfg.expect with
