@@ -12,11 +12,13 @@ let-rhs-io | model-rejects/compiler-accepts: let-rhs-io | compiler does not enfo
 # in infer.sprout, docs/fundamentals-code-review-handoff-2026-07-03.md W3) and rejects a non-value
 # initialiser whose type still has free variables. spec §5.2 and §7 rule 16 say nothing about it.
 value-restriction | model-accepts/compiler-rejects: value restriction | the spec does not state the value restriction on top-level let (compiler rejects non-value let with a polymorphic type)
-# Compiler bug: a top-level `let` that calls a pure function value bound by an earlier non-value
-# top-level `let` (so not generalised, its effect variable stays open) is rejected as "performs IO
-# when its module loads". The spec calls that `let` pure, and says an unresolved effect variable is
-# accepted (spec §7 rule 8, property 3). `let f = let v = 0 in \(x: Bool) -> x` then `let g = f(false)`.
-nongen-call | model-accepts/compiler-rejects: top-level _ performs IO when its module loads, but top-level bindings must be pure | compiler rejects a pure top-level let that calls a non-generalised function value (open effect variable counted as IO; spec §5.2, §7 rule 8 property 3)
+# Spec gap: a top-level `let` that calls a pure function value bound by an earlier non-value
+# top-level `let` is rejected as "performs IO when its module loads". The compiler gives a lambda's
+# arrow a fresh effect variable; `f` is not generalised, so it stays open, and spec §6's note says
+# "An unresolved effect variable counts as not pure". The spec never gives a lambda an effect
+# variable (§5.3), so read literally the `let` is pure, which the model follows.
+# `let f = let v = 0 in \(x: Bool) -> x` then `let g = f(false)`.
+nongen-call | model-accepts/compiler-rejects: top-level _ performs IO when its module loads, but top-level bindings must be pure | the spec does not say whether an inferred lambda's arrow has an effect variable, which decides whether §6's unresolved-variable rule applies
 # Compiler bug: passing a pure function value bound by a non-generalised top-level `let` (so its
 # effect variable stays open) to an `!{IO}` slot, then calling it, makes the caller "perform IO".
 # `effect_slot_meet` in unifier.sprout records the slot as a ceiling, but `bind_open` also binds

@@ -27,12 +27,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   concrete; an open variable one side can bind to pure would launder. Find a reaching program, or
   route those sites through a fresh result variable as `if` now does.
   `docs/effect-subsumption-v0.md` §6.5b.
-- [ ] `P2` **A pure top-level `let` calling a non-generalised function value is rejected as IO.**
-  `let f = let v = 0 in \(x: Bool) -> x` then `let g = f(false)`: `checker.sprout`'s top-level
-  purity check says `g` "performs IO when its module loads". With `let f = \(x: Bool) -> x` it is
-  accepted. `f`'s open effect variable seems to count as IO; spec §7 rule 8 property 3 accepts an
-  unresolved variable. Same with `f = if c then \… else \…`. Found by the Lean oracle
-  (`formal/oracle/ALLOWLIST`); add a `run/` fixture with the fix.
+- [ ] `P3` **The spec does not say whether an inferred lambda's arrow has an effect variable.**
+  `let f = let v = 0 in \(x: Bool) -> x` then `let g = f(false)`: the compiler gives the lambda a
+  fresh effect variable, `f` is not generalised, and §6's note ("An unresolved effect variable
+  counts as not pure") rejects `g`. Read literally (§5.3 gives a lambda no effect; omitted means
+  pure), `g` is pure. Decide which, and state it in §5.3 or §7 rule 8. Found by the Lean oracle
+  (`nongen-call` in `formal/oracle/ALLOWLIST`).
 - [ ] `P2` **A non-generalised function value passed to an `!{IO}` slot is read back as IO.**
   `let l = let v = false in \(x: Int) -> v`, `fn use(p: Int -> Bool !{IO})`, then
   `fn both() -> Bool = if use(l) then l(0) else false` is rejected "performs IO but is declared
