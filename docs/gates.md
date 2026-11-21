@@ -1434,7 +1434,9 @@ PATH. It installs on first use, so nothing changes for a contributor who never t
   reports it as a harness error (`HARNESS ERROR … fuel`), and `Tests.lean`'s `accepts` and
   `rejects` are both false on it. The oracle's `--dump-verdicts <file>` writes one line per
   program (`<seed> <model verdict> <compiler verdict>`), to diff verdicts, not counts, across a
-  checker change.
+  checker change. `formal/SproutCore/CheckFuel.lean` proves `checkProgram_fuel_mono`: a run that
+  does not end in `CErr.fuel` at budget `n` gives the same result at every `m ≥ n`, so a
+  verdict never depends on the budget once the run fits in it.
 - Spec snapshot: `formal/spec-snapshot/` holds spec §5.1–5.5, the intro of §5.6 (up to
   `### 5.6.1`), §5.8, §7 and §10.10, cut by heading (`scripts/lean_spec_snapshot.py`). Any change
   to them fails `lean-model` until the model has been re-checked against the new text and
