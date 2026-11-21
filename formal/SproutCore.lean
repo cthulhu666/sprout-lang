@@ -2,6 +2,7 @@ import SproutCore.Syntax
 import SproutCore.Check
 import SproutCore.CheckFuel
 import SproutCore.CheckWF
+import SproutCore.PlanInv
 import SproutCore.Print
 import SproutCore.Gen
 import SproutCore.GenProgram
