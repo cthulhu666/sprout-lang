@@ -320,8 +320,9 @@ structure Solves (θ : Nat → Ty) (s : CState) : Prop where
   bound : ∀ (n : Nat) (t : Ty), s.subst[n]? = some (some t) → θ n = Ty.app θ t
   solved : ∀ n, Ty.Solved (θ n)
 
-/-- `s'` extends `s`: the size does not shrink and no binding is changed or removed. -/
-def Ext (s s' : CState) : Prop :=
+/-- `s'` extends `s`: the size does not shrink and no binding is changed or removed. Reducible, so
+`omega` reads the size fact. -/
+@[reducible] def Ext (s s' : CState) : Prop :=
   s.sz ≤ s'.sz ∧ ∀ (n : Nat) (t : Ty), s.subst[n]? = some (some t) → s'.subst[n]? = some (some t)
 
 theorem Ext.refl (s : CState) : Ext s s := ⟨Nat.le_refl _, fun _ _ h => h⟩
@@ -598,7 +599,7 @@ theorem bindMeta_leaf {Q : PUnit → CState → Prop} {s : CState} {n : Nat} {t 
 theorem fresh_push_loop_sound {α : Type} (l : List α) :
     ∀ (ms0 : Array Ty) {Q : Array Ty → CState → Prop} {s : CState}, s.WF →
       (∀ u ∈ ms0, ∃ j, u = .mv j) → (∀ t ∈ ms0, Ty.WF s.sz 0 t) →
-      (∀ ms s', s.sz ≤ s'.sz → Ext s s' → s'.WF → ms.size = ms0.size + l.length →
+      (∀ ms s', Ext s s' → s'.WF → ms.size = ms0.size + l.length →
         (∀ u ∈ ms, ∃ j, u = .mv j) → (∀ t ∈ ms, Ty.WF s'.sz 0 t) → Q ms s') →
       Wp (forIn l ms0 fun _ ms => do
         let d ← fresh
@@ -607,7 +608,7 @@ theorem fresh_push_loop_sound {α : Type} (l : List α) :
   | nil =>
     intro ms0 Q s hs hm h0 h
     simp only [List.forIn_nil]
-    exact Wp.pure' (h ms0 s (Nat.le_refl _) (Ext.refl _) hs (by simp) hm h0)
+    exact Wp.pure' (h ms0 s (Ext.refl _) hs (by simp) hm h0)
   | cons a l ih =>
     intro ms0 Q s hs hm h0 h
     simp only [List.forIn_cons]
@@ -624,24 +625,24 @@ theorem fresh_push_loop_sound {α : Type} (l : List α) :
       rcases Array.mem_push.mp ht with ht | rfl
       · exact (h0 t ht).mono (by omega) (Nat.le_refl _)
       · exact hd
-    · intro ms s2 g2 e2 h2 hsz hm2 hms
-      refine h ms s2 (by omega) (e1.trans e2) h2 ?_ hm2 hms
+    · intro ms s2 e2 h2 hsz hm2 hms
+      refine h ms s2 (e1.trans e2) h2 ?_ hm2 hms
       simp only [Array.size_push] at hsz
       simp only [List.length_cons]
       omega
 
 theorem instantiate_leaf {Q : Ty → CState → Prop} {s : CState} {n : Nat} {t : Ty} (hs : s.WF)
     (ht : Ty.WF s.sz n t)
-    (h : ∀ r s', s.sz ≤ s'.sz → Ext s s' → s'.WF → Ty.WF s'.sz 0 r →
+    (h : ∀ r s', Ext s s' → s'.WF → Ty.WF s'.sz 0 r →
       (∃ ms : Array Ty, ms.size = n ∧ (∀ u ∈ ms, ∃ j, u = .mv j) ∧ r = instTy ms t) →
       Q r s') : Wp (instantiate n t) Q s := by
   unfold instantiate
   dsimp only
   simp only [Std.Legacy.Range.forIn_eq_forIn_range']
   refine Wp.bind (fresh_push_loop_sound _ #[] hs (by simp) (by simp) ?_)
-  intro ms s1 g1 e1 h1 hsz hm hms
+  intro ms s1 e1 h1 hsz hm hms
   have hsz' : ms.size = n := by simpa using hsz
-  refine Wp.pure' (h _ s1 g1 e1 h1 ?_ ⟨ms, hsz', hm, rfl⟩)
-  refine instTy_wf (n := n) hsz' hms t (ht.mono g1 (Nat.le_refl _))
+  refine Wp.pure' (h _ s1 e1 h1 ?_ ⟨ms, hsz', hm, rfl⟩)
+  refine instTy_wf (n := n) hsz' hms t (ht.mono e1.sz (Nat.le_refl _))
 
 end SproutCore

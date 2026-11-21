@@ -293,14 +293,14 @@ macro_rules
 theorem lamParam_sound {Q : Ty → CState → Prop} {s : CState} {slot ann : Option Ty}
     (hs : s.WF) (hslot : ∀ t, slot = some t → Ty.WF s.sz 0 t)
     (hann : ∀ t, ann = some t → Ty.surf t = true)
-    (h : ∀ r s', s.sz ≤ s'.sz → Ext s s' → s'.WF → Ty.WF s'.sz 0 r →
+    (h : ∀ r s', Ext s s' → s'.WF → Ty.WF s'.sz 0 r →
       (∀ θ, Solves θ s' → LamParam ann (Ty.app θ r)) → Q r s') :
     Wp (lamParam slot ann) Q s := by
   rcases ann with _ | a0 <;> rcases slot with _ | s0 <;> unfold lamParam <;> dsimp only
   all_goals (try have := hann a0 rfl)
   all_goals (try have := hslot s0 rfl)
   all_goals repeat' wp_step
-  all_goals refine h _ _ (by omega) (by ext_close) ‹CState.WF _› (by wf_close) ?_
+  all_goals refine h _ _ (by ext_close) ‹CState.WF _› (by wf_close) ?_
   all_goals intro θ hθ
   · exact Ty.app_solved hθ.solved ‹Ty.WF _ 0 _›
   · exact Ty.app_solved hθ.solved ‹Ty.WF _ 0 _›

@@ -108,7 +108,7 @@ macro_rules
 abbrev InferSoundAt (rules : Rules) (e : Expr) : Prop :=
   ∀ {env : Env} {Q : Ty × Eff → CState → Prop} {s : CState} (hs : s.WF) (he : Env.WF s.sz env)
     (hb : e.Src) (hsb : e.Surf)
-    (h : ∀ t ε s', s.sz ≤ s'.sz → Ext s s' → s'.WF → Ty.WF s'.sz 0 t →
+    (h : ∀ t ε s', Ext s s' → s'.WF → Ty.WF s'.sz 0 t →
       (∀ θ, Solves θ s' → HasType (Env.app θ env) e (Ty.app θ t) ε) → Q (t, ε) s'),
     Wp (infer rules env e) Q s
 
@@ -116,7 +116,7 @@ mutual
 theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
     ∀ (e : Expr) (env : Env) (Q : Ty × Eff → CState → Prop) (s : CState), s.WF →
     Env.WF s.sz env → e.Src → e.Surf →
-    (∀ t ε s', s.sz ≤ s'.sz → Ext s s' → s'.WF → Ty.WF s'.sz 0 t →
+    (∀ t ε s', Ext s s' → s'.WF → Ty.WF s'.sz 0 t →
       (∀ θ, Solves θ s' → HasType (Env.app θ env) e (Ty.app θ t) ε) → Q (t, ε) s') →
     Wp (infer rules env e) Q s
   | .var x, env, Q, s, hs, he, _, _, h => by
@@ -124,19 +124,19 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
     split
     all_goals repeat' wp_step
     · rename_i _ t heq
-      refine h t .pure s (Nat.le_refl _) (Ext.refl _) hs (by simpa [Bind.WF] using he.lookup heq) ?_
+      refine h t .pure s (Ext.refl _) hs (by simpa [Bind.WF] using he.lookup heq) ?_
       intro θ hθ
       exact HasType.var _ x (.local (Ty.app θ t)) _ (by rw [Env.app_lookup, heq]; rfl) rfl
     · rename_i _ k t heq
       have hb : Ty.WF s.sz 0 t := by simpa [Bind.WF] using he.lookup heq
-      refine h t .pure s (Nat.le_refl _) (Ext.refl _) hs hb ?_
+      refine h t .pure s (Ext.refl _) hs hb ?_
       intro θ hθ
       refine HasType.var _ x (.fn k ⟨0, Ty.app θ t⟩) _ (by rw [Env.app_lookup, heq]; rfl) ?_
       exact ⟨[], rfl, by simp, (Ty.inst_of_ok [] _ (Ty.app_solved hθ.solved hb)).symm⟩
-    · rename_i _ n t heq r s' g e hw hwr hex
+    · rename_i _ n t heq r s' e hw hwr hex
       obtain ⟨ms, hsz, hmv, rfl⟩ := hex
       have hb : Ty.WF s.sz n t := by simpa [Bind.WF] using he.lookup heq
-      refine h _ .pure s' g e hw hwr ?_
+      refine h _ .pure s' e hw hwr ?_
       intro θ hθ
       refine HasType.var _ x (.val ⟨n, Ty.app θ t⟩) _ (by rw [Env.app_lookup, heq]; rfl) ?_
       refine ⟨ms.toList.map (Ty.app θ), by simp [hsz], ?_, ?_⟩
@@ -145,10 +145,10 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
         obtain ⟨j, rfl⟩ := hmv v (Array.mem_toList_iff.mp hv)
         exact hθ.solved j
       · exact app_instTy θ hθ.solved ms t (fun i hi => hsz ▸ hb.2 i hi)
-    · rename_i _ k n t heq r s' g e hw hwr hex
+    · rename_i _ k n t heq r s' e hw hwr hex
       obtain ⟨ms, hsz, hmv, rfl⟩ := hex
       have hb : Ty.WF s.sz n t := by simpa [Bind.WF] using he.lookup heq
-      refine h _ .pure s' g e hw hwr ?_
+      refine h _ .pure s' e hw hwr ?_
       intro θ hθ
       refine HasType.var _ x (.fn k ⟨n, Ty.app θ t⟩) _ (by rw [Env.app_lookup, heq]; rfl) ?_
       refine ⟨ms.toList.map (Ty.app θ), by simp [hsz], ?_, ?_⟩
@@ -159,19 +159,19 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
       · exact app_instTy θ hθ.solved ms t (fun i hi => hsz ▸ hb.2 i hi)
   | .int _, env, Q, s, hs, he, _, _, h => by
     unfold infer
-    exact Wp.pure' (h _ _ _ (Nat.le_refl _) (Ext.refl _) hs Ty.WF_int
+    exact Wp.pure' (h _ _ _ (Ext.refl _) hs Ty.WF_int
       fun θ hθ => HasType.int _ _)
   | .bool _, env, Q, s, hs, he, _, _, h => by
     unfold infer
-    exact Wp.pure' (h _ _ _ (Nat.le_refl _) (Ext.refl _) hs Ty.WF_bool
+    exact Wp.pure' (h _ _ _ (Ext.refl _) hs Ty.WF_bool
       fun θ hθ => HasType.bool _ _)
   | .str _, env, Q, s, hs, he, _, _, h => by
     unfold infer
-    exact Wp.pure' (h _ _ _ (Nat.le_refl _) (Ext.refl _) hs Ty.WF_str
+    exact Wp.pure' (h _ _ _ (Ext.refl _) hs Ty.WF_str
       fun θ hθ => HasType.str _ _)
   | .unit, env, Q, s, hs, he, _, _, h => by
     unfold infer
-    exact Wp.pure' (h _ _ _ (Nat.le_refl _) (Ext.refl _) hs Ty.WF_unit
+    exact Wp.pure' (h _ _ _ (Ext.refl _) hs Ty.WF_unit
       fun θ hθ => HasType.unit _)
   | .lam x ann body, env, Q, s, hs, he, hsrc, hsurf, h => by
     obtain ⟨hann0, hbody0⟩ := hsrc
@@ -180,10 +180,10 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
       fun hs he hb hsb h => infer_sound rules hr body _ _ _ hs he hb hsb h
     unfold infer
     refine Wp.bind (lamParam_sound hs (fun t ht => by cases ht) hann ?_)
-    intro pt s1 g1 e1 w1 wpt hpt
+    intro pt s1 e1 w1 wpt hpt
     repeat' (first | leaf inferB | wp_step)
-    rename_i t ε s2 g2 e2 w2 wt ht
-    refine h (mkArr [pt] t ε) .pure s2 (by omega) (e1.trans e2) w2 (by wf_close) ?_
+    rename_i t ε s2 e2 w2 wt ht
+    refine h (mkArr [pt] t ε) .pure s2 (e1.trans e2) w2 (by wf_close) ?_
     intro θ hθ
     rw [Ty.app_mkArr]
     exact HasType.lam _ x ann body (Ty.app θ pt) (Ty.app θ t) ε (hpt θ (hθ.back e2)) (ht θ hθ)
@@ -195,7 +195,7 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
     have plainK : ∀ {slots : List Ty} {eff : Eff} {Q : Eff → CState → Prop} {s : CState}
         (hs : s.WF) (he : Env.WF s.sz env) (hargs : Expr.SrcList args)
         (hsargs : Expr.SurfList args) (hsl : ∀ t ∈ slots, Ty.WF s.sz 0 t)
-        (h : ∀ eff' s', s.sz ≤ s'.sz → Ext s s' → s'.WF →
+        (h : ∀ eff' s', Ext s s' → s'.WF →
           (∀ θ, Solves θ s' → args.length = slots.length →
             ∃ os εp, PlainRel (Env.app θ env) args (slots.map (Ty.app θ)) os εp ∧
               eff' = eff.join εp) → Q eff' s'),
@@ -204,16 +204,16 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
     have lamK : ∀ {slots : List Ty} {eff : Eff} {Q : Eff → CState → Prop} {s : CState}
         (hs : s.WF) (he : Env.WF s.sz env) (hargs : Expr.SrcList args)
         (hsargs : Expr.SurfList args) (hsl : ∀ t ∈ slots, Ty.WF s.sz 0 t)
-        (h : ∀ eff' s', s.sz ≤ s'.sz → Ext s s' → s'.WF → eff' = eff →
+        (h : ∀ eff' s', Ext s s' → s'.WF → eff' = eff →
           (∀ θ, Solves θ s' → args.length = slots.length →
             ∃ os, LamRel (Env.app θ env) args (slots.map (Ty.app θ)) os) → Q eff' s'),
         Wp (inferLamArgs rules env args slots eff) Q s :=
       fun hs he ha hsa hsl h => inferLamArgs_sound rules hr env args _ _ _ _ hs he ha hsa hsl h
     unfold infer
     repeat' (first | leaf inferF | leaf plainK | leaf lamK | leaf arityCheck_sound | wp_step)
-    rename_i s0 hag τ ε s1 g1 e1 w1 wτ hf ps r ce s2 g2 e2 w2 wps wr hpeel s3 g3 e3 w3 eff s4 g4 e4
+    rename_i s0 hag τ ε s1 e1 w1 wτ hf ps r ce s2 e2 w2 wps wr hpeel s3 e3 w3 eff s4 e4
       w4 hlam hplain
-    refine h r eff s4 (by omega) (e1.trans (e2.trans (e3.trans e4))) w4
+    refine h r eff s4 (e1.trans (e2.trans (e3.trans e4))) w4
       (wr.mono (by omega) (Nat.le_refl _)) ?_
     intro θ hθ
     have hpl := hpeel θ (hθ.back (e3.trans e4))
@@ -236,8 +236,8 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
       fun hs he hb hsb h => infer_sound rules hr body _ _ _ hs he hb hsb h
     unfold infer
     repeat' (first | leaf inferR | leaf inferB | leaf bindLocal_leaf | wp_step)
-    rename_i t1 ε1 hε s1 g1 e1 w1 wt1 ht1 t ε s2 g2 e2 w2 wt ht
-    refine h t ε s2 (by omega) (e1.trans e2) w2 wt ?_
+    rename_i t1 ε1 hε s1 e1 w1 wt1 ht1 t ε s2 e2 w2 wt ht
+    refine h t ε s2 (e1.trans e2) w2 wt ?_
     intro θ hθ
     have hε' : ε1 = .pure := Eff.beq_pure.mp hε
     subst hε'
@@ -253,9 +253,9 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
       fun hs he hb hsb h => infer_sound rules hr e _ _ _ hs he hb hsb h
     unfold infer
     repeat' (first | leaf inferC | leaf inferT | leaf inferE | wp_step)
-    rename_i tc ec s1 g1 e1 w1 wtc htc s2 g2 e2 w2 hbool tt et s3 g3 e3 w3 wtt htt te ee s4 g4 e4 w4
-      wte hte r s5 g5 e5 w5 wr hj
-    refine h r (ec.join (et.join ee)) s5 (by omega) ((((e1.trans e2).trans e3).trans e4).trans e5)
+    rename_i tc ec s1 e1 w1 wtc htc s2 e2 w2 hbool tt et s3 e3 w3 wtt htt te ee s4 e4 w4
+      wte hte r s5 e5 w5 wr hj
+    refine h r (ec.join (et.join ee)) s5 ((((e1.trans e2).trans e3).trans e4).trans e5)
       w5 wr ?_
     intro θ hθ
     have hb : Ty.app θ tc = .bool := hbool θ (hθ.back (e3.trans (e4.trans e5)))
@@ -270,15 +270,15 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
   | .tup es, env, Q, s, hs, he, hsrc, hsurf, h => by
     have tupleK : ∀ {Q : List Ty × Eff → CState → Prop} {s : CState} (hs : s.WF)
         (he : Env.WF s.sz env) (hes : Expr.SrcList es) (hses : Expr.SurfList es)
-        (h : ∀ ts eff s', s.sz ≤ s'.sz → Ext s s' → s'.WF → (∀ t ∈ ts, Ty.WF s'.sz 0 t) →
+        (h : ∀ ts eff s', Ext s s' → s'.WF → (∀ t ∈ ts, Ty.WF s'.sz 0 t) →
           (∀ θ, Solves θ s' → HasExprs (Env.app θ env) es (ts.map (Ty.app θ)) eff) →
           Q (ts, eff) s'),
         Wp (inferTuple rules env es) Q s :=
       fun hs he hes hses h => inferTuple_sound rules hr env es _ _ hs he hes hses h
     unfold infer
     repeat' (first | leaf tupleK | wp_step)
-    rename_i ts eff s1 g1 e1 w1 wts hts
-    refine h (.tup ts) eff s1 g1 e1 w1 (Ty.WF_tup.mpr wts) ?_
+    rename_i ts eff s1 e1 w1 wts hts
+    refine h (.tup ts) eff s1 e1 w1 (Ty.WF_tup.mpr wts) ?_
     intro θ hθ
     rw [Ty.app_tup]
     exact HasType.tup _ es _ eff (hts θ hθ)
@@ -287,8 +287,8 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
       fun hs he hb hsb h => infer_sound rules hr e _ _ _ hs he hb hsb h
     unfold infer
     repeat' (first | leaf inferE | wp_step)
-    rename_i t ε s1 g1 e1 w1 wt ht s2 g2 e2 w2 hb
-    refine h .bool ε s2 (by omega) (e1.trans e2) w2 Ty.WF_bool ?_
+    rename_i t ε s1 e1 w1 wt ht s2 e2 w2 hb
+    refine h .bool ε s2 (e1.trans e2) w2 Ty.WF_bool ?_
     intro θ hθ
     have ht' := ht θ (hθ.back e2)
     rw [hb θ hθ] at ht'
@@ -298,7 +298,7 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
     obtain ⟨hsst, hsfin⟩ := hsurf
     have stepsK : ∀ {Q : Env × Eff → CState → Prop} {s : CState} (hs : s.WF)
         (he : Env.WF s.sz env) (hst : Step.SrcList steps) (hsst : Step.SurfList steps)
-        (h : ∀ env' eff s', s.sz ≤ s'.sz → Ext s s' → s'.WF → Env.WF s'.sz env' →
+        (h : ∀ env' eff s', Ext s s' → s'.WF → Env.WF s'.sz env' →
           (∀ θ, Solves θ s' → HasSteps (Env.app θ env) steps (Env.app θ env') eff) →
           Q (env', eff) s'),
         Wp (inferSteps rules env steps) Q s :=
@@ -307,8 +307,8 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
       fun hs he hb hsb h => infer_sound rules hr final _ _ _ hs he hb hsb h
     unfold infer
     repeat' (first | leaf stepsK | leaf inferF | wp_step)
-    rename_i env' eff s1 g1 e1 w1 we hst t ε s2 g2 e2 w2 wt ht
-    refine h t (eff.join ε) s2 (by omega) (e1.trans e2) w2 wt ?_
+    rename_i env' eff s1 e1 w1 we hst t ε s2 e2 w2 wt ht
+    refine h t (eff.join ε) s2 (e1.trans e2) w2 wt ?_
     intro θ hθ
     exact HasType.doB _ _ steps final (Ty.app θ t) eff ε (hst θ (hθ.back e2)) (ht θ hθ)
 
@@ -316,7 +316,7 @@ theorem inferPlainArgs_sound (rules : Rules) (hr : rules.localLetMono = true) (e
     ∀ (args : List Expr) (slots : List Ty) (eff : Eff) (Q : Eff → CState → Prop) (s : CState),
     s.WF → Env.WF s.sz env → Expr.SrcList args → Expr.SurfList args →
     (∀ t ∈ slots, Ty.WF s.sz 0 t) →
-    (∀ eff' s', s.sz ≤ s'.sz → Ext s s' → s'.WF →
+    (∀ eff' s', Ext s s' → s'.WF →
       (∀ θ, Solves θ s' → args.length = slots.length →
         ∃ os εp, PlainRel (Env.app θ env) args (slots.map (Ty.app θ)) os εp ∧
           eff' = eff.join εp) → Q eff' s') →
@@ -329,7 +329,7 @@ theorem inferPlainArgs_sound (rules : Rules) (hr : rules.localLetMono = true) (e
     have plainK : ∀ {eff : Eff} {Q : Eff → CState → Prop} {s : CState} (hs : s.WF)
         (he : Env.WF s.sz env) (has : Expr.SrcList as) (hsas : Expr.SurfList as)
         (hsl : ∀ t ∈ ss, Ty.WF s.sz 0 t)
-        (h : ∀ eff' s', s.sz ≤ s'.sz → Ext s s' → s'.WF →
+        (h : ∀ eff' s', Ext s s' → s'.WF →
           (∀ θ, Solves θ s' → as.length = ss.length →
             ∃ os εp, PlainRel (Env.app θ env) as (ss.map (Ty.app θ)) os εp ∧
               eff' = eff.join εp) → Q eff' s'),
@@ -341,15 +341,15 @@ theorem inferPlainArgs_sound (rules : Rules) (hr : rules.localLetMono = true) (e
     split
     · rename_i hlam
       refine plainK hs he has hsas hss ?_
-      intro eff' s' g e w hq
-      refine h eff' s' g e w ?_
+      intro eff' s' e w hq
+      refine h eff' s' e w ?_
       intro θ hθ hlen
       obtain ⟨os, εp, hp, heq⟩ := hq θ hθ (by simpa using hlen)
       exact ⟨none :: os, εp, PlainRel.lam a as _ _ os εp hlam hp, heq⟩
     · rename_i hlam
       repeat' (first | leaf inferA | leaf plainK | wp_step)
-      rename_i t ε s1 g1 e1 w1 wt ht s2 g2 e2 w2 hfl eff' s3 g3 e3 w3 hq
-      refine h eff' s3 (by omega) ((e1.trans e2).trans e3) w3 ?_
+      rename_i t ε s1 e1 w1 wt ht s2 e2 w2 hfl eff' s3 e3 w3 hq
+      refine h eff' s3 ((e1.trans e2).trans e3) w3 ?_
       intro θ hθ hlen
       obtain ⟨os, εp, hp, heq⟩ := hq θ hθ (by simpa using hlen)
       refine ⟨some (Ty.app θ t) :: os, ε.join εp, ?_, ?_⟩
@@ -358,14 +358,14 @@ theorem inferPlainArgs_sound (rules : Rules) (hr : rules.localLetMono = true) (e
       · rw [heq, Eff.join_assoc]
   | [], slots, eff, Q, s, hs, he, hsrc, hsurf, hsl, h => by
     unfold inferPlainArgs
-    refine Wp.pure' (h _ _ (Nat.le_refl _) (Ext.refl _) hs ?_)
+    refine Wp.pure' (h _ _ (Ext.refl _) hs ?_)
     intro θ hθ hlen
     cases slots with
     | nil => exact ⟨[], .pure, PlainRel.nil, by simp [Eff.join_pure_right]⟩
     | cons _ _ => simp at hlen
   | _ :: _, [], eff, Q, s, hs, he, hsrc, hsurf, hsl, h => by
     unfold inferPlainArgs
-    refine Wp.pure' (h _ _ (Nat.le_refl _) (Ext.refl _) hs ?_)
+    refine Wp.pure' (h _ _ (Ext.refl _) hs ?_)
     intro θ hθ hlen
     simp at hlen
 
@@ -373,7 +373,7 @@ theorem inferLamArgs_sound (rules : Rules) (hr : rules.localLetMono = true) (env
     ∀ (args : List Expr) (slots : List Ty) (eff : Eff) (Q : Eff → CState → Prop) (s : CState),
     s.WF → Env.WF s.sz env → Expr.SrcList args → Expr.SurfList args →
     (∀ t ∈ slots, Ty.WF s.sz 0 t) →
-    (∀ eff' s', s.sz ≤ s'.sz → Ext s s' → s'.WF → eff' = eff →
+    (∀ eff' s', Ext s s' → s'.WF → eff' = eff →
       (∀ θ, Solves θ s' → args.length = slots.length →
         ∃ os, LamRel (Env.app θ env) args (slots.map (Ty.app θ)) os) → Q eff' s') →
     Wp (inferLamArgs rules env args slots eff) Q s
@@ -383,7 +383,7 @@ theorem inferLamArgs_sound (rules : Rules) (hr : rules.localLetMono = true) (env
     have lamK : ∀ {eff : Eff} {Q : Eff → CState → Prop} {s : CState} (hs : s.WF)
         (he : Env.WF s.sz env) (has : Expr.SrcList as) (hsas : Expr.SurfList as)
         (hsl : ∀ t ∈ ss, Ty.WF s.sz 0 t)
-        (h : ∀ eff' s', s.sz ≤ s'.sz → Ext s s' → s'.WF → eff' = eff →
+        (h : ∀ eff' s', Ext s s' → s'.WF → eff' = eff →
           (∀ θ, Solves θ s' → as.length = ss.length →
             ∃ os, LamRel (Env.app θ env) as (ss.map (Ty.app θ)) os) → Q eff' s'),
         Wp (inferLamArgs rules env as ss eff) Q s :=
@@ -399,10 +399,10 @@ theorem inferLamArgs_sound (rules : Rules) (hr : rules.localLetMono = true) (env
       simp only [inferLamArgs]
       refine Wp.bind (lamParam_sound hs
         (fun t ht => by have h1 := Option.some.inj ht; subst h1; exact hs0) hann ?_)
-      intro pt s1 g1 e1 w1 wpt hpt
+      intro pt s1 e1 w1 wpt hpt
       repeat' (first | leaf inferK | leaf lamK | wp_step)
-      rename_i t ε s2 g2 e2 w2 wt ht s3 g3 e3 w3 hfl eff' s4 g4 e4 w4 hq
-      refine h eff' s4 (by omega) (((e1.trans e2).trans e3).trans e4) w4 rfl ?_
+      rename_i t ε s2 e2 w2 wt ht s3 e3 w3 hfl eff' s4 e4 w4 hq
+      refine h eff' s4 (((e1.trans e2).trans e3).trans e4) w4 rfl ?_
       intro θ hθ hlen
       obtain ⟨os, hos⟩ := hq θ hθ (by simpa using hlen)
       refine ⟨some (Ty.app θ (mkArr [pt] t ε)) :: os, ?_⟩
@@ -413,34 +413,34 @@ theorem inferLamArgs_sound (rules : Rules) (hr : rules.localLetMono = true) (env
     | _ =>
       simp only [inferLamArgs]
       refine lamK hs he has hsas hss ?_
-      intro eff' s' g e w heq hq
-      refine h eff' s' g e w heq ?_
+      intro eff' s' e w heq hq
+      refine h eff' s' e w heq ?_
       intro θ hθ hlen
       obtain ⟨os, hos⟩ := hq θ hθ (by simpa using hlen)
       exact ⟨none :: os, LamRel.plain _ as _ _ os rfl hos⟩
   | [], slots, eff, Q, s, hs, he, hsrc, hsurf, hsl, h => by
     simp only [inferLamArgs]
-    refine Wp.pure' (h _ _ (Nat.le_refl _) (Ext.refl _) hs rfl ?_)
+    refine Wp.pure' (h _ _ (Ext.refl _) hs rfl ?_)
     intro θ hθ hlen
     cases slots with
     | nil => exact ⟨[], LamRel.nil⟩
     | cons _ _ => simp at hlen
   | _ :: _, [], eff, Q, s, hs, he, hsrc, hsurf, hsl, h => by
     simp only [inferLamArgs]
-    refine Wp.pure' (h _ _ (Nat.le_refl _) (Ext.refl _) hs rfl ?_)
+    refine Wp.pure' (h _ _ (Ext.refl _) hs rfl ?_)
     intro θ hθ hlen
     simp at hlen
 
 theorem inferTuple_sound (rules : Rules) (hr : rules.localLetMono = true) (env : Env) :
     ∀ (es : List Expr) (Q : List Ty × Eff → CState → Prop) (s : CState), s.WF →
     Env.WF s.sz env → Expr.SrcList es → Expr.SurfList es →
-    (∀ ts eff s', s.sz ≤ s'.sz → Ext s s' → s'.WF → (∀ t ∈ ts, Ty.WF s'.sz 0 t) →
+    (∀ ts eff s', Ext s s' → s'.WF → (∀ t ∈ ts, Ty.WF s'.sz 0 t) →
       (∀ θ, Solves θ s' → HasExprs (Env.app θ env) es (ts.map (Ty.app θ)) eff) →
       Q (ts, eff) s') →
     Wp (inferTuple rules env es) Q s
   | [], Q, s, hs, he, hsrc, hsurf, h => by
     unfold inferTuple
-    exact Wp.pure' (h _ _ _ (Nat.le_refl _) (Ext.refl _) hs (by simp)
+    exact Wp.pure' (h _ _ _ (Ext.refl _) hs (by simp)
       fun θ hθ => HasExprs.nil _)
   | e :: es, Q, s, hs, he, hsrc, hsurf, h => by
     obtain ⟨he', hes⟩ := hsrc
@@ -449,15 +449,15 @@ theorem inferTuple_sound (rules : Rules) (hr : rules.localLetMono = true) (env :
       fun hs he hb hsf h => infer_sound rules hr e _ _ _ hs he hb hsf h
     have tupleK : ∀ {Q : List Ty × Eff → CState → Prop} {s : CState} (hs : s.WF)
         (he : Env.WF s.sz env) (hes : Expr.SrcList es) (hses : Expr.SurfList es)
-        (h : ∀ ts eff s', s.sz ≤ s'.sz → Ext s s' → s'.WF → (∀ t ∈ ts, Ty.WF s'.sz 0 t) →
+        (h : ∀ ts eff s', Ext s s' → s'.WF → (∀ t ∈ ts, Ty.WF s'.sz 0 t) →
           (∀ θ, Solves θ s' → HasExprs (Env.app θ env) es (ts.map (Ty.app θ)) eff) →
           Q (ts, eff) s'),
         Wp (inferTuple rules env es) Q s :=
       fun hs he hes hses h => inferTuple_sound rules hr env es _ _ hs he hes hses h
     unfold inferTuple
     repeat' (first | leaf inferE | leaf tupleK | wp_step)
-    rename_i t ε s1 g1 e1 w1 wt ht ts eff s2 g2 e2 w2 wts hts
-    refine h (t :: ts) (ε.join eff) s2 (by omega) (e1.trans e2) w2
+    rename_i t ε s1 e1 w1 wt ht ts eff s2 e2 w2 wts hts
+    refine h (t :: ts) (ε.join eff) s2 (e1.trans e2) w2
       (Ty.WF.list_cons (wt.mono (by omega) (Nat.le_refl _)) wts) ?_
     intro θ hθ
     have := HasExprs.cons (Env.app θ env) e es (Ty.app θ t) (ts.map (Ty.app θ)) ε eff
@@ -467,13 +467,13 @@ theorem inferTuple_sound (rules : Rules) (hr : rules.localLetMono = true) (env :
 theorem inferSteps_sound (rules : Rules) (hr : rules.localLetMono = true) (env : Env) :
     ∀ (steps : List Step) (Q : Env × Eff → CState → Prop) (s : CState), s.WF →
     Env.WF s.sz env → Step.SrcList steps → Step.SurfList steps →
-    (∀ env' eff s', s.sz ≤ s'.sz → Ext s s' → s'.WF → Env.WF s'.sz env' →
+    (∀ env' eff s', Ext s s' → s'.WF → Env.WF s'.sz env' →
       (∀ θ, Solves θ s' → HasSteps (Env.app θ env) steps (Env.app θ env') eff) →
       Q (env', eff) s') →
     Wp (inferSteps rules env steps) Q s
   | [], Q, s, hs, he, hsrc, hsurf, h => by
     unfold inferSteps
-    exact Wp.pure' (h _ _ _ (Nat.le_refl _) (Ext.refl _) hs he fun θ hθ => HasSteps.nil _)
+    exact Wp.pure' (h _ _ _ (Ext.refl _) hs he fun θ hθ => HasSteps.nil _)
   | .letS x rhs :: rest, Q, s, hs, he, hsrc, hsurf, h => by
     obtain ⟨hr1, hrest⟩ := hsrc
     obtain ⟨hs1, hsrest⟩ := hsurf
@@ -481,15 +481,15 @@ theorem inferSteps_sound (rules : Rules) (hr : rules.localLetMono = true) (env :
       fun hs he hb hsf h => infer_sound rules hr rhs _ _ _ hs he hb hsf h
     have stepsK : ∀ {env : Env} {Q : Env × Eff → CState → Prop} {s : CState} (hs : s.WF)
         (he : Env.WF s.sz env) (hrest : Step.SrcList rest) (hsrest : Step.SurfList rest)
-        (h : ∀ env' eff s', s.sz ≤ s'.sz → Ext s s' → s'.WF → Env.WF s'.sz env' →
+        (h : ∀ env' eff s', Ext s s' → s'.WF → Env.WF s'.sz env' →
           (∀ θ, Solves θ s' → HasSteps (Env.app θ env) rest (Env.app θ env') eff) →
           Q (env', eff) s'),
         Wp (inferSteps rules env rest) Q s :=
       fun hs he hrest hsrest h => inferSteps_sound rules hr _ rest _ _ hs he hrest hsrest h
     unfold inferSteps
     repeat' (first | leaf inferR | leaf stepsK | leaf bindLocal_leaf | wp_step)
-    rename_i t ε hε s1 g1 e1 w1 wt ht env' eff s2 g2 e2 w2 we hst
-    refine h env' eff s2 (by omega) (e1.trans e2) w2 we ?_
+    rename_i t ε hε s1 e1 w1 wt ht env' eff s2 e2 w2 we hst
+    refine h env' eff s2 (e1.trans e2) w2 we ?_
     intro θ hθ
     have hε' : ε = .pure := Eff.beq_pure.mp hε
     subst hε'
@@ -501,15 +501,15 @@ theorem inferSteps_sound (rules : Rules) (hr : rules.localLetMono = true) (env :
       fun hs he hb hsf h => infer_sound rules hr e _ _ _ hs he hb hsf h
     have stepsK : ∀ {Q : Env × Eff → CState → Prop} {s : CState} (hs : s.WF)
         (he : Env.WF s.sz env) (hrest : Step.SrcList rest) (hsrest : Step.SurfList rest)
-        (h : ∀ env' eff s', s.sz ≤ s'.sz → Ext s s' → s'.WF → Env.WF s'.sz env' →
+        (h : ∀ env' eff s', Ext s s' → s'.WF → Env.WF s'.sz env' →
           (∀ θ, Solves θ s' → HasSteps (Env.app θ env) rest (Env.app θ env') eff) →
           Q (env', eff) s'),
         Wp (inferSteps rules env rest) Q s :=
       fun hs he hrest hsrest h => inferSteps_sound rules hr _ rest _ _ hs he hrest hsrest h
     unfold inferSteps
     repeat' (first | leaf inferE | leaf stepsK | wp_step)
-    rename_i t ε s1 g1 e1 w1 wt ht env' eff s2 g2 e2 w2 we hst
-    refine h env' (ε.join eff) s2 (by omega) (e1.trans e2) w2 we ?_
+    rename_i t ε s1 e1 w1 wt ht env' eff s2 e2 w2 we hst
+    refine h env' (ε.join eff) s2 (e1.trans e2) w2 we ?_
     intro θ hθ
     exact HasSteps.exprS _ _ e rest (Ty.app θ t) ε eff (ht θ (hθ.back e2)) (hst θ hθ)
 end
@@ -526,6 +526,6 @@ theorem infer_sound_run {s : CState} {env : Env} {e : Expr} {n : Nat} {t : Ty} {
   infer_sound {} rfl e env
     (fun r s2 => Ext s s2 ∧ s2.WF ∧ Ty.WF s2.sz 0 r.1 ∧
       ∀ θ, Solves θ s2 → HasType (Env.app θ env) e (Ty.app θ r.1) r.2)
-    s hs he hsrc hsurf (fun t ε s' _ ex hw ht hty => ⟨ex, hw, ht, hty⟩) n (t, ε) s' hrun
+    s hs he hsrc hsurf (fun t ε s' ex hw ht hty => ⟨ex, hw, ht, hty⟩) n (t, ε) s' hrun
 
 end SproutCore
