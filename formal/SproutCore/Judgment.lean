@@ -65,8 +65,10 @@ checker on every program it proves about, to show the two agree.
   a call's arguments, and fixing an argument lambda's parameter from the callee's slot. The
   judgment lets a lambda's parameter be any solved type from which the lambda flows into its slot.
   I expect that adds no accepts (a larger parameter type only makes the body's uses harder); not
-  proved. `Ty.elab` rejects an `!{IO}` arrow whose result
-  is an arrow, as `Check.elabTy` does: no surface syntax spells it.
+  proved. `Ty.elab` rejects an `!{IO}` arrow whose WRITTEN result is an arrow, as `Check.elabTy`
+  does: no surface syntax spells it. The refusal is on the written form, so a type variable that a
+  grounding later solves to an arrow is fine (`let f : a -> a !{IO} = \(h: Int -> Int) -> h`), and
+  `mkArr ps r' .io` with an arrow `r'` stays one unmerged arrow (`mkArr` merges only a pure one).
 * **A signature's `!{IO}` on a function-typed result** (`fn f(x: Int) -> Int -> Int !{IO}`) goes on
   the innermost arrow, and the call itself is pure (spec §7 rule 9). `Check.FnInfo.build` rejects
   the form and the compiler accepts it; the judgment follows the spec (`RetTy.writtenInner`).
@@ -134,8 +136,8 @@ end
 
 mutual
 /-- Read a written type with its variables mapped through `σ`. An arrow goes through `mkArr`; an
-`!{IO}` arrow whose result is an arrow has no spelling and is not read (spec §7 rule 9, as in
-`Check.elabTy`). A type a programmer cannot write (`.mv`, `.skolem`, `.gen`) is not read. -/
+`!{IO}` arrow whose WRITTEN result is an arrow has no spelling and is not read (spec §7 rule 9,
+as in `Check.elabTy`); the test is on the written `r`, not on `σ`'s reading of it. A type a programmer cannot write (`.mv`, `.skolem`, `.gen`) is not read. -/
 def Ty.elab (σ : String → Ty) : Ty → Option Ty
   | .named s => some (σ s)
   | .int => some .int
@@ -148,7 +150,7 @@ def Ty.elab (σ : String → Ty) : Ty → Option Ty
   | .tup ts => (Ty.elabList σ ts).map .tup
   | .arr ps r e =>
     match Ty.elabList σ ps, r.elab σ with
-    | some ps', some r' => if r'.isArr && e == .io then none else some (mkArr ps' r' e)
+    | some ps', some r' => if r.isArr && e == .io then none else some (mkArr ps' r' e)
     | _, _ => none
 def Ty.elabList (σ : String → Ty) : List Ty → Option (List Ty)
   | [] => some []

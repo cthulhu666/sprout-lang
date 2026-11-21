@@ -157,33 +157,67 @@ theorem Ty.elabList_ok {σ : String → Ty} (hσ : ∀ s, (σ s).ok 0 = true) :
     · cases h
 end
 
+theorem mkArr_isArr (ps : List Ty) (r : Ty) (e : Eff) : (mkArr ps r e).isArr = true := by
+  unfold mkArr
+  split
+  · split <;> rfl
+  · rfl
+
+/-- A map that gives no arrow reads an arrow exactly where one was written. -/
+theorem Ty.elab_isArr {σ : String → Ty} (hσ : ∀ s, (σ s).isArr = false) :
+    ∀ (t r : Ty), t.elab σ = some r → r.isArr = t.isArr
+  | .named s, r, h => by
+    simp only [Ty.elab, Option.some.injEq] at h
+    subst h; simpa [Ty.isArr] using hσ s
+  | .int, r, h => by simp only [Ty.elab, Option.some.injEq] at h; subst h; rfl
+  | .bool, r, h => by simp only [Ty.elab, Option.some.injEq] at h; subst h; rfl
+  | .str, r, h => by simp only [Ty.elab, Option.some.injEq] at h; subst h; rfl
+  | .unit, r, h => by simp only [Ty.elab, Option.some.injEq] at h; subst h; rfl
+  | .mv _, r, h => by simp [Ty.elab] at h
+  | .skolem _, r, h => by simp [Ty.elab] at h
+  | .gen _, r, h => by simp [Ty.elab] at h
+  | .tup ts, r, h => by
+    simp only [Ty.elab, Option.map_eq_some_iff] at h
+    obtain ⟨rs, _, rfl⟩ := h
+    rfl
+  | .arr ps r0 e, r, h => by
+    simp only [Ty.elab] at h
+    split at h
+    · split at h
+      · cases h
+      · simp only [Option.some.injEq] at h
+        subst h
+        exact mkArr_isArr _ _ _
+    · cases h
+
 mutual
-theorem elabTy_elab (f : String → Ty) : ∀ (t : Ty) (Q : Ty → CState → Prop) (s : CState),
+theorem elabTy_elab (f : String → Ty) (hf : ∀ s, (f s).isArr = false) : ∀ (t : Ty) (Q : Ty → CState → Prop) (s : CState),
     t.surf = true →
     (∀ r s', s' = s → t.elab f = some r → Q r s') → Wp (elabTy f t) Q s
   | .named x, Q, s, _, h => by
     unfold elabTy; exact Wp.pure' (h _ _ rfl (by simp [Ty.elab]))
   | .tup ts, Q, s, hsf, h => by
     unfold elabTy
-    refine Wp.bind (elabTyList_elab f ts _ s (by simpa [Ty.surf] using hsf) ?_)
+    refine Wp.bind (elabTyList_elab f hf ts _ s (by simpa [Ty.surf] using hsf) ?_)
     intro bs s1 e1 hb
     subst e1
     exact Wp.pure' (h _ _ rfl (by simp [Ty.elab, hb]))
   | .arr ps r e, Q, s, hsf, h => by
     simp only [Ty.surf, Bool.and_eq_true] at hsf
     unfold elabTy
-    refine Wp.bind (elabTy_elab f r _ s hsf.2 ?_)
+    refine Wp.bind (elabTy_elab f hf r _ s hsf.2 ?_)
     intro r' s1 e1 hr'
     subst e1
     split
     · exact Wp.reject' _ _
     · rename_i hnot
-      refine Wp.bind (elabTyList_elab f ps _ s1 hsf.1 ?_)
+      refine Wp.bind (elabTyList_elab f hf ps _ s1 hsf.1 ?_)
       intro bs s2 e2 hb
       subst e2
       refine Wp.pure' (h _ _ rfl ?_)
       simp only [Ty.elab, hb, hr']
-      have hb2 : (r'.isArr && e == Eff.io) = false := by
+      have hb2 : (r.isArr && e == Eff.io) = false := by
+        rw [← Ty.elab_isArr hf r r' hr']
         cases r' <;> cases e <;> simp_all [Ty.isArr]
       simp [hb2]
   | .mv _, Q, s, hsf, h => by simp [Ty.surf] at hsf
@@ -194,7 +228,7 @@ theorem elabTy_elab (f : String → Ty) : ∀ (t : Ty) (Q : Ty → CState → Pr
   | .str, Q, s, _, h => by unfold elabTy; exact Wp.pure' (h _ _ rfl (by simp [Ty.elab]))
   | .unit, Q, s, _, h => by unfold elabTy; exact Wp.pure' (h _ _ rfl (by simp [Ty.elab]))
 
-theorem elabTyList_elab (f : String → Ty) :
+theorem elabTyList_elab (f : String → Ty) (hf : ∀ s, (f s).isArr = false) :
     ∀ (ts : List Ty) (Q : List Ty → CState → Prop) (s : CState), Ty.surfList ts = true →
     (∀ rs s', s' = s → Ty.elabList f ts = some rs → Q rs s') → Wp (elabTyList f ts) Q s
   | [], Q, s, _, h => by
@@ -202,10 +236,10 @@ theorem elabTyList_elab (f : String → Ty) :
   | t :: ts, Q, s, hsf, h => by
     simp only [Ty.surfList, Bool.and_eq_true] at hsf
     unfold elabTyList
-    refine Wp.bind (elabTy_elab f t _ s hsf.1 ?_)
+    refine Wp.bind (elabTy_elab f hf t _ s hsf.1 ?_)
     intro t' s1 e1 ht'
     subst e1
-    refine Wp.bind (elabTyList_elab f ts _ s1 hsf.2 ?_)
+    refine Wp.bind (elabTyList_elab f hf ts _ s1 hsf.2 ?_)
     intro rs s2 e2 hrs
     subst e2
     exact Wp.pure' (h _ _ rfl (by simp [Ty.elabList, ht', hrs]))
@@ -308,7 +342,7 @@ theorem elabTy_unit_leaf {Q : Ty → CState → Prop} {s : CState} {a : Ty} (hsf
     (h : ∀ r s', s' = s → Ty.elab (fun _ => Ty.unit) a = some r → r.ok 0 = true →
       Ty.WF s.sz 0 r → r.NF → Q r s') :
     Wp (elabTy (fun _ => .unit) a) Q s :=
-  elabTy_elab _ a Q s hsf fun r s' e he =>
+  elabTy_elab _ (fun _ => rfl) a Q s hsf fun r s' e he =>
     h r s' e he (Ty.elab_ok (fun _ => rfl) a r he)
       (Ty.wf_of_ok (Ty.elab_ok (fun _ => rfl) a r he) _ _)
       (Ty.nf_of_ok _ (Ty.elab_ok (fun _ => rfl) a r he))
