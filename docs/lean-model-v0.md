@@ -288,6 +288,8 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
        final substitution applied, is derivable. Instantiation and effects are included; they
        cannot be split off.
      - **3b.** `inferLet`, `inferFnGroup` and `checkProgram`: an accepted program is derivable.
+       It needs `Plan`'s index invariants (`edges.size = n`, every index `< n`), which step 2
+       left out: its array reads are total instead.
      Prior art: Algorithm W's soundness in Isabelle (Naraschewski and Nipkow, JAR 1999 [10]). Its
      hard part was the fresh-variable invariant, which is what the well-formedness invariants are
      for.
