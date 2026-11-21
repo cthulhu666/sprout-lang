@@ -417,7 +417,7 @@ inductive RetTy (σ : String → Ty) : Option (Ty × Eff) → Ty → Eff → Pro
   | written (a r : Ty) (e : Eff) :
       a.elab σ = some r → ¬ (r.isArr = true ∧ e = .io) → RetTy σ (some (a, e)) r e
   | writtenInner (a r0 r : Ty) :
-      a.elab σ = some r0 → r0.isArr = true → r0.attachIO = some r →
+      a.elab σ = some r0 → r0.attachIO = some r →
       RetTy σ (some (a, .io)) r .pure
   | omitted (r : Ty) : r.Solved → RetTy σ none r .pure
 
