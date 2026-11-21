@@ -147,6 +147,12 @@ results.append(run("5. new untracked file", "block", present=["g.spr"]))
 write(".claude/settings.local.json", "{}\n")
 results.append(run("6. .claude/ change only", "pass"))
 
+# .claude/skills/ holds shipped code (the pr-tracker plugin), so it is reviewed.
+write(".claude/skills/pr-tracker/scripts/review_ledger.sh", "echo hi\n")
+results.append(
+    run("6b. .claude/skills/ change -> block", "block", present=["review_ledger.sh"])
+)
+
 write("bootstrap/compile_driver.ll", "reseeded\n" * 100)
 results.append(run("7. generated seed change only", "pass"))
 

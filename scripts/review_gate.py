@@ -45,6 +45,7 @@ TAIL_BYTES = 512 * 1024
 # Generated artifacts, not reviewed prose or code. Excluding them also keeps a
 # post-`refresh-seed` Stop cheap: the seed is 13 MB and its diff runs to hundreds
 # of thousands of lines, and `tests/golden/ir/` is 61 more files on top.
+# `.claude/skills/` is shipped code (the pr-tracker plugin), so it is not ignored.
 IGNORED = (
     ".claude/",
     "build/",
@@ -113,7 +114,7 @@ def git(root, *args):
 
 
 def interesting(path):
-    return not path.startswith(IGNORED)
+    return path.startswith(".claude/skills/") or not path.startswith(IGNORED)
 
 
 def changed_paths(root):

@@ -2,8 +2,10 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 
-/** The plugin directory the harness gives the mod as `$.plugin.root` (the test sits in `hooks/`). */
-const PLUGIN_ROOT = import.meta.dir.replace(/\/hooks$/, '')
+/** The ledger script path, whatever `$.plugin.root` is: the harness exposes no root to a test.
+ *  The mod must not take the repo root (`/repo/`, what `git rev-parse` answers below) for it. */
+const isLedgerScript = (path: string | undefined) =>
+  path !== undefined && path.endsWith('/scripts/review_ledger.sh') && !path.startsWith('/repo/')
 
 const PANE = {
   plugin: 'pr-tracker',
@@ -174,7 +176,7 @@ const wire = (on: On, runs = RUNS, stored: Record<string, unknown> = {}, cwd = '
       return ok(prJson(n, `old-${n}`, w.states[n], w.rollups[n]))
     }
     if (a === 'gh') return out(1, '', 'no pull requests found\n')
-    if (a === 'bash' && b === `${PLUGIN_ROOT}/scripts/review_ledger.sh`) {
+    if (a === 'bash' && isLedgerScript(b)) {
       if (e.argv[2] === 'dir') return ok(`${LEDGER}\n`)
       if (e.argv[2] === 'runs') return ok(doneRows(runs))
       if (e.argv[2] === 'issues') {

@@ -63,9 +63,9 @@ Use commit messages that explain intent:
 **Review gate** — `scripts/review_gate.py`, a Stop hook. Once per distinct working-tree state it
 blocks the turn and returns a path-aware checklist: idiomatic Sprout for `.sprout`/`.spr`,
 `docs/guidelines.md` for `stdlib/`, GC/rooting for `stdlib/compiler/` and `runtime/`, docs+spec sync
-always. Generated artifacts (the seed, `tests/golden/ir/`, `build/`, `.claude/`) are invisible to it,
-so a reseed or a golden snapshot never trips it. A turn whose last tool call is
-`AskUserQuestion` passes through, because an agent blocked on an answer cannot review-and-fix —
+always. Generated artifacts (the seed, `tests/golden/ir/`, `build/`, and `.claude/` except
+`.claude/skills/`) are invisible to it, so a reseed or a golden snapshot never trips it. A turn
+whose last tool call is `AskUserQuestion` passes through, because an agent blocked on an answer cannot review-and-fix —
 and it records nothing, so the change is still gated once you reply. Test with
 `just test-review-gate`.
 
@@ -73,9 +73,9 @@ and it records nothing, so the change is still gated once you reply. Test with
 `/code-review` that records each run in `claude-review/runs.tsv` under the common git dir (one
 ledger for all worktrees, invisible to `git status`), with findings and items files beside it.
 `.claude/skills/pr-tracker/` (`/prs`) shows each PR's runs and issues; the one plugin ships both,
-and other repos install it as `pr-tracker@sprout` from this repo's marketplace. `/sprout-review
-[low|medium|high|xhigh|max] [<pr#>|<branch>|<path>]`, default `high`. It reports and stops. Test
-with `just test-review-ledger`.
+and other repos install it as `pr-tracker@sprout` from this repo's marketplace.
+`/pr-tracker:sprout-review [low|medium|high|xhigh|max] [<pr#>|<branch>|<path>]`, default `high`.
+It reports and stops. Test with `just test-review-ledger`.
 
 **Seed gate** — `scripts/seed_gate.sh`, a PreToolUse Bash hook. Intercepts `git commit` and blocks if
 `stdlib/compiler/*.sprout` or `stdlib/*.sprout` is staged without a refreshed

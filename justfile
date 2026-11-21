@@ -859,7 +859,7 @@ test-shell-hooks:
 # when the count stops being right — and a wrong count reads as authoritative.
 [group('test')]
 test-review-ledger:
-  bash scripts/test_review_ledger.sh
+  bash .claude/skills/pr-tracker/scripts/test_review_ledger.sh
 
 # Exercise `pr-rebase` against throwaway repos and stub reseed/check commands.
 [group('test')]

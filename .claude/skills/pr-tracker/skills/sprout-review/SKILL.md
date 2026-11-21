@@ -15,7 +15,7 @@ Why it exists, and the history of the ensemble it replaced: `README.md` beside t
 ## Arguments
 
 ```
-/sprout-review [low|medium|high|xhigh|max] [<pr#>|<branch>|<path>] [--comment]
+/pr-tracker:sprout-review [low|medium|high|xhigh|max] [<pr#>|<branch>|<path>] [--comment]
 ```
 
 This invocation's arguments, verbatim (empty when none were given): `$ARGUMENTS`
@@ -23,7 +23,7 @@ This invocation's arguments, verbatim (empty when none were given): `$ARGUMENTS`
 - **Level:** the first token, if it names a level. `med` means `medium`.
 - A first token that is a number or contains `/`, `.` or `-` is a target. Any other token that
   is not a level but starts with one, or is `mid` (`higher`, `maximum`), is a misspelt level: say
-  so and stop. A branch like `lowercase` needs the level first: `/sprout-review high lowercase`.
+  so and stop. A branch like `lowercase` needs the level first: `/pr-tracker:sprout-review high lowercase`.
 - `ultra`: say so and stop. It is a billed cloud review, and the ledger stores only five levels.
 - `--fix`: say so and stop. This skill reports; it does not fix.
 - `--max-findings`: say so and stop. It is sticky inside `/code-review`, so it would make later
