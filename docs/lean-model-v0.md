@@ -280,17 +280,24 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
        a node or an edge list is an `internal` rejection, not a default node. 3b needs the
        index invariants proved (below).
      - ~~**3a.**~~ Landed. `infer_sound_run` (`formal/SproutCore/InferSound.lean`): a successful
-       `infer {} env e` from a well-formed state and environment, on a source expression, gives a
-       type and effect that every grounding `θ` solving the final state turns into
-       `HasType (Env.app θ env) e (Ty.app θ t) ε`. The layers: `Subst.lean` (`Ty.app`, `Solves`,
-       `Ext`), `FlowsLemmas.lean` and `FlowSound.lean` (the curried-level bridge, then `flow`,
-       `joinTy`, `peel`, `expectBool`), `InferHelpers.lean`, `SolvesExists.lean` (a well-formed
-       state has a solving `θ`, so the quantifier is not empty). No counterexample: every case
-       derives. What 3b must discharge: lambda annotations are surface types (`Expr.Surf`: no `.mv`,
-       `.skolem`, `.gen`; the parser builds none); `Env.app` sends `.poly` to `.val`, but
-       `Ctx.prelude` has `print_str` as `.fn 1`, so a derivation using it needs the transfer (only
-       `Peel.exact` at one argument applies to `String -> Unit !{IO}`); `.named` grounds to `.unit`
-       (the checker builds none); `rules.localLetMono = true`.
+       `infer {} env e` from a well-formed, named-free state and environment, on a source
+       expression, gives a type and effect that every grounding `θ` solving the final state turns
+       into `HasType (Env.app θ env) e (Ty.app θ t) ε`. The state stays well formed and named-free
+       and the type is named-free. The layers: `Subst.lean` (`Ty.app`, `Solves`), `Ext`
+       (`CheckWF.lean`), `FlowsLemmas.lean` and `FlowSound.lean` (the curried-level bridge, then
+       `flow`, `joinTy`, `peel`, `expectBool`), `InferHelpers.lean`, `SolvesExists.lean` (a
+       well-formed, named-free state has a solving `θ`, so the quantifier is not empty).
+       `infer_sound_exists` combines the two: an accepted expression has some `θ` with a
+       `HasType` derivation. No counterexample: every case derives. `Ty.app` keeps a `.named`,
+       which has no solved grounding, so two distinct written names never ground alike. What 3b
+       must discharge: the start state's bindings are named-free (`CState.NF`; `CState.NF.init`
+       for `{}`); the environment is named-free (`Env.NF`; `Env.NF.prelude`, and the bindings
+       `inferLet` and `inferFnGroup` add come from `elabTy f` with `f` sending each name to a
+       named-free type); lambda annotations are surface types (`Expr.Surf`: no `.mv`, `.skolem`,
+       `.gen`; the parser builds none; `lamParam` rejects a `.named`); `Env.app` sends `.poly` to
+       `.val`, but `Ctx.prelude` has `print_str` as `.fn 1`, so a derivation using it needs the
+       transfer (only `Peel.exact` at one argument applies to `String -> Unit !{IO}`);
+       `rules.localLetMono = true`.
      - **3b.** `inferLet`, `inferFnGroup` and `checkProgram`: an accepted program is derivable.
        It needs `Plan`'s index invariants (`edges.size = n`, every index `< n`), which step 2
        left out: its array reads are total instead.

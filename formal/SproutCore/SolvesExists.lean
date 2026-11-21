@@ -1,12 +1,13 @@
 import SproutCore.Subst
 
 /-!
-# A well-formed state is solved by some grounding (docs/lean-model-v0.md §9, 1b step 3a)
+# A well-formed, named-free state is solved by some grounding (docs/lean-model-v0.md §9, 1b step 3a)
 
 `infer_sound` quantifies over every `θ` with `Solves θ s'`. This file shows the quantifier is not
-empty: a state with `CState.WF` has a solving grounding. It is built by well-founded recursion
+empty: a state with `CState.WF` and `CState.NF` has a solving grounding. It is built by well-founded recursion
 along `CState.Dep` (the acyclicity half of `CState.WF`): an unbound variable goes to `.unit`, a
-bound one to the grounding of its type. Without this, the soundness theorem could hold by there
+bound one to the grounding of its type. That type must be named-free (`CState.NF`): `Ty.app` keeps
+a `.named`, which has no solved grounding. Without this, the soundness theorem could hold by there
 being no `θ`.
 -/
 
@@ -47,7 +48,7 @@ noncomputable def solveStep (s : CState) (n : Nat) (ih : ∀ m, s.Dep m n → Ty
   | some (some t) => Ty.app (fun m => if hm : m ∈ metasOf t then ih m ⟨t, hb, hm⟩ else .unit) t
   | _ => .unit
 
-theorem exists_solves {s : CState} (hs : s.WF) : ∃ θ, Solves θ s := by
+theorem exists_solves {s : CState} (hs : s.WF) (hn : s.NF) : ∃ θ, Solves θ s := by
   have wf : WellFounded s.Dep := ⟨hs.acyc⟩
   let θ : Nat → Ty := fun n => wf.fix (solveStep s) n
   have heq : ∀ n, θ n = solveStep s n (fun m _ => θ m) := fun n => wf.fix_eq (solveStep s) n
@@ -59,7 +60,7 @@ theorem exists_solves {s : CState} (hs : s.WF) : ∃ θ, Solves θ s := by
       unfold solveStep
       split
       · rename_i t hb
-        refine Ty.app_solved (g := 0) (sz := s.sz) (fun m => ?_) (hs.range n t hb)
+        refine Ty.app_solved (g := 0) (sz := s.sz) (fun m => ?_) (hs.range n t hb) (hn n t hb)
         by_cases hm : m ∈ metasOf t
         · simp only [hm, dite_true]; exact ih m ⟨t, hb, hm⟩
         · simp only [hm, dite_false]; rfl

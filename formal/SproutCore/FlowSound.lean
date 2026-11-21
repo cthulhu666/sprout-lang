@@ -5,8 +5,9 @@ import SproutCore.FlowsLemmas
 
 Each statement has the shape `Wp (f …) Q s` with a continuation `h`: the state grows (`Ext`), stays
 well formed, and for every grounding `θ` that solves the new state the judgment's relation holds
-between the grounded arguments and result. The continuation form lets `sound_step` walk a `do` block
-forward (`CheckWF.lean`), the facts of earlier steps staying in context.
+between the grounded arguments and result. The state and the argument types are named-free
+(`Ty.NF`); `Ext` carries the state's, and a result type is named-free too. The continuation form
+lets `sound_step` walk a `do` block forward, the facts of earlier steps staying in context.
 
 * `flow a e` ok ⇒ `Flows (app θ a) (app θ e)`.
 * `joinTy true a b` returning `r` ⇒ both of `a`, `b` flow into `r`; `joinTy false a b` ⇒ `r` flows
@@ -30,24 +31,25 @@ local macro_rules
                first | exact hua _ rfl | exact hue _ rfl | exact hub _ rfl))
 
 theorem shallowF_leaf {Q : Ty → CState → Prop} {s : CState} {k : Nat} {t : Ty} (hs : s.WF)
-    (ht : Ty.WF s.sz 0 t)
-    (h : ∀ r s', s' = s → Ty.WF s.sz 0 r → (∀ m, r = .mv m → s.Unbound m) →
+    (hnf : s.NF) (ht : Ty.WF s.sz 0 t) (htn : t.NF)
+    (h : ∀ r s', s' = s → Ty.WF s.sz 0 r → r.NF → (∀ m, r = .mv m → s.Unbound m) →
       (∀ θ, Solves θ s → Ty.app θ r = Ty.app θ t) → Q r s') : Wp (shallowF k t) Q s := by
   have h1 := shallowF_wp hs k t ht
     (Q := fun r s' => s' = s ∧ Ty.WF s.sz 0 r ∧ (∀ m, r = .mv m → s.Unbound m))
     (fun r s' e hr hu => ⟨e, hr, hu⟩)
-  exact Wp.mono (Wp.and' h1 (shallowF_app k t s)) fun r s' ⟨⟨e, hr, hu⟩, _, hf⟩ => h r s' e hr hu hf
+  exact Wp.mono (Wp.and' (Wp.and' h1 (shallowF_app k t s)) (shallowF_nf k t s hnf htn))
+    fun r s' ⟨⟨⟨e, hr, hu⟩, _, hf⟩, _, hrn⟩ => h r s' e hr hrn hu hf
 
 macro_rules
-  | `(tactic| sound_step) => `(tactic| leaf shallowF_leaf)
+  | `(tactic| sound_step) => `(tactic| sleaf shallowF_leaf)
 macro_rules
-  | `(tactic| sound_step) => `(tactic| leaf shallow_leaf)
+  | `(tactic| sound_step) => `(tactic| sleaf shallow_leaf)
 macro_rules
-  | `(tactic| sound_step) => `(tactic| leaf zonk_leaf)
+  | `(tactic| sound_step) => `(tactic| sleaf zonk_leaf)
 macro_rules
-  | `(tactic| sound_step) => `(tactic| leaf bindMeta_leaf)
+  | `(tactic| sound_step) => `(tactic| sleaf bindMeta_leaf)
 macro_rules
-  | `(tactic| sound_step) => `(tactic| leaf instantiate_leaf)
+  | `(tactic| sound_step) => `(tactic| sleaf instantiate_leaf)
 
 /-- Pointwise `Flows` between zipped lists gives `FlowsAll` of the images. -/
 theorem flowsAll_of_zip {f : Ty → Ty} :
@@ -63,12 +65,13 @@ theorem flowsAll_of_zip {f : Ty → Ty} :
 
 /-- `flowF` over zipped lists, in the same direction: every pair flows. -/
 theorem flowzip_sound {k : Nat} {xs ys : List Ty} {Q : PUnit → CState → Prop} {s : CState}
-    (flowk : ∀ {Q : PUnit → CState → Prop} {s : CState} {x y : Ty} (hs : s.WF)
-      (hx : Ty.WF s.sz 0 x) (hy : Ty.WF s.sz 0 y)
+    (flowk : ∀ {Q : PUnit → CState → Prop} {s : CState} {x y : Ty} (hs : s.WF) (hnf : s.NF)
+      (hx : Ty.WF s.sz 0 x) (hxn : x.NF) (hy : Ty.WF s.sz 0 y) (hyn : y.NF)
       (h : ∀ s', Ext s s' → s'.WF →
         (∀ θ, Solves θ s' → Flows (Ty.app θ x) (Ty.app θ y)) → Q ⟨⟩ s'),
       Wp (flowF k x y) Q s)
-    (hs : s.WF) (hxs : ∀ t ∈ xs, Ty.WF s.sz 0 t) (hys : ∀ t ∈ ys, Ty.WF s.sz 0 t)
+    (hs : s.WF) (hnf : s.NF) (hxs : ∀ t ∈ xs, Ty.WF s.sz 0 t) (hxn : ∀ t ∈ xs, t.NF)
+    (hys : ∀ t ∈ ys, Ty.WF s.sz 0 t) (hyn : ∀ t ∈ ys, t.NF)
     (h : ∀ s', Ext s s' → s'.WF →
       (∀ p ∈ xs.zip ys, ∀ θ, Solves θ s' → Flows (Ty.app θ p.1) (Ty.app θ p.2)) → Q ⟨⟩ s') :
     Wp (forIn (xs.zip ys) PUnit.unit fun x _ => do
@@ -79,20 +82,21 @@ theorem flowzip_sound {k : Nat} {xs ys : List Ty} {Q : PUnit → CState → Prop
   · intro p hp s1 h1 e1
     obtain ⟨x, y⟩ := p
     obtain ⟨hx, hy⟩ := List.of_mem_zip hp
-    exact flowk h1 ((hxs x hx).mono e1.sz (Nat.le_refl _))
-      ((hys y hy).mono e1.sz (Nat.le_refl _)) fun s' e' h' f => ⟨h', e', f⟩
+    exact flowk h1 (e1.nf hnf) ((hxs x hx).mono e1.sz (Nat.le_refl _)) (hxn x hx)
+      ((hys y hy).mono e1.sz (Nat.le_refl _)) (hyn y hy) fun s' e' h' f => ⟨h', e', f⟩
   · intro u s2 ⟨i2, e2, r2⟩
     exact h s2 e2 i2 r2
 
 /-- `flowF` over zipped lists with the direction reversed: the second of each pair flows into the
 first (a parameter). -/
 theorem flowzip'_sound {k : Nat} {xs ys : List Ty} {Q : PUnit → CState → Prop} {s : CState}
-    (flowk : ∀ {Q : PUnit → CState → Prop} {s : CState} {x y : Ty} (hs : s.WF)
-      (hx : Ty.WF s.sz 0 x) (hy : Ty.WF s.sz 0 y)
+    (flowk : ∀ {Q : PUnit → CState → Prop} {s : CState} {x y : Ty} (hs : s.WF) (hnf : s.NF)
+      (hx : Ty.WF s.sz 0 x) (hxn : x.NF) (hy : Ty.WF s.sz 0 y) (hyn : y.NF)
       (h : ∀ s', Ext s s' → s'.WF →
         (∀ θ, Solves θ s' → Flows (Ty.app θ x) (Ty.app θ y)) → Q ⟨⟩ s'),
       Wp (flowF k x y) Q s)
-    (hs : s.WF) (hxs : ∀ t ∈ xs, Ty.WF s.sz 0 t) (hys : ∀ t ∈ ys, Ty.WF s.sz 0 t)
+    (hs : s.WF) (hnf : s.NF) (hxs : ∀ t ∈ xs, Ty.WF s.sz 0 t) (hxn : ∀ t ∈ xs, t.NF)
+    (hys : ∀ t ∈ ys, Ty.WF s.sz 0 t) (hyn : ∀ t ∈ ys, t.NF)
     (h : ∀ s', Ext s s' → s'.WF →
       (∀ p ∈ xs.zip ys, ∀ θ, Solves θ s' → Flows (Ty.app θ p.2) (Ty.app θ p.1)) → Q ⟨⟩ s') :
     Wp (forIn (xs.zip ys) PUnit.unit fun x _ => do
@@ -103,8 +107,8 @@ theorem flowzip'_sound {k : Nat} {xs ys : List Ty} {Q : PUnit → CState → Pro
   · intro p hp s1 h1 e1
     obtain ⟨x, y⟩ := p
     obtain ⟨hx, hy⟩ := List.of_mem_zip hp
-    exact flowk h1 ((hys y hy).mono e1.sz (Nat.le_refl _))
-      ((hxs x hx).mono e1.sz (Nat.le_refl _)) fun s' e' h' f => ⟨h', e', f⟩
+    exact flowk h1 (e1.nf hnf) ((hys y hy).mono e1.sz (Nat.le_refl _)) (hyn y hy)
+      ((hxs x hx).mono e1.sz (Nat.le_refl _)) (hxn x hx) fun s' e' h' f => ⟨h', e', f⟩
   · intro u s2 ⟨i2, e2, r2⟩
     exact h s2 e2 i2 r2
 
@@ -212,7 +216,7 @@ theorem flow_arr_lt (θ : Nat → Ty) (aps eps : List Ty) (ar er : Ty) (ae ee : 
   omega
 
 theorem flowF_sound : ∀ (k : Nat) (a e : Ty) (Q : PUnit → CState → Prop) (s : CState), s.WF →
-    Ty.WF s.sz 0 a → Ty.WF s.sz 0 e →
+    s.NF → Ty.WF s.sz 0 a → a.NF → Ty.WF s.sz 0 e → e.NF →
     (∀ s', Ext s s' → s'.WF →
       (∀ θ, Solves θ s' → Flows (Ty.app θ a) (Ty.app θ e)) → Q ⟨⟩ s') →
     Wp (flowF k a e) Q s := by
@@ -220,45 +224,47 @@ theorem flowF_sound : ∀ (k : Nat) (a e : Ty) (Q : PUnit → CState → Prop) (
   induction k with
   | zero => intros; exact Wp.fuel'
   | succ k ih =>
-    intro a e Q s hs ha he h
+    intro a e Q s hs hnf ha han he hen h
     simp only [flowF]
-    refine Wp.bind (shallowF_leaf hs ha ?_)
-    intro a' s1 e1 ha' hua hsa
+    refine Wp.bind (shallowF_leaf hs hnf ha han ?_)
+    intro a' s1 e1 ha' han' hua hsa
     subst e1
-    refine Wp.bind (shallowF_leaf hs he ?_)
-    intro e' s2 e2 he' hue hse
+    refine Wp.bind (shallowF_leaf hs hnf he hen ?_)
+    intro e' s2 e2 he' hen' hue hse
     subst e2
-    have flowk : ∀ {Q : PUnit → CState → Prop} {s : CState} {x y : Ty} (hs : s.WF)
-        (hx : Ty.WF s.sz 0 x) (hy : Ty.WF s.sz 0 y)
+    have flowk : ∀ {Q : PUnit → CState → Prop} {s : CState} {x y : Ty} (hs : s.WF) (hnf : s.NF)
+        (hx : Ty.WF s.sz 0 x) (hxn : x.NF) (hy : Ty.WF s.sz 0 y) (hyn : y.NF)
         (h : ∀ s', Ext s s' → s'.WF →
           (∀ θ, Solves θ s' → Flows (Ty.app θ x) (Ty.app θ y)) → Q ⟨⟩ s'),
         Wp (flowF k x y) Q s :=
-      fun hs hx hy h => ih _ _ _ _ hs hx hy h
+      fun hs hnf hx hxn hy hyn h => ih _ _ _ _ hs hnf hx hxn hy hyn h
     have flowzip : ∀ {xs ys : List Ty} {Q : PUnit → CState → Prop} {s : CState} (hs : s.WF)
-        (hxs : ∀ t ∈ xs, Ty.WF s.sz 0 t) (hys : ∀ t ∈ ys, Ty.WF s.sz 0 t)
+        (hnf : s.NF) (hxs : ∀ t ∈ xs, Ty.WF s.sz 0 t) (hxn : ∀ t ∈ xs, t.NF)
+        (hys : ∀ t ∈ ys, Ty.WF s.sz 0 t) (hyn : ∀ t ∈ ys, t.NF)
         (h : ∀ s', Ext s s' → s'.WF →
           (∀ p ∈ xs.zip ys, ∀ θ, Solves θ s' → Flows (Ty.app θ p.1) (Ty.app θ p.2)) →
             Q ⟨⟩ s'),
         Wp (forIn (xs.zip ys) PUnit.unit fun x _ => do
           flowF k x.fst x.snd; pure (ForInStep.yield PUnit.unit)) Q s :=
-      fun hs hxs hys h => flowzip_sound flowk hs hxs hys h
+      fun hs hnf hxs hxn hys hyn h => flowzip_sound flowk hs hnf hxs hxn hys hyn h
     have flowzip' : ∀ {xs ys : List Ty} {Q : PUnit → CState → Prop} {s : CState} (hs : s.WF)
-        (hxs : ∀ t ∈ xs, Ty.WF s.sz 0 t) (hys : ∀ t ∈ ys, Ty.WF s.sz 0 t)
+        (hnf : s.NF) (hxs : ∀ t ∈ xs, Ty.WF s.sz 0 t) (hxn : ∀ t ∈ xs, t.NF)
+        (hys : ∀ t ∈ ys, Ty.WF s.sz 0 t) (hyn : ∀ t ∈ ys, t.NF)
         (h : ∀ s', Ext s s' → s'.WF →
           (∀ p ∈ xs.zip ys, ∀ θ, Solves θ s' → Flows (Ty.app θ p.2) (Ty.app θ p.1)) →
             Q ⟨⟩ s'),
         Wp (forIn (xs.zip ys) PUnit.unit fun x _ => do
           flowF k x.snd x.fst; pure (ForInStep.yield PUnit.unit)) Q s :=
-      fun hs hxs hys h => flowzip'_sound flowk hs hxs hys h
+      fun hs hnf hxs hxn hys hyn h => flowzip'_sound flowk hs hnf hxs hxn hys hyn h
     split
-    all_goals repeat' (first | sound_step | leaf flowk | leaf flowzip | leaf flowzip')
+    all_goals repeat' (first | sound_step | sleaf flowk | sleaf flowzip | sleaf flowzip')
     all_goals refine h _ (by ext_close) ‹CState.WF _› ?_
     all_goals intro θ hθ
     all_goals have hs2 : Solves θ s2 := by solves_close
     all_goals rw [← hsa θ hs2, ← hse θ hs2]
     · have hnm := Nat.eq_of_beq_eq_true ‹(_ == _) = true›
       subst hnm
-      exact Flows.refl_of_ok _ (Ty.app_solved hθ.solved ha')
+      exact Flows.refl_of_ok _ (hθ.solved _)
     · have e := ‹∀ θ, Solves θ _ → θ _ = Ty.app θ _› θ hθ
       simp only [Ty.app] at e ⊢
       rw [e]
@@ -266,11 +272,11 @@ theorem flowF_sound : ∀ (k : Nat) (a e : Ty) (Q : PUnit → CState → Prop) (
     · have e := ‹∀ θ, Solves θ _ → θ _ = Ty.app θ _› θ hθ
       simp only [Ty.app] at e ⊢
       rw [e]
-      exact Flows.refl_of_ok _ (Ty.app_solved hθ.solved he')
+      exact Flows.refl_of_ok _ (e ▸ hθ.solved _)
     · have e := ‹∀ θ, Solves θ _ → θ _ = Ty.app θ _› θ hθ
       simp only [Ty.app] at e ⊢
       rw [e]
-      exact Flows.refl_of_ok _ (Ty.app_solved hθ.solved ha')
+      exact Flows.refl_of_ok _ (e ▸ hθ.solved _)
     · simp only [Ty.app]; exact Flows.int
     · simp only [Ty.app]; exact Flows.bool
     · simp only [Ty.app]; exact Flows.str
@@ -294,15 +300,15 @@ theorem flowF_sound : ∀ (k : Nat) (a e : Ty) (Q : PUnit → CState → Prop) (
         (fun p hp' => hp p hp' θ (hθ.back e3)) (hr θ hθ)
 
 theorem flow_sound {Q : PUnit → CState → Prop} {s : CState} {a e : Ty} (hs : s.WF)
-    (ha : Ty.WF s.sz 0 a) (he : Ty.WF s.sz 0 e)
+    (hnf : s.NF) (ha : Ty.WF s.sz 0 a) (han : a.NF) (he : Ty.WF s.sz 0 e) (hen : e.NF)
     (h : ∀ s', Ext s s' → s'.WF →
       (∀ θ, Solves θ s' → Flows (Ty.app θ a) (Ty.app θ e)) → Q ⟨⟩ s') :
     Wp (flow a e) Q s := by
   unfold flow
-  exact Wp.bind (Wp.read' fun n => flowF_sound n a e Q s hs ha he h)
+  exact Wp.bind (Wp.read' fun n => flowF_sound n a e Q s hs hnf ha han he hen h)
 
 macro_rules
-  | `(tactic| sound_step) => `(tactic| leaf flow_sound)
+  | `(tactic| sound_step) => `(tactic| sleaf flow_sound)
 
 /-! ### `joinTy` -/
 
@@ -492,86 +498,90 @@ theorem join_arr_lt (pos : Bool) (θ : Nat → Ty) (aps bps ps : List Ty) (ar br
 theorem joinzip_sound {k : Nat} {pos : Bool} {xs ys : List Ty} {Q : List Ty → CState → Prop}
     {s : CState}
     (joink : ∀ {pos : Bool} {Q : Ty → CState → Prop} {s : CState} {x y : Ty} (hs : s.WF)
-      (hx : Ty.WF s.sz 0 x) (hy : Ty.WF s.sz 0 y)
-      (h : ∀ r s', Ext s s' → s'.WF → Ty.WF s'.sz 0 r →
+      (hnf : s.NF) (hx : Ty.WF s.sz 0 x) (hxn : x.NF) (hy : Ty.WF s.sz 0 y) (hyn : y.NF)
+      (h : ∀ r s', Ext s s' → s'.WF → Ty.WF s'.sz 0 r → r.NF →
         (∀ θ, Solves θ s' → JoinR pos (Ty.app θ x) (Ty.app θ y) (Ty.app θ r)) → Q r s'),
       Wp (joinTyF k pos x y) Q s)
-    (hs : s.WF) (hxs : ∀ t ∈ xs, Ty.WF s.sz 0 t) (hys : ∀ t ∈ ys, Ty.WF s.sz 0 t)
-    (h : ∀ bs s', Ext s s' → s'.WF → (∀ b ∈ bs, Ty.WF s'.sz 0 b) →
+    (hs : s.WF) (hnf : s.NF) (hxs : ∀ t ∈ xs, Ty.WF s.sz 0 t) (hxn : ∀ t ∈ xs, t.NF)
+    (hys : ∀ t ∈ ys, Ty.WF s.sz 0 t) (hyn : ∀ t ∈ ys, t.NF)
+    (h : ∀ bs s', Ext s s' → s'.WF → (∀ b ∈ bs, Ty.WF s'.sz 0 b) → (∀ b ∈ bs, b.NF) →
       (∀ θ, Solves θ s' →
         All2 (fun p r => JoinR pos (Ty.app θ p.1) (Ty.app θ p.2) (Ty.app θ r)) (xs.zip ys) bs) →
       Q bs s') :
     Wp ((xs.zip ys).mapM fun (x, y) => joinTyF k pos x y) Q s := by
   refine Wp.mono (Wp.mapM_ext (f := fun (p : Ty × Ty) => joinTyF k pos p.1 p.2) (l := xs.zip ys)
     (s := s) (fun s1 => s1.WF)
-    (fun s1 p r => Ty.WF s1.sz 0 r ∧
+    (fun s1 p r => Ty.WF s1.sz 0 r ∧ r.NF ∧
       ∀ θ, Solves θ s1 → JoinR pos (Ty.app θ p.1) (Ty.app θ p.2) (Ty.app θ r)) ?_ hs ?_) ?_
-  · intro s1 s2 p r e ⟨hw, hj⟩
-    exact ⟨hw.mono e.sz (Nat.le_refl _), fun θ hθ => hj θ (hθ.back e)⟩
+  · intro s1 s2 p r e ⟨hw, hrn, hj⟩
+    exact ⟨hw.mono e.sz (Nat.le_refl _), hrn, fun θ hθ => hj θ (hθ.back e)⟩
   · intro p hp s1 h1 e1
     obtain ⟨x, y⟩ := p
     obtain ⟨hx, hy⟩ := List.of_mem_zip hp
-    exact joink h1 ((hxs x hx).mono e1.sz (Nat.le_refl _)) ((hys y hy).mono e1.sz (Nat.le_refl _))
-      fun r s' e' h' hr hj => ⟨h', e', hr, hj⟩
+    exact joink h1 (e1.nf hnf) ((hxs x hx).mono e1.sz (Nat.le_refl _)) (hxn x hx)
+      ((hys y hy).mono e1.sz (Nat.le_refl _)) (hyn y hy)
+      fun r s' e' h' hr hrn hj => ⟨h', e', hr, hrn, hj⟩
   · intro bs s2 ⟨i2, e2, r2⟩
-    refine h bs s2 e2 i2 ?_ ?_
+    refine h bs s2 e2 i2 ?_ ?_ ?_
     · exact All2.forall_right (fun a b h => h.1) r2
+    · exact All2.forall_right (fun a b h => h.2.1) r2
     · intro θ hθ
-      exact All2.imp (fun a b h => h.2 θ hθ) r2
+      exact All2.imp (fun a b h => h.2.2 θ hθ) r2
 
 -- the tuple and arrow cases, run on the goals the walk leaves; hypothesis names are the proof's
 set_option hygiene false in
 local macro "join_close" : tactic => `(tactic| (
-  · rename_i _ _ as es hl bs s1 _ _ _ hall
+  · rename_i _ _ as es hl bs s1 _ _ _ _ hall
     exact join_tup _ θ as es bs (Nat.eq_of_beq_eq_true hl) (hall θ hθ)
-  · rename_i _ _ aps ar ae eps er ee hlen bs s1 e1 _ _ hps r s3 e3 _ _ hr
+  · rename_i _ _ aps ar ae eps er ee hlen bs s1 e1 _ _ _ hps r s3 e3 _ _ _ hr
     exact join_arr_eq _ θ aps eps bs ar er r ae ee (Nat.eq_of_beq_eq_true hlen)
       (hps θ (hθ.back e3)) (hr θ hθ)
-  · rename_i _ _ aps ar ae eps er ee hlen hemp hgt bs s1 e1 _ _ hps r s3 e3 _ _ hr
+  · rename_i _ _ aps ar ae eps er ee hlen hemp hgt bs s1 e1 _ _ _ hps r s3 e3 _ _ _ hr
     exact join_arr_gt _ θ aps eps bs ar er r ae ee hgt (ne_right_of_not_or hemp)
       (hps θ (hθ.back e3)) (hr θ hθ)
-  · rename_i _ _ aps ar ae eps er ee hlen hemp hgt bs s1 e1 _ _ hps r s3 e3 _ _ hr
+  · rename_i _ _ aps ar ae eps er ee hlen hemp hgt bs s1 e1 _ _ _ hps r s3 e3 _ _ _ hr
     have hlt : aps.length < eps.length := by simp at hlen hgt; omega
     exact join_arr_lt _ θ aps eps bs ar er r ae ee hlt (ne_left_of_not_or hemp)
       (hps θ (hθ.back e3)) (hr θ hθ)))
 
 theorem joinTyF_sound : ∀ (k : Nat) (pos : Bool) (a b : Ty) (Q : Ty → CState → Prop) (s : CState),
-    s.WF → Ty.WF s.sz 0 a → Ty.WF s.sz 0 b →
-    (∀ r s', Ext s s' → s'.WF → Ty.WF s'.sz 0 r →
+    s.WF → s.NF → Ty.WF s.sz 0 a → a.NF → Ty.WF s.sz 0 b → b.NF →
+    (∀ r s', Ext s s' → s'.WF → Ty.WF s'.sz 0 r → r.NF →
       (∀ θ, Solves θ s' → JoinR pos (Ty.app θ a) (Ty.app θ b) (Ty.app θ r)) → Q r s') →
     Wp (joinTyF k pos a b) Q s := by
   intro k
   induction k with
   | zero => intros; exact Wp.fuel'
   | succ k ih =>
-    intro pos a b Q s hs ha hb h
+    intro pos a b Q s hs hnf ha han hb hbn h
     simp only [joinTyF]
-    refine Wp.bind (shallowF_leaf hs ha ?_)
-    intro a' s1 e1 ha' hua hsa
+    refine Wp.bind (shallowF_leaf hs hnf ha han ?_)
+    intro a' s1 e1 ha' han' hua hsa
     subst e1
-    refine Wp.bind (shallowF_leaf hs hb ?_)
-    intro b' s2 e2 hb' hub hsb
+    refine Wp.bind (shallowF_leaf hs hnf hb hbn ?_)
+    intro b' s2 e2 hb' hbn' hub hsb
     subst e2
     have joink : ∀ {pos : Bool} {Q : Ty → CState → Prop} {s : CState} {x y : Ty} (hs : s.WF)
-        (hx : Ty.WF s.sz 0 x) (hy : Ty.WF s.sz 0 y)
-        (h : ∀ r s', Ext s s' → s'.WF → Ty.WF s'.sz 0 r →
+        (hnf : s.NF) (hx : Ty.WF s.sz 0 x) (hxn : x.NF) (hy : Ty.WF s.sz 0 y) (hyn : y.NF)
+        (h : ∀ r s', Ext s s' → s'.WF → Ty.WF s'.sz 0 r → r.NF →
           (∀ θ, Solves θ s' → JoinR pos (Ty.app θ x) (Ty.app θ y) (Ty.app θ r)) → Q r s'),
         Wp (joinTyF k pos x y) Q s :=
-      fun hs hx hy h => ih _ _ _ _ _ hs hx hy h
+      fun hs hnf hx hxn hy hyn h => ih _ _ _ _ _ hs hnf hx hxn hy hyn h
     have joinzip : ∀ {pos : Bool} {xs ys : List Ty} {Q : List Ty → CState → Prop} {s : CState}
-        (hs : s.WF) (hxs : ∀ t ∈ xs, Ty.WF s.sz 0 t) (hys : ∀ t ∈ ys, Ty.WF s.sz 0 t)
-        (h : ∀ bs s', Ext s s' → s'.WF → (∀ b ∈ bs, Ty.WF s'.sz 0 b) →
+        (hs : s.WF) (hnf : s.NF) (hxs : ∀ t ∈ xs, Ty.WF s.sz 0 t) (hxn : ∀ t ∈ xs, t.NF)
+        (hys : ∀ t ∈ ys, Ty.WF s.sz 0 t) (hyn : ∀ t ∈ ys, t.NF)
+        (h : ∀ bs s', Ext s s' → s'.WF → (∀ b ∈ bs, Ty.WF s'.sz 0 b) → (∀ b ∈ bs, b.NF) →
           (∀ θ, Solves θ s' →
             All2 (fun p r => JoinR pos (Ty.app θ p.1) (Ty.app θ p.2) (Ty.app θ r))
               (xs.zip ys) bs) → Q bs s'),
         Wp ((xs.zip ys).mapM fun (x, y) => joinTyF k pos x y) Q s :=
-      fun hs hxs hys h => joinzip_sound joink hs hxs hys h
+      fun hs hnf hxs hxn hys hyn h => joinzip_sound joink hs hnf hxs hxn hys hyn h
     cases pos
     all_goals simp only [Bool.false_eq_true, ite_false, ite_true, Bool.not_false,
       Bool.not_true] at *
     all_goals split
-    all_goals repeat' (first | sound_step | leaf joink | leaf joinzip)
-    all_goals refine h _ _ (by ext_close) ‹CState.WF _› (by wf_close) ?_
+    all_goals repeat' (first | sound_step | sleaf joink | sleaf joinzip)
+    all_goals refine h _ _ (by ext_close) ‹CState.WF _› (by wf_close) (by nf_close) ?_
     all_goals intro θ hθ
     all_goals have hs2 : Solves θ s2 := by solves_close
     all_goals rw [← hsa θ hs2, ← hsb θ hs2]
@@ -579,36 +589,35 @@ theorem joinTyF_sound : ∀ (k : Nat) (pos : Bool) (a b : Ty) (Q : Ty → CState
       | (have hnm := Nat.eq_of_beq_eq_true ‹(_ == _) = true›
          subst hnm
          simp only [Ty.app]
-         exact JoinR.refl_of_ok _ _ (by first | rfl | exact Ty.app_solved hθ.solved ‹_›))
+         exact JoinR.refl_of_ok _ _ (by first | rfl | exact hθ.solved _))
       | (have e := ‹∀ θ, Solves θ _ → θ _ = Ty.app θ _› θ hθ
          simp only [Ty.app] at e ⊢
          rw [e]
-         exact JoinR.refl_of_ok _ _
-           (by first | exact hθ.solved _ | exact Ty.app_solved hθ.solved ‹_›))
+         exact JoinR.refl_of_ok _ _ (e ▸ hθ.solved _))
       | (simp only [Ty.app]; exact JoinR.refl_of_ok _ _ rfl)
       | skip)
     join_close
     join_close
 
 theorem joinTy_sound {Q : Ty → CState → Prop} {s : CState} {pos : Bool} {a b : Ty} (hs : s.WF)
-    (ha : Ty.WF s.sz 0 a) (hb : Ty.WF s.sz 0 b)
-    (h : ∀ r s', Ext s s' → s'.WF → Ty.WF s'.sz 0 r →
+    (hnf : s.NF) (ha : Ty.WF s.sz 0 a) (han : a.NF) (hb : Ty.WF s.sz 0 b) (hbn : b.NF)
+    (h : ∀ r s', Ext s s' → s'.WF → Ty.WF s'.sz 0 r → r.NF →
       (∀ θ, Solves θ s' → JoinR pos (Ty.app θ a) (Ty.app θ b) (Ty.app θ r)) → Q r s') :
     Wp (joinTy pos a b) Q s := by
   unfold joinTy
-  exact Wp.bind (Wp.read' fun n => joinTyF_sound n pos a b Q s hs ha hb h)
+  exact Wp.bind (Wp.read' fun n => joinTyF_sound n pos a b Q s hs hnf ha han hb hbn h)
 
 macro_rules
-  | `(tactic| sound_step) => `(tactic| leaf joinTy_sound)
+  | `(tactic| sound_step) => `(tactic| sleaf joinTy_sound)
 
 /-! ### `peel` -/
 
 /-- The `.mv` case of `peelF`: a call of an unsolved variable solves it to a pure arrow of `n`
 fresh parameters. -/
 theorem peel_mv_leaf {Q : List Ty × Ty × Eff → CState → Prop} {s : CState} {m n : Nat}
-    (hs : s.WF) (hm : Ty.WF s.sz 0 (.mv m)) (hu : s.Unbound m)
-    (h : ∀ ps r s', Ext s s' → s'.WF → (∀ t ∈ ps, Ty.WF s'.sz 0 t) →
-      Ty.WF s'.sz 0 r → ps.length = n →
+    (hs : s.WF) (hnf : s.NF) (hm : Ty.WF s.sz 0 (.mv m)) (hu : s.Unbound m)
+    (h : ∀ ps r s', Ext s s' → s'.WF → (∀ t ∈ ps, Ty.WF s'.sz 0 t) → (∀ t ∈ ps, t.NF) →
+      Ty.WF s'.sz 0 r → r.NF → ps.length = n →
       (∀ θ, Solves θ s' → θ m = Ty.app θ (.arr ps r .pure)) → Q (ps, r, .pure) s') :
     Wp (do
       let mut ps := []
@@ -617,26 +626,33 @@ theorem peel_mv_leaf {Q : List Ty × Ty × Eff → CState → Prop} {s : CState}
       bindMeta m (.arr ps r .pure)
       pure (ps, r, .pure) : M (List Ty × Ty × Eff)) Q s := by
   refine Wp.bind (fresh_loop_sound n hs ?_)
-  intro ps s1 e1 h1 hl hps hun1
+  intro ps s1 e1 h1 hl hps hpm hun1
   refine Wp.bind (fresh_leaf h1 ?_)
-  intro r s2 hr _ g2 e2 h2 hun2
+  intro r s2 hr hrm g2 e2 h2 hun2
   have hm2 : Ty.WF s2.sz 0 (.mv m) := hm.mono (by omega) (Nat.le_refl _)
   have hu2 : s2.Unbound m := hun2 _ (hun1 _ hu)
   have hw : Ty.WF s2.sz 0 (.arr ps r .pure) :=
     Ty.WF_arr.mpr ⟨fun t ht => (hps t ht).mono (by omega) (Nat.le_refl _), hr⟩
-  refine Wp.bind (bindMeta_leaf h2 (Ty.WF_mv.mp hm2) hu2 hw ?_)
+  have hwn : Ty.NF (.arr ps r .pure) := by
+    refine Ty.NF_arr.mpr ⟨fun t ht => ?_, ?_⟩
+    · obtain ⟨j, rfl⟩ := hpm t ht; exact Ty.NF_mv
+    · obtain ⟨j, rfl⟩ := hrm; exact Ty.NF_mv
+  refine Wp.bind (bindMeta_leaf h2 ((e1.trans e2).nf hnf) (Ty.WF_mv.mp hm2) hu2 hw hwn ?_)
   intro s3 hsz e3 h3 hb
-  exact Wp.pure' (h ps r s3 (e1.trans (e2.trans e3)) h3
-    (fun t ht => (hps t ht).mono (by omega) (Nat.le_refl _)) (hr.mono (by omega) (Nat.le_refl _))
-    hl hb)
+  refine Wp.pure' (h ps r s3 (e1.trans (e2.trans e3)) h3
+    (fun t ht => (hps t ht).mono (by omega) (Nat.le_refl _))
+    (fun t ht => by obtain ⟨j, rfl⟩ := hpm t ht; exact Ty.NF_mv)
+    (hr.mono (by omega) (Nat.le_refl _)) ?_ hl hb)
+  obtain ⟨j, rfl⟩ := hrm
+  exact Ty.NF_mv
 
 macro_rules
-  | `(tactic| sound_step) => `(tactic| leaf peel_mv_leaf)
+  | `(tactic| sound_step) => `(tactic| sleaf peel_mv_leaf)
 
 theorem peelF_sound : ∀ (k : Nat) (t : Ty) (n : Nat) (Q : List Ty × Ty × Eff → CState → Prop)
-    (s : CState), s.WF → Ty.WF s.sz 0 t →
-    (∀ ps r e s', Ext s s' → s'.WF → (∀ t ∈ ps, Ty.WF s'.sz 0 t) →
-      Ty.WF s'.sz 0 r →
+    (s : CState), s.WF → s.NF → Ty.WF s.sz 0 t → t.NF →
+    (∀ ps r e s', Ext s s' → s'.WF → (∀ t ∈ ps, Ty.WF s'.sz 0 t) → (∀ t ∈ ps, t.NF) →
+      Ty.WF s'.sz 0 r → r.NF →
       (∀ θ, Solves θ s' → Peel (Ty.app θ t) n (ps.map (Ty.app θ)) (Ty.app θ r) e) →
       Q (ps, r, e) s') →
     Wp (peelF k t n) Q s := by
@@ -644,43 +660,48 @@ theorem peelF_sound : ∀ (k : Nat) (t : Ty) (n : Nat) (Q : List Ty × Ty × Eff
   induction k with
   | zero => intros; exact Wp.fuel'
   | succ k ih =>
-    intro t n Q s hs ht h
+    intro t n Q s hs hnf ht htn h
     simp only [peelF]
-    refine Wp.bind (shallowF_leaf hs ht ?_)
-    intro t' s1 e1 ht' hua hsa
+    refine Wp.bind (shallowF_leaf hs hnf ht htn ?_)
+    intro t' s1 e1 ht' htn' hua hsa
     subst e1
     have peelk : ∀ {Q : List Ty × Ty × Eff → CState → Prop} {s : CState} {t : Ty} {n : Nat}
-        (hs : s.WF) (ht : Ty.WF s.sz 0 t)
-        (h : ∀ ps r e s', Ext s s' → s'.WF → (∀ t ∈ ps, Ty.WF s'.sz 0 t) →
-          Ty.WF s'.sz 0 r →
+        (hs : s.WF) (hnf : s.NF) (ht : Ty.WF s.sz 0 t) (htn : t.NF)
+        (h : ∀ ps r e s', Ext s s' → s'.WF → (∀ t ∈ ps, Ty.WF s'.sz 0 t) → (∀ t ∈ ps, t.NF) →
+          Ty.WF s'.sz 0 r → r.NF →
           (∀ θ, Solves θ s' → Peel (Ty.app θ t) n (ps.map (Ty.app θ)) (Ty.app θ r) e) →
           Q (ps, r, e) s'),
-        Wp (peelF k t n) Q s := fun hs ht h => ih _ _ _ _ hs ht h
+        Wp (peelF k t n) Q s := fun hs hnf ht htn h => ih _ _ _ _ hs hnf ht htn h
     split
-    all_goals repeat' (first | sound_step | leaf peelk)
+    all_goals repeat' (first | sound_step | sleaf peelk)
     · rename_i _ ps r e hn
       refine h ps r e s1 (Ext.refl _) hs (Ty.WF.arr_params ht' (Nat.le_refl _))
-        (Ty.WF.arr_res ht' (Nat.le_refl _)) ?_
+        (Ty.NF.arr_params htn') (Ty.WF.arr_res ht' (Nat.le_refl _)) (Ty.NF.arr_res htn') ?_
       intro θ hθ
       rw [← hsa θ hθ, Ty.app_arr, Nat.eq_of_beq_eq_true hn]
       have := peel_mkArr_exact (ps := ps.map (Ty.app θ)) (e := e)
-        (Ty.app_solved hθ.solved (Ty.WF.arr_res ht' (Nat.le_refl _)))
+        (Ty.app_solved hθ.solved (Ty.WF.arr_res ht' (Nat.le_refl _)) (Ty.NF.arr_res htn'))
       rwa [List.length_map] at this
     · rename_i _ ps r e hne hemp hn0 hlt
       refine h (ps.take n) (mkArr (ps.drop n) r e) .pure s1 (Ext.refl _) hs
-        (Ty.WF.arr_take ht' (Nat.le_refl _) n)
-        (Ty.WF_mkArr.mpr (Ty.WF.arr_drop ht' (Nat.le_refl _) n)) ?_
+        (Ty.WF.arr_take ht' (Nat.le_refl _) n) (Ty.NF.arr_take htn' n)
+        (Ty.WF_mkArr.mpr (Ty.WF.arr_drop ht' (Nat.le_refl _) n))
+        (Ty.NF_mkArr.mpr ⟨Ty.NF.arr_params (Ty.NF.arr_drop htn' n), Ty.NF.arr_res htn'⟩) ?_
       intro θ hθ
       rw [← hsa θ hθ, Ty.app_arr, Ty.app_mkArr, List.map_take, List.map_drop]
       have hn0' : 0 < n := by simp at hn0; omega
-      exact peel_mkArr_rest (Ty.app_solved hθ.solved (Ty.WF.arr_res ht' (Nat.le_refl _))) hn0'
-        (by simpa using hlt)
-    · rename_i _ ps r e hne hemp hn0 hlt ps2 r2 e2 s' e1 w1 hps2 hr2 hrec
-      refine h (ps ++ ps2) r2 (e.join e2) s' e1 w1 ?_ hr2 ?_
+      exact peel_mkArr_rest (Ty.app_solved hθ.solved (Ty.WF.arr_res ht' (Nat.le_refl _))
+        (Ty.NF.arr_res htn')) hn0' (by simpa using hlt)
+    · rename_i _ ps r e hne hemp hn0 hlt ps2 r2 e2 s' e1 w1 hps2 hpn2 hr2 hrn2 hrec
+      refine h (ps ++ ps2) r2 (e.join e2) s' e1 w1 ?_ ?_ hr2 hrn2 ?_
       · intro t ht
         rcases List.mem_append.mp ht with ht | ht
         · exact (Ty.WF.arr_params ht' (Nat.le_refl _) t ht).mono (by omega) (Nat.le_refl _)
         · exact hps2 t ht
+      · intro t ht
+        rcases List.mem_append.mp ht with ht | ht
+        · exact Ty.NF.arr_params htn' t ht
+        · exact hpn2 t ht
       · intro θ hθ
         rw [← hsa θ (hθ.back e1), Ty.app_arr, List.map_append]
         have hlt' : ps.length < n := by simp at hne hlt; omega
@@ -690,35 +711,36 @@ theorem peelF_sound : ∀ (k : Nat) (t : Ty) (n : Nat) (Q : List Ty × Ty × Eff
           subst this
           simp at hemp
         refine peel_over_mkArr
-          (Ty.app_solved hθ.solved (Ty.WF.arr_res ht' (Nat.le_refl _))) hps (by simpa using hlt') ?_
+          (Ty.app_solved hθ.solved (Ty.WF.arr_res ht' (Nat.le_refl _)) (Ty.NF.arr_res htn')) hps
+          (by simpa using hlt') ?_
         rw [List.length_map]
         exact hrec θ hθ
-    · rename_i _ m ps r s' e1 w1 hps hr hfact
-      refine h ps r .pure s' e1 w1 hps hr ?_
+    · rename_i _ m ps r s' e1 w1 hps hpn hr hrn hfact
+      refine h ps r .pure s' e1 w1 hps hpn hr hrn ?_
       intro θ hθ
       rw [← hsa θ (hθ.back e1)]
       show Peel (θ m) _ _ _ _
       rw [hfact θ hθ, Ty.app_arr]
       have := peel_mkArr_exact (ps := ps.map (Ty.app θ)) (e := .pure)
-        (Ty.app_solved hθ.solved hr)
+        (Ty.app_solved hθ.solved hr hrn)
       rwa [List.length_map] at this
 
 theorem peel_sound {Q : List Ty × Ty × Eff → CState → Prop} {s : CState} {t : Ty} {n : Nat}
-    (hs : s.WF) (ht : Ty.WF s.sz 0 t)
-    (h : ∀ ps r e s', Ext s s' → s'.WF → (∀ t ∈ ps, Ty.WF s'.sz 0 t) →
-      Ty.WF s'.sz 0 r →
+    (hs : s.WF) (hnf : s.NF) (ht : Ty.WF s.sz 0 t) (htn : t.NF)
+    (h : ∀ ps r e s', Ext s s' → s'.WF → (∀ t ∈ ps, Ty.WF s'.sz 0 t) → (∀ t ∈ ps, t.NF) →
+      Ty.WF s'.sz 0 r → r.NF →
       (∀ θ, Solves θ s' → Peel (Ty.app θ t) n (ps.map (Ty.app θ)) (Ty.app θ r) e) →
       Q (ps, r, e) s') : Wp (peel t n) Q s := by
   unfold peel
-  exact Wp.bind (Wp.read' fun k => peelF_sound k t n Q s hs ht h)
+  exact Wp.bind (Wp.read' fun k => peelF_sound k t n Q s hs hnf ht htn h)
 
 macro_rules
-  | `(tactic| sound_step) => `(tactic| leaf peel_sound)
+  | `(tactic| sound_step) => `(tactic| sleaf peel_sound)
 
 /-! ### `expectBool` -/
 
 theorem expectBool_sound {Q : PUnit → CState → Prop} {s : CState} {t : Ty} {key detail : String}
-    (hs : s.WF) (ht : Ty.WF s.sz 0 t)
+    (hs : s.WF) (hnf : s.NF) (ht : Ty.WF s.sz 0 t) (htn : t.NF)
     (h : ∀ s', Ext s s' → s'.WF → (∀ θ, Solves θ s' → Ty.app θ t = .bool) →
       Q ⟨⟩ s') :
     Wp (expectBool t key detail) Q s := by
@@ -726,7 +748,7 @@ theorem expectBool_sound {Q : PUnit → CState → Prop} {s : CState} {t : Ty} {
   refine Wp.bind (Wp.mono (Wp.tryCatch' (Q := fun (ok : Bool) s' => ok = true →
       (Ext s s' ∧ s'.WF ∧ ∀ θ, Solves θ s' → Ty.app θ t = .bool)) ?_
       (fun _ _ => ?_) rfl) fun ok s1 hq => ?_)
-  · refine Wp.bind (flow_sound hs ht Ty.WF_bool ?_)
+  · refine Wp.bind (flow_sound hs hnf ht htn Ty.WF_bool Ty.NF_bool ?_)
     intro s' e hw hf
     exact Wp.pure' fun _ => ⟨e, hw, fun θ hθ => Flows.to_bool (hf θ hθ)⟩
   · exact Wp.pure' fun hf => by cases hf
@@ -737,6 +759,6 @@ theorem expectBool_sound {Q : PUnit → CState → Prop} {s : CState} {t : Ty} {
       exact Wp.pure' (h s1 e hw hf)
 
 macro_rules
-  | `(tactic| sound_step) => `(tactic| leaf expectBool_sound)
+  | `(tactic| sound_step) => `(tactic| sleaf expectBool_sound)
 
 end SproutCore
