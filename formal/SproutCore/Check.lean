@@ -742,8 +742,9 @@ def checkPlan (p : Program) : Except CErr Plan := do
 def runPlan (rules : Rules) (pl : Plan) : M Unit := do
   let mut env := preludeEnv
   for g in pl.order do
-    -- `checkPlan` builds `order` from node indices; an index with no node or no edge list is an
-    -- internal error, not a default node (it would pass the declaration-order rules)
+    -- `Plan.Inv` (`order_lt`, `edges_size`) makes this guard unreachable for a plan `checkPlan`
+    -- built. It stays as fail-closed defence: an index with no node or no edge list is an
+    -- internal error, not a default node (it would pass the declaration-order rules).
     unless g.all (fun i => i < pl.nodes.size && i < pl.edges.size) do
       reject "internal" "a group names a node the plan lacks"
     let members := g.map fun i => pl.nodes[i]?.getD default
