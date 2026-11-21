@@ -87,7 +87,7 @@ check "findings dir was created"       "1"  "$([ -n "$fpath" ] && [ -d "${fpath%
 echo "# findings" > "$fpath"
 check "writing findings keeps count"   "3"  "$(bash "$LEDGER" count)"
 
-# A run id reaches this from a workflow result, so it is not trusted to be a bare
+# A run id reaches this from the caller's arguments, so it is not trusted to be a bare
 # token. `../../etc/passwd` must not resolve to a path outside the ledger dir.
 check "a traversing id is rejected"     "1" \
   "$(bash "$LEDGER" findings "../../escape" 2>&1 >/dev/null | grep -c 'run id')"
@@ -195,7 +195,7 @@ printf '2020-01-01T00:00:00Z\tdone\tcleanup-col\tdeadbee\t999-2\t3\t1\tlow\n' >>
 check "a legacy 8-field row counts"    "3"  "$(bash "$LEDGER" count)"
 
 # --- the confirmed-cleanups column ----------------------------------------
-# Cleanups have their own skeptic, so how many survived it is a tenth column.
+# How many cleanups were confirmed is a tenth column.
 # Same rules as the ninth: digits only, and older rows keep counting.
 git switch -q -c cleanup-real
 ide=$(bash "$LEDGER" open)
@@ -233,6 +233,11 @@ git switch -q -c zero-real
 idz=$(bash "$LEDGER" open)
 bash "$LEDGER" done "$idz" 3 0 high
 check "a real 0 is still shown as 0"   "review:1 3 found 0 real @high" "$(bash "$LEDGER" show)"
+git switch -q -c clean-run
+idc=$(bash "$LEDGER" open)
+bash "$LEDGER" done "$idc" 0 - high 0 -
+check "a clean dash run prints no +0"  "review:1 @high" "$(bash "$LEDGER" show)"
+git switch -q zero-real
 # found and confirmed are digits or '-'; anything else is an error and writes no row.
 rows_before=$(($(wc -l < "$runs")))
 bash "$LEDGER" done "$idz" 4 - high

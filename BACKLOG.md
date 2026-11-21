@@ -1393,7 +1393,8 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 - [ ] `P2` **`/sprout-review` has no Sprout-specific review dimensions.** `/code-review` runs
   forked and takes no guidance, so a review cannot know GC rooting for `stdlib/compiler/` and
   `runtime/`, seed staleness, idiomatic Sprout, or the golden-IR trap. It also has no angle for
-  doc and comment drift (14 of the old ensemble's 67 raw findings over 11 runs). Proposal: the
+  doc and comment drift (14 of 67 raw findings over the ensemble's first 11 runs, from the
+  `raw-*.json` files in the ledger dir; method in `297cbed7`'s skill README). Proposal: the
   wrapper runs one extra Sprout-only agent, its prompt built from the path-matched rows of
   `scripts/review_gate.py`'s `CHECKLIST`; findings go into the same items file with
   `category: sprout`. Measure it against plain wrapper runs before keeping it.
@@ -1403,9 +1404,16 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `scripts/review_gate.py` already computes a per-path tree digest that could be reused.
 - [ ] `P3` **A review diffed against a stale `@{upstream}` or local `master` counts merged code.**
   Without a fetch, the base is behind `origin/master`, so the review diff includes commits
-  already merged and reports them as the branch's. Seen in this worktree on 2026-11-21 and in run
+  already merged and reports them as the branch's. Seen on branch `sprout-review-wrapper` on
+  2026-11-21 (3 merged commits) and in run
   1793356017-7260 (2 of 6 cleanups were about merged #781). Fix: the wrapper fetches, then passes
   an explicit base/target to `/code-review`.
+- [ ] `P2` **`/sprout-review` never gets a verdict or category from `/code-review`.** In Claude
+  Code 2.1.311, only `max` runs a verify pass (`low` to `xhigh` dedup only), and unless
+  `CLAUDE_CODE_REPORT_FINDINGS` is set the reviewer returns `file`/`line`/`summary`/
+  `failure_scenario` only, at every level. So every run records `unverified` and the reporter
+  guesses track and severity. Research: is the flag supported, what it changes per level, what a
+  `max` run costs, and whether the wrapper should run its own verify pass instead.
 
 ### 7.5) Type Classes
 

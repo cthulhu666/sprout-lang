@@ -209,7 +209,7 @@ cmd_done() {
 # say a review happened; this says what it found, so a reader can be pointed at the
 # list instead of at a number.
 #
-# The id arrives from a workflow result, so it is not trusted to be a bare token —
+# The id arrives from the caller's arguments, so it is not trusted to be a bare token —
 # a `/` or `..` in it would resolve outside the ledger directory.
 #
 # 5th argument: none prints the path to write, in the common dir. `read` prints the file
@@ -452,7 +452,7 @@ cmd_show() {
           if (n == 0) exit
           printf "review:%d", n
           if (nconf > 0) printf " %d found %d real", found, confirmed
-          if (unv > 0) printf " +%d unverified", ufound
+          if (ufound > 0) printf " +%d unverified", ufound
           if (level != "") printf " @%s", level
           printf "\n" }'
 }
