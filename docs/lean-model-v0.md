@@ -254,7 +254,7 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
      compiler bugs: a non-generalised function value passed to an `!{IO}` slot is then read back
      as IO at its other uses, and a peer join of a nested join with an `!{IO}` function is
      order-dependent. The spec gaps and compiler bugs are `BACKLOG.md` entries.
-   - **1b: T2**, inference soundness, and the axiom check of §7. One PR per step, in this order:
+   - **1b (landed): T2**, inference soundness, and the axiom check of §7. One PR per step, in this order:
      - ~~**Judgment.**~~ Landed. `formal/SproutCore/Judgment.lean` is an inductive `HasType` over
        solved types (no metavariables; a scheme is `∀n.` over `.gen`; a written variable is
        rigid), one rule per construct, effect subsumption only where rule 8 puts it. The program
@@ -277,8 +277,8 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
        a harness error, `test-lean-oracle` plants it, and the oracle's per-program verdicts were
        diffed before and after, not its counts. The axiom check is `formal/AxiomCheck.lean`
        (§7). The plan code reads arrays by total functions; an index out of range where it picks
-       a node or an edge list is an `internal` rejection, not a default node. 3b needs the
-       index invariants proved (below).
+       a node or an edge list is an `internal` rejection, not a default node. 3b proved the index
+       invariants (`PlanInv.lean`).
      - ~~**3a.**~~ Landed. `infer_sound_run` (`formal/SproutCore/InferSound.lean`): a successful
        `infer {} env e` from a well-formed, named-free state and environment, on a source
        expression, gives a type and effect that every grounding `θ` solving the final state turns
@@ -289,18 +289,32 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
        well-formed, named-free state has a solving `θ`, so the quantifier is not empty).
        `infer_sound_exists` combines the two: an accepted expression has some `θ` with a
        `HasType` derivation. No counterexample: every case derives. `Ty.app` keeps a `.named`,
-       which has no solved grounding, so two distinct written names never ground alike. What 3b
-       must discharge: the start state's bindings are named-free (`CState.NF`; `CState.NF.init`
-       for `{}`); the environment is named-free (`Env.NF`; `Env.NF.prelude`, and the bindings
-       `inferLet` and `inferFnGroup` add come from `elabTy f` with `f` sending each name to a
-       named-free type); lambda annotations are surface types (`Expr.Surf`: no `.mv`, `.skolem`,
-       `.gen`; the parser builds none; `lamParam` rejects a `.named`); `Env.app` sends `.poly` to
-       `.val`, but `Ctx.prelude` has `print_str` as `.fn 1`, so a derivation using it needs the
-       transfer (only `Peel.exact` at one argument applies to `String -> Unit !{IO}`);
-       `rules.localLetMono = true`.
-     - **3b.** `inferLet`, `inferFnGroup` and `checkProgram`: an accepted program is derivable.
-       It needs `Plan`'s index invariants (`edges.size = n`, every index `< n`), which step 2
-       left out: its array reads are total instead.
+       which has no solved grounding, so two distinct written names never ground alike. The side
+       conditions were `CState.NF` and `Env.NF` of the start state and environment (3b proved
+       them for `{}` and for every environment `runPlan` builds), `Expr.Surf` on every lambda
+       annotation, and `rules.localLetMono = true`.
+     - ~~**3b.**~~ Landed. `checkProgram_sound` (`formal/SproutCore/ProgramSound.lean`):
+       `p.Surf → checkProgram {} p fuel = .ok () → p.Typed`. `p.Surf` says every written type of
+       a `fn` signature or a top-level `let` annotation is a surface type (`Ty.surf`: no `.mv`,
+       `.skolem`, `.gen`; the parser builds none) and every term is a surface term (`Expr.Surf`);
+       `Expr.Src` follows. No counterexample beyond the one below: every case derives. The layers:
+       `PlanInv.lean` (`checkPlan` gives edges of the right size, `p.nodes`, the `main`s, and a group
+       order that is a permutation; it proves the Warshall loop computes the transitive closure),
+       `Ground.lean` (a grounding that sends each unsolved metavariable to its own fresh skolem makes
+       `generalize`'s scheme `Generalises`; the bound `B` is picked after the run from the finitely
+       many zonked types, so no skolem-range invariant on the state; closed environments do not
+       depend on the grounding), `LetSound.lean` (`GroupTy.letG`), `FnSound.lean` (`GroupTy.fnG`,
+       one `FnWit` per member in reverse member order, since `groupEnv` and `out` are consed),
+       `ProgramSound.lean` (the `Groups` walk and `MainOk`). Three changes outside the proofs:
+       `Ty`'s derived `BEq` is an opaque constant (a nested inductive), so `Syntax.lean` now
+       writes it out and proves it lawful, which `genSlot` and the `main` signature test need;
+       `preludeEnv` holds `print_str` as `.fnPoly 1 0 …`, so `Env.app` gives `Ctx.prelude` (the
+       oracle's verdict dumps are byte-identical; a call of `print_str` with two or more
+       arguments now rejects with key `arity`, not `mismatch`); and the judgment: `Ty.elab`
+       refused an `!{IO}` arrow whose elaborated result is an arrow, but the checker and the
+       compiler accept `let f : a -> a !{IO} = \(h: Int -> Int) -> h`, where the initialiser makes
+       `a` an arrow. Spec §7 rule 9 is a rule about spelling, so `Ty.elab` now refuses on the
+       written result (`okLetAnnIO_typed` is the regression test). Stage 1b is complete.
      Prior art: Algorithm W's soundness in Isabelle (Naraschewski and Nipkow, JAR 1999 [10]). Its
      hard part was the fresh-variable invariant, which is what the well-formedness invariants are
      for.

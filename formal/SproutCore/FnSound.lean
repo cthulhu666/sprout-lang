@@ -13,7 +13,7 @@ scheme (the complete signature's, or what `generalize` built).
   skolem-freeness; `ParamsTy` is functional and commutes with instantiation for written parameters.
 * Leaf lemmas: `skolemLoop_sound`, `build_sound`, `scheme_sound`, `checkBody_sound`.
 * `MemInv` is what the first loop knows of a member, `BodyOK` what the second types, `OutRel` what
-  the third records. `member_wit` builds one witness, `witnesses` the list, `group_assemble` the
+  the third records. `member_wit` builds one witness, `fnWitnesses` the list, `group_assemble` the
   `GroupTy`.
 -/
 
@@ -354,7 +354,6 @@ theorem build_sound {Q : List Ty × Ty × Eff × Ty → CState → Prop} {s : CS
       · intro θ hθ
         rw [List.map_append]
         refine ParamsTy.snoc (hP1 θ hθ) x (some t0) _ ?_
-        simp only [List.map_cons, List.map_nil]
         rw [Ty.app_of_ok_gen θ p hokp]
         exact hel
       · intro hw
@@ -379,7 +378,6 @@ theorem build_sound {Q : List Ty × Ty × Eff × Ty → CState → Prop} {s : CS
       · intro θ hθ
         rw [List.map_append]
         refine ParamsTy.snoc (hP1 θ (hθ.back e2)) x none _ ?_
-        simp only [List.map_cons, List.map_nil]
         exact hθ.solved j
       · intro hw
         have := hw (x, none) (List.mem_append_right _ (List.mem_singleton_self _))
@@ -452,7 +450,7 @@ theorem gmap_props (f : FnInfo) (sz : Nat) :
   all_goals first
     | rfl
     | (have := (List.findIdx?_eq_some_iff_findIdx_eq.mp hi).1
-       simp [Ty.isArr, Ty.NF, namedIn, Ty.ok, Ty.noSk, this])
+       simp [Ty.ok, this])
     | simp [Ty.NF, namedIn, Ty.ok, Ty.noSk, Ty.isArr]
 
 theorem scheme_sound {Q : Nat × Ty → CState → Prop} {s : CState} {f : FnInfo} (hs : s.WF)
@@ -882,7 +880,7 @@ theorem member_wit {s : CState} {θ : Nat → Ty} {B : Nat} {E : Env} (hθ : Sol
     · show Ty.app θ b.t = _
       rw [mem.t_eq, Ty.app_mkArr]
 
-theorem witnesses {s : CState} {θ : Nat → Ty} {B : Nat} {E : Env} (hθ : Solves θ s) :
+theorem fnWitnesses {s : CState} {θ : Nat → Ty} {B : Nat} {E : Env} (hθ : Solves θ s) :
     ∀ (bs : List BuiltT) (sksL : List (List (String × Ty))) (outS : List (Nat × Ty × Option Ty)),
     All2 (MemInv s) bs sksL → All2 (OutRel s) bs outS →
     (sksL.flatMap fun l => l.map Prod.snd).Nodup → (∀ b ∈ bs, BodyOK θ E b) →
@@ -951,7 +949,7 @@ theorem group_assemble {s : CState} {base : Env} {bs : List BuiltT}
       GroupTy (Env.app θ base) ((bs.map BuiltT.f).reverse.map FnInfo.toDecl)
         (Env.app θ (((bs.zip outS).map fun p => outEntry p.1 p.2).reverse ++ base)) := by
   intro B hB θ hθ hm
-  obtain ⟨ws, e1, e2, e3, g1, g2, g3, g4⟩ := witnesses (B := B) (E := genv ++ base) hθ bs sksL outS
+  obtain ⟨ws, e1, e2, e3, g1, g2, g3, g4⟩ := fnWitnesses (B := B) (E := genv ++ base) hθ bs sksL outS
     hall hout hnd (fun b hb => hbody b hb θ hθ)
     (fun o ho zt hz => ⟨hB zt (List.mem_filterMap.mpr ⟨o, ho, hz⟩),
       hm zt (List.mem_filterMap.mpr ⟨o, ho, hz⟩)⟩)

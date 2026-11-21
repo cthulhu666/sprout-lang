@@ -347,7 +347,7 @@ def isLam : Expr → Bool
   | _ => false
 
 /-- The prelude name the stage-1 fragment can reach. -/
-def preludeEnv : Env := [("print_str", .poly 0 (.arr [.str] .unit .io))]
+def preludeEnv : Env := [("print_str", .fnPoly 1 0 (.arr [.str] .unit .io))]
 
 /-- Bind a local `let`. -/
 def bindLocal (rules : Rules) (env : Env) (x : String) (t : Ty) : M Env := do

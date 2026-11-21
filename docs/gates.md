@@ -1450,7 +1450,9 @@ PATH. It installs on first use, so nothing changes for a contributor who never t
   that solves the final state turns a run of `infer` into a `HasType` derivation; its corollary
   `infer_sound_exists` adds `exists_solves` (`SolvesExists.lean`), so an accepted expression has
   some `θ` with a derivation. The start state and environment must be named-free (`CState.NF`,
-  `Env.NF`), and `infer` keeps them so.
+  `Env.NF`), and `infer` keeps them so. `formal/SproutCore/ProgramSound.lean` proves
+  `checkProgram_sound` (`p.Surf → checkProgram {} p fuel = .ok () → p.Typed`), T2 for programs;
+  its layers are `PlanInv`, `Ground`, `LetSound` and `FnSound`.
 - Spec snapshot: `formal/spec-snapshot/` holds spec §5.1–5.5, the intro of §5.6 (up to
   `### 5.6.1`), §5.8, §7 and §10.10, cut by heading (`scripts/lean_spec_snapshot.py`). Any change
   to them fails `lean-model` until the model has been re-checked against the new text and
