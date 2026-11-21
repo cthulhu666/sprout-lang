@@ -116,24 +116,14 @@ theorem Groups.snoc_perm {Γ0 Γ1 Γ2 : Ctx} {ds g' gd : List Decl} (h : Groups 
     rw [← List.append_assoc]
     exact hperm.append_right gd
 
-theorem exists_skLt_forall (zts : List Ty) : ∃ B, ∀ zt ∈ zts, zt.SkLt B := by
-  induction zts with
-  | nil => exact ⟨0, by simp⟩
-  | cons z zs ih =>
-    obtain ⟨B1, hB1⟩ := Ty.exists_skLt z
-    obtain ⟨B2, hB2⟩ := ih
-    refine ⟨max B1 B2, fun zt hzt => ?_⟩
-    rcases List.mem_cons.mp hzt with rfl | hzt
-    · exact hB1.mono (Nat.le_max_left _ _)
-    · exact (hB2 zt hzt).mono (Nat.le_max_right _ _)
-
 /-- Pick the grounding: some `θ` solves the state and sends each unsolved variable of the zonked
 types to its own skolem above `B`. -/
 theorem pick_grounding {s : CState} (hs : s.WF) (hnf : s.NF) {zts : List Ty}
     (hu : ∀ zt ∈ zts, ∀ m ∈ metasOf zt, s.Unbound m) {P : (Nat → Ty) → Prop}
     (hz : ∀ B, (∀ zt ∈ zts, zt.SkLt B) → ∀ θ, Solves θ s →
       (∀ zt ∈ zts, ∀ m ∈ metasOf zt, θ m = .skolem (B + m)) → P θ) : ∃ θ, P θ := by
-  obtain ⟨B, hB⟩ := exists_skLt_forall zts
+  obtain ⟨B, hB0⟩ := Ty.exists_skLt_list (Ty.skOfList zts)
+  have hB : ∀ zt ∈ zts, zt.SkLt B := fun zt hzt k hk => hB0 k (mem_skOfList.mpr ⟨zt, hzt, hk⟩)
   obtain ⟨θ, hθ, hfresh⟩ := exists_solves_with hs hnf (fun m => .skolem (B + m)) (fun _ => rfl)
   exact ⟨θ, hz B hB θ hθ (fun zt hzt m hm => hfresh m (hu zt hzt m hm))⟩
 
@@ -149,28 +139,11 @@ theorem Plan.declAt_mem {p : Program} {pl : Plan} (hinv : Plan.Inv p pl) {i : Na
   rw [hinv.nodes_eq] at hmem
   exact (List.mem_filter.mp hmem).1
 
-theorem only_fnN : ∀ ms : List Node,
+/-- A node list whose `fn` nodes are all of it is a list of `fnN`. -/
+theorem exists_fnN : ∀ ms : List Node,
     (ms.filterMap (fun nd => match nd with | Node.fnN f => some f | _ => none)).length =
-      ms.length → ∀ nd ∈ ms, ∃ f, nd = Node.fnN f
-  | [], _, nd, h => by simp at h
-  | nd0 :: rest, hl, nd, h => by
-    cases nd0 with
-    | letN nm a i =>
-      simp only [List.filterMap_cons, List.length_cons] at hl
-      have := List.length_filterMap_le (fun nd => match nd with | Node.fnN f => some f | _ => none) rest
-      omega
-    | fnN f =>
-      simp only [List.filterMap_cons, List.length_cons, Nat.add_right_cancel_iff] at hl
-      rcases List.mem_cons.mp h with rfl | h
-      · exact ⟨f, rfl⟩
-      · exact only_fnN rest hl nd h
-
-theorem fnN_decls : ∀ ms : List Node,
-    (ms.filterMap (fun nd => match nd with | Node.fnN f => some f | _ => none)).length =
-      ms.length →
-    (ms.filterMap (fun nd => match nd with | Node.fnN f => some f | _ => none)).map FnInfo.toDecl =
-      ms.map Node.toDecl
-  | [], _ => rfl
+      ms.length → ∃ fs : List FnInfo, ms = fs.map Node.fnN
+  | [], _ => ⟨[], rfl⟩
   | nd0 :: rest, hl => by
     cases nd0 with
     | letN nm a i =>
@@ -179,8 +152,8 @@ theorem fnN_decls : ∀ ms : List Node,
       omega
     | fnN f =>
       simp only [List.filterMap_cons, List.length_cons, Nat.add_right_cancel_iff] at hl
-      simp only [List.filterMap_cons, List.map_cons, fnN_decls rest hl]
-      rfl
+      obtain ⟨fs, rfl⟩ := exists_fnN rest hl
+      exact ⟨f :: fs, rfl⟩
 
 theorem Judgment.Groups.perm {Γ Γ' : Ctx} {ds ds' : List Decl} (h : Groups Γ ds Γ') (hp : ds.Perm ds') :
     Groups Γ ds' Γ' := by
@@ -258,7 +231,6 @@ theorem runPlan_sound {p : Program} {pl : Plan} (hinv : Plan.Inv p pl) (hp : p.S
         · rename_i hlen'
           simp only [bne_iff_ne, ne_eq, Decidable.not_not] at hlen'
           have hlen := hlen'
-          have hall := only_fnN _ hlen
           have hne : (List.filterMap (fun nd => match nd with | Node.fnN f => some f | _ => none)
               (List.map (fun i => pl.nodes[i]?.getD default) g)) ≠ [] := by
             intro h0
@@ -294,7 +266,12 @@ theorem runPlan_sound {p : Program} {pl : Plan} (hinv : Plan.Inv p pl) (hp : p.S
               (List.map (fun i => pl.nodes[i]?.getD default) g)).reverse) := by
             rw [List.map_reverse]
             refine List.Perm.trans ?_ (List.reverse_perm _).symm
-            rw [fnN_decls _ hlen, List.map_map]
+            obtain ⟨fs, hfs⟩ := exists_fnN _ hlen
+            have hd : g.map pl.declAt =
+                (List.map (fun i => pl.nodes[i]?.getD default) g).map Node.toDecl := by
+              rw [List.map_map]; rfl
+            rw [hd, hfs]
+            simp only [List.filterMap_map, Function.comp_def, List.filterMap_some, List.map_map]
             exact List.Perm.refl _
           have := Groups.snoc_perm hgr hθg hperm
           simpa [List.flatMap_append] using this
