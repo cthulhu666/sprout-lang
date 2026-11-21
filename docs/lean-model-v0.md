@@ -267,14 +267,11 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
        (rules), `JudgmentLemmas.lean` and `JudgmentExamples.lean` (the proofs, each rejected
        program with an accepted twin, and the checker's verdict on all of them). Rule 15's
        `x + 1` example needs `+`, which Core lacks, so `fn f(x: a) -> Int = x` stands in. The
-       judgment departs from the checker in two places, both `BACKLOG.md` entries against the
-       checker: a signature's `!{IO}` on a function-typed result (rule 9) and the arity of
-       `print_str`.
+       judgment departs from the checker in one place, a `BACKLOG.md` entry against the checker:
+       a signature's `!{IO}` on a function-typed result (rule 9).
      - **Provable checker.** Every `partial def` becomes total: termination proofs for the
        structural ones, a fuel argument (not in `CState`, which `try` rolls back) for `shallow`,
-       `zonk`, `flow`, `joinTy` and `peel`. It also gives `print_str` its declared arity: the
-       checker accepts `print_str()`, the judgment does not, so T2 is false until then
-       (`BACKLOG.md`). The `for` loops in `infer` become recursive helpers,
+       `zonk`, `flow`, `joinTy` and `peel`. The `for` loops in `infer` become recursive helpers,
        arrows get one canonical form (`zonk` reshapes them through `mkArr` today), and
        well-formedness invariants on the state and the environment back every `!` accessor.
        Running out of fuel is never a verdict: `expectBool` passes it through instead of turning
