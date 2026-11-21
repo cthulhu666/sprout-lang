@@ -1402,8 +1402,13 @@ PATH. It installs on first use, so nothing changes for a contributor who never t
 - `just lean-model`: `lake -d formal build` (which also runs the `#guard` regressions of
   `formal/SproutCore/Tests.lean` and builds the typing judgment, `Judgment.lean`, with its proofs
   in `JudgmentLemmas.lean` and `JudgmentExamples.lean`), then fails on a `sorry` in
-  `formal/SproutCore`, and first on a stale spec snapshot (below). The axiom check waits for the
-  provable-checker step of 1b.
+  `formal/SproutCore`, then runs the axiom check, and first fails on a stale spec snapshot
+  (below). The axiom check, `formal/AxiomCheck.lean` (`lake exe axiom-check --src formal`), imports
+  `SproutCore`, takes the package's modules from the environment, and runs `Lean.collectAxioms` on
+  every theorem and definition in them. It fails on any axiom outside `propext`,
+  `Classical.choice` and `Quot.sound`: a `sorry` is `sorryAx`, a `native_decide` is a
+  `…native_decide.ax_*` axiom. It also fails on a source file under `formal/SproutCore` that no
+  import reaches, and on a package with no theorem.
 - `just lean-oracle [N]`: N programs (default 500, seed 20261117, override with `LEAN_ORACLE_SEED`)
   from the Lean generator, each printed to a `.spr` and checked by both the model and
   `build/compile_driver_bin_stage1 --phase check`. Fails on a disagreement whose shape is not in
@@ -1418,8 +1423,18 @@ PATH. It installs on first use, so nothing changes for a contributor who never t
 - `just test-lean-oracle`: a model with the local-`let` rule removed must disagree with the
   compiler, a printer with a planted bug must give a harness error and not a disagreement, small
   runs with other seeds must pass, an allowlist entry whose witness does not disagree must fail
-  the run, and the snapshot check must fail on a doctored section and on a rule tag citing a
-  section it does not hold.
+  the run, a model with a fuel budget of 1 (`--plant low-fuel`) must give fuel harness errors and
+  no verdict or disagreement from one, the axiom check must fail on a planted `sorry`,
+  `native_decide`, declared axiom and unimported source file and pass a clean theorem, and the
+  snapshot check must fail on a doctored section and on a rule tag citing a section it does not
+  hold.
+- Fuel: the checker's walks over metavariable bindings (`shallow`, `zonk`, `flow`, `joinTy`,
+  `peel`) take a depth budget (`defaultFuel`, 10000, a reader of the checker's monad; `--fuel N`
+  on the oracle). Running out is `CErr.fuel`, never a verdict: `expectBool` re-throws it, the oracle
+  reports it as a harness error (`HARNESS ERROR … fuel`), and `Tests.lean`'s `accepts` and
+  `rejects` are both false on it. The oracle's `--dump-verdicts <file>` writes one line per
+  program (`<seed> <model verdict> <compiler verdict>`), to diff verdicts, not counts, across a
+  checker change.
 - Spec snapshot: `formal/spec-snapshot/` holds spec §5.1–5.5, the intro of §5.6 (up to
   `### 5.6.1`), §5.8, §7 and §10.10, cut by heading (`scripts/lean_spec_snapshot.py`). Any change
   to them fails `lean-model` until the model has been re-checked against the new text and

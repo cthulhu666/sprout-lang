@@ -889,8 +889,9 @@ lean-spec-snapshot:
 lean-spec-snapshot-check:
   python3 scripts/lean_spec_snapshot.py --check
 
-# Stage 1a has no theorems, so the axiom check of docs/lean-model-v0.md §7 waits for stage 1b.
-# Build formal/; fail on an unfinished proof (a `sorry`) in formal/SproutCore or a stale spec snapshot.
+# Build formal/; fail on an unfinished proof (a `sorry`) in formal/SproutCore, on a constant of the
+# package resting on an axiom beyond Lean's three (formal/AxiomCheck.lean, docs/lean-model-v0.md §7)
+# and on a stale spec snapshot.
 [group('lean')]
 lean-model: lean-spec-snapshot-check
   #!/usr/bin/env bash
@@ -900,7 +901,8 @@ lean-model: lean-spec-snapshot-check
     echo "lean-model: unfinished proof left in formal/SproutCore" >&2
     exit 1
   fi
-  echo "==> lean-model ✓ — formal/ builds, 0 sorry, spec snapshot current"
+  {{lake}} -d formal exe axiom-check --src formal
+  echo "==> lean-model ✓ — formal/ builds, 0 sorry, standard axioms only, spec snapshot current"
 
 # Fixed seed; override with LEAN_ORACLE_SEED. Shrunk programs go to build/lean-oracle/.
 # Fails on a disagreement outside formal/oracle/ALLOWLIST, a harness error, or an allowlist entry
@@ -918,14 +920,16 @@ lean-oracle n="500": bootstrap-from-seed
 
 # A model with one rule removed must disagree with the compiler, a printer with a planted bug must
 # give a harness error and not a disagreement, a small run must pass, an allowlist entry whose
-# witness does not disagree (or that has none) must fail the run, and the snapshot check must
+# witness does not disagree (or that has none) must fail the run, a model run cut off by low fuel
+# must be a harness error and never a verdict, the axiom check must fail on a `sorry`, a
+# `native_decide` and a declared axiom (and pass a clean theorem), and the snapshot check must
 # notice a changed section and an uncovered rule tag.
 # Self-test of the Lean oracle, as `test-review-gate` tests its hook.
 [group('test')]
 test-lean-oracle: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  {{lake}} -d formal build sprout-oracle
+  {{lake}} -d formal build sprout-oracle axiom-check
   D=$(mktemp -d /tmp/sprout_lean_oracle_XXXXXX); trap 'rm -rf "$D"' EXIT
   O=formal/.lake/build/bin/sprout-oracle
   COMMON=(--driver "{{build_dir}}/compile_driver_bin_stage1" --stdlib "{{stdlib_root}}" --out "$D/out"
@@ -954,6 +958,31 @@ test-lean-oracle: bootstrap-from-seed
     echo "test-lean-oracle: an allowlist entry without a witness did not fail the run" >&2; exit 1
   fi
   grep -q 'no witness' <<<"$out" || { echo "$out" >&2; echo "test-lean-oracle: no missing-witness report" >&2; exit 1; }
+  echo "== axiom check: a planted sorry, native_decide and axiom fail; a clean theorem passes =="
+  mkdir -p "$D/ax"
+  printf 'theorem planted : 1 = 2 := sorry\n' > "$D/ax/PlantedSorry.lean"
+  printf 'theorem planted : 2 + 2 = 4 := by native_decide\n' > "$D/ax/PlantedNative.lean"
+  printf 'axiom plantedAx : False\ntheorem planted : 1 = 2 := plantedAx.elim\n' > "$D/ax/PlantedAxiom.lean"
+  printf 'theorem planted (a b : Nat) : a + b = b + a := Nat.add_comm a b\n' > "$D/ax/PlantedClean.lean"
+  for m in PlantedSorry PlantedNative PlantedAxiom PlantedClean; do
+    {{lake}} -d formal env lean --root="$D/ax" -o "$D/ax/$m.olean" "$D/ax/$m.lean" >/dev/null 2>&1
+  done
+  AX=({{lake}} -d formal exe axiom-check --lib-path "$D/ax")
+  # 4.35 routes `native_decide` through a per-use axiom named `<decl>._native.native_decide.ax_*`
+  for pair in PlantedSorry:sorryAx PlantedNative:native_decide PlantedAxiom:plantedAx; do
+    if out=$("${AX[@]}" "${pair%%:*}" 2>&1); then
+      echo "$out" >&2; echo "test-lean-oracle: the axiom check passed ${pair%%:*}" >&2; exit 1
+    fi
+    grep -q "${pair##*:}" <<<"$out" || { echo "$out" >&2; echo "test-lean-oracle: no report naming ${pair##*:}" >&2; exit 1; }
+  done
+  "${AX[@]}" PlantedClean | tail -n 1
+  echo "== axiom check: a source file no import reaches fails =="
+  mkdir -p "$D/src/SproutCore"
+  printf 'theorem orphan : True := trivial\n' > "$D/src/SproutCore/Orphan.lean"
+  if out=$({{lake}} -d formal exe axiom-check --src "$D/src" 2>&1); then
+    echo "$out" >&2; echo "test-lean-oracle: the axiom check missed an unimported module" >&2; exit 1
+  fi
+  grep -q 'SproutCore.Orphan' <<<"$out" || { echo "$out" >&2; echo "test-lean-oracle: no report naming Orphan" >&2; exit 1; }
   echo "== snapshot check notices a change =="
   LEAN_SNAPSHOT_DIR="$D/snap" python3 scripts/lean_spec_snapshot.py --write
   LEAN_SNAPSHOT_DIR="$D/snap" python3 scripts/lean_spec_snapshot.py --check

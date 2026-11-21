@@ -23,7 +23,7 @@ structure Cfg where
   plant : String := ""
   /-- The model's fuel budget per `shallow`/`zonk`/`flow`/`joinTy`/`peel` call. -/
   fuel : Nat := defaultFuel
-  /-- `disagreement`, `harness-error` or `fuel-error`: succeed only if the planted defect is seen. -/
+  /-- `disagreement`, `harness-error` or `fuel-error`: succeed only if the planted defect shows. -/
   expect : String := ""
   /-- With `--expect disagreement`: some new disagreement shape must contain this text. -/
   expectShape : String := ""
@@ -268,7 +268,7 @@ def main (args : List String) : IO UInt32 := do
     if nFuel > 0 && harness.length == nFuel && bad.isEmpty then
       IO.println s!"self-test ok: {nFuel} runs ran out of fuel, none gave a verdict"
       return 0
-    IO.println "self-test FAILED: expected fuel harness errors, no verdict from one, no disagreement"
+    IO.println "self-test FAILED: expected fuel harness errors, no verdict from a fuel-out"
     return 1
   | _ =>
     for st in stale do
