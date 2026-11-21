@@ -21,7 +21,9 @@ Why it exists, and the history of the ensemble it replaced: `README.md` beside t
 This invocation's arguments, verbatim (empty when none were given): `$ARGUMENTS`
 
 - **Level:** the first token, if it names a level. `med` means `medium`.
-- A first token that looks like a level but is not (`higher`, `mid`, `maximum`): say so and stop.
+- A first token that is a number or contains `/`, `.` or `-` is a target. Any other token that
+  is not a level but starts with one, or is `mid` (`higher`, `maximum`), is a misspelt level: say
+  so and stop. A branch like `lowercase` needs the level first: `/sprout-review high lowercase`.
 - `ultra`: say so and stop. It is a billed cloud review, and the ledger stores only five levels.
 - `--fix`: say so and stop. This skill reports; it does not fix.
 - `--max-findings`: say so and stop. It is sticky inside `/code-review`, so it would make later
@@ -74,11 +76,12 @@ Validate all of this before the ledger row exists.
    `bash <root>/scripts/review_ledger.sh items <run-id> --write < <file>`. One object per grouped
    issue, with the keys `validate_items` in `scripts/review_ledger.sh` checks: `ns`,
    `track`, `severity`, `verdict`, `file`, `line`, `summary`, `decision`. Mapping:
-   - `track`: from `category` when present: `cleanup` for reuse, simplification, efficiency or
-     altitude, `bug` for anything else. `/code-review high` returns none, so the reporter assigns
+   - `track`: from `category` when present: `cleanup` for reuse, simplification, efficiency,
+     altitude or conventions, `bug` for anything else. Without `CLAUDE_CODE_REPORT_FINDINGS`
+     `/code-review` returns no category at any level, so the reporter assigns
      it from `failure_scenario`: `bug` when the code does the wrong thing (wrong output, crash, lost
      data, a check that cannot fail); `cleanup` when it works but costs duplication, needless
-     complexity, wasted work, or a stale comment or doc.
+     complexity, wasted work, a stale comment or doc, or a broken style rule (`conventions`).
    - **Performance**, either way: a cost that grows with input (worse complexity, unbounded memory,
      what a cost gate would catch) is `bug`; a constant-factor waste is `cleanup`. This overrides
      `category: efficiency`.
