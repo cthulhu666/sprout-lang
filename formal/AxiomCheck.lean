@@ -7,8 +7,9 @@ docs/lean-model-v0.md §7. Imports a root module (default `SproutCore`) and walk
 declared in a module of its package, the modules being those the environment lists under the
 root's first name component, so a theorem cannot escape by sitting in a file a hand-kept list
 forgot. Every theorem, definition, opaque and axiom is traced to the axioms it rests on. An
-unfinished proof is `sorryAx`, a `native_decide` is `Lean.ofReduceBool`: both fail. A source file
-under `--src` that no import reaches fails too: its theorems would not be checked.
+unfinished proof is `sorryAx`; under Lean 4.35 each `native_decide` is a per-use axiom named
+`<decl>._native.native_decide.ax_*`: both fail. A source file under `--src` that no import
+reaches fails too: its theorems would not be checked. Exit 2 is a usage or setup error.
 
 The import loads constants only (`loadExts := false`), so no imported `initialize` runs. Running
 them would need `enableInitializersExecution` and, on Linux, an executable that exports the Lean
@@ -38,13 +39,11 @@ def parseArgs : List String → Cfg → Except String Cfg
     else parseArgs r { c with root := a.toName }
 
 /-- The modules a source tree `<src>/<Root>/**.lean` defines. -/
-partial def sourceModules (dir : System.FilePath) (m : Name) : IO (List Name) := do
+def sourceModules (src : System.FilePath) (pkg : Name) : IO (List Name) := do
   let mut out := []
-  for e in (← dir.readDir) do
-    if (← e.path.isDir) then
-      out := out ++ (← sourceModules e.path (m.str e.fileName))
-    else if e.path.extension == some "lean" then
-      out := out ++ [m.str (e.path.fileStem.getD "")]
+  for f in ← (src / pkg.toString).walkDir do
+    if f.extension == some "lean" && !(← f.isDir) then
+      out := out ++ [← moduleNameOfFileName f (some src)]
   return out
 
 /-- The walk's state: the axiom sets known to be complete, and the constants being visited with
@@ -90,6 +89,10 @@ def main (args : List String) : IO UInt32 := do
     | .ok c => pure c
     | .error e => do IO.eprintln e; return 2
   let pkg := cfg.root.getRoot
+  if let some src := cfg.src then
+    unless ← (src / pkg.toString).isDir do
+      IO.eprintln s!"axiom-check: --src {src}: no directory {src / pkg.toString}"
+      return 2
   initSearchPath (← findSysroot) cfg.libPaths
   let env ← importModules #[{ module := cfg.root }] {}
   -- the private view, so that every body is visible
@@ -99,12 +102,10 @@ def main (args : List String) : IO UInt32 := do
   let mods := pkgIdxs.map (env.header.moduleNames[·]!)
   let mut failed := false
   if let some src := cfg.src then
-    let dir := src / pkg.toString
-    if ← dir.pathExists then
-      for m in ← sourceModules dir pkg do
-        unless mods.contains m do
-          IO.println s!"axiom-check: {m} is not imported by {cfg.root}, so its theorems escape"
-          failed := true
+    for m in ← sourceModules src pkg do
+      unless mods.contains m do
+        IO.println s!"axiom-check: {m} is not imported by {cfg.root}, so its theorems escape"
+        failed := true
   let mut nThm := 0
   let mut nDef := 0
   let mut used : NameSet := {}
