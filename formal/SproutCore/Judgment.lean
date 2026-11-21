@@ -274,7 +274,8 @@ because the count is checked at run time (spec §5.3). More arguments continue i
 list"). Zero arguments to any other arrow is no call: spec §7 rule 9 makes `() -> T` the only type
 taking zero arguments, so the run-time count check of §5.3 can never pass. The spec does not say
 this is a compile error; the compiler rejects it ("requires arguments but was called with none")
-and so do the checker and this rule (BACKLOG, "The spec does not say a zero-argument call …"). -/
+and so do the checker and this rule (BACKLOG, "The spec does not say a zero-argument call of a
+non-`()` arrow value is an error"). -/
 inductive Peel : Ty → Nat → List Ty → Ty → Eff → Prop
   -- spec §5.3: a call saturates the arrow and performs its effect
   | exact (ps : List Ty) (r : Ty) (e : Eff) : Peel (.arr ps r e) ps.length ps r e
@@ -402,8 +403,8 @@ performs when called with its declared parameters. Omitted: the function is pure
 type is "one type" (rule 16). Written `-> T !{IO}`: `!{IO}` is the function's own effect, unless
 `T` is a function type; then spec §7 rule 9 puts it on `T`'s innermost arrow (`-> A -> B !{IO}` is
 `A -> B !{IO}` returned by a pure call), and the call itself is pure. The checker rejects that
-second form (`Check.FnInfo.build`) and the compiler accepts it (BACKLOG, "Lean model rejects
-`-> A -> B !{IO}`"); the judgment follows the spec. -/
+second form (`Check.FnInfo.build`) and the compiler accepts it (BACKLOG, "The Lean checker rejects
+`fn f(x: Int) -> Int -> Int !{IO}`"); the judgment follows the spec. -/
 inductive RetTy (σ : String → Ty) : Option (Ty × Eff) → Ty → Eff → Prop
   | written (a r : Ty) (e : Eff) :
       a.elab σ = some r → ¬ (r.isArr = true ∧ e = .io) → RetTy σ (some (a, e)) r e
