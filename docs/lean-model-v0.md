@@ -255,35 +255,30 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
      as IO at its other uses, and a peer join of a nested join with an `!{IO}` function is
      order-dependent. The spec gaps and compiler bugs are `BACKLOG.md` entries.
    - **1b: T2**, inference soundness, and the axiom check of §7. One PR per step, in this order:
-     - **Judgment (landed).** An inductive `HasType` over solved types (no metavariables; a scheme
-       is `∀n.` over `.gen`; a written variable is rigid), one rule per construct, effect
-       subsumption only where rule 8 puts it. The program level is existential: some partition
-       into groups and some order, each group typed monomorphically and then generalised (rule 16).
-       That is weaker than rule 16's *minimal* groups; the declaration-order rejects stay outside,
-       since they only remove accepts. It lands with proofs that it **rejects** the spec's own bad
-       examples: rule 15's three, a generalised local `let`, `() -> T` against `Unit -> T`, an
-       `!{IO}` value in a pure slot. Without them a permissive judgment makes T2 empty. Gaps in
-       the spec text go to `BACKLOG.md`. No checker change. In `formal/SproutCore/Judgment.lean`
-       (rules), `JudgmentLemmas.lean` and `JudgmentExamples.lean` (the proofs, each rejected
-       program with an accepted twin, and the checker's verdict on all of them). Rule 15's
-       `x + 1` example needs `+`, which Core lacks, so `fn f(x: a) -> Int = x` stands in. The
-       judgment departs from the checker in one place, a `BACKLOG.md` entry against the checker:
-       a signature's `!{IO}` on a function-typed result (rule 9).
-     - **Provable checker (landed).** Every `partial def` becomes total: termination proofs for the
-       structural ones, a fuel argument (not in `CState`, which `try` rolls back) for `shallow`,
-       `zonk`, `flow`, `joinTy` and `peel`. The `for` loops in `infer` become recursive helpers,
-       arrows get one canonical form (`zonk` reshapes them through `mkArr` today), and
-       well-formedness invariants on the state and the environment back every `!` accessor.
-       Running out of fuel is never a verdict: `expectBool` passes it through instead of turning
-       it into a reject, the oracle and `Tests.lean` report it as a harness error, and
-       `test-lean-oracle` plants it. A theorem shows more fuel never changes a verdict, and the
-       oracle's per-program verdicts are diffed before and after, not its counts. The axiom
-       check lands here, as an executable that walks every module in the package and fails on an
-       axiom outside the three, with a planted-`sorry` self-test; the fuel theorem is its first
-       subject. In `formal/`: the total checker in `SproutCore/Check.lean`, the fuel theorem in
-       `CheckFuel.lean`, the invariants (`CState.WF`, `Env.WF`, `Expr.Src`), their preservation by
-       every state-touching function and `Ty.Canon` in `CheckWF.lean`, the axiom check in
-       `AxiomCheck.lean`.
+     - ~~**Judgment.**~~ Landed. `formal/SproutCore/Judgment.lean` is an inductive `HasType` over
+       solved types (no metavariables; a scheme is `∀n.` over `.gen`; a written variable is
+       rigid), one rule per construct, effect subsumption only where rule 8 puts it. The program
+       level is existential: some partition into groups and some order, each group typed
+       monomorphically and then generalised (rule 16). That is weaker than rule 16's *minimal*
+       groups, and the declaration-order rejects stay outside it, since they only remove accepts.
+       `JudgmentLemmas.lean` and `JudgmentExamples.lean` prove it **rejects** the spec's own bad
+       examples (rule 15's three, a generalised local `let`, `() -> T` against `Unit -> T`, an
+       `!{IO}` value in a pure slot), each with an accepted twin and the checker's verdict on
+       both. Rule 15's `x + 1` example needs `+`, which Core lacks, so `fn f(x: a) -> Int = x`
+       stands in. The judgment departs from the checker in one place, a `BACKLOG.md` entry
+       against the checker: a signature's `!{IO}` on a function-typed result (rule 9).
+     - ~~**Provable checker.**~~ Landed. `SproutCore/Check.lean` is total: structural recursion
+       or a fuel argument (a reader of the checker's monad, not in `CState`, which `try` rolls
+       back) for `shallow`, `zonk`, `flow`, `joinTy` and `peel`; arrows have one canonical form;
+       `CheckFuel.lean` proves `checkProgram_fuel_mono` (more fuel never changes a verdict);
+       `CheckWF.lean` proves the invariants (`CState.WF`, `Env.WF`, `Expr.Src`), their
+       preservation by every state-touching function, and `Ty.Canon`. Running out of fuel is
+       never a verdict: `expectBool` passes it through, the oracle and `Tests.lean` report it as
+       a harness error, `test-lean-oracle` plants it, and the oracle's per-program verdicts were
+       diffed before and after, not its counts. The axiom check is `formal/AxiomCheck.lean`
+       (§7). The plan code reads arrays by total functions; an index out of range where it picks
+       a node or an edge list is an `internal` rejection, not a default node. 3b needs the
+       index invariants proved (below).
      - **3a.** `infer` is sound: under a well-formed state and environment, its result, with the
        final substitution applied, is derivable. Instantiation and effects are included; they
        cannot be split off.

@@ -1404,11 +1404,15 @@ PATH. It installs on first use, so nothing changes for a contributor who never t
   in `JudgmentLemmas.lean` and `JudgmentExamples.lean`), then fails on a `sorry` in
   `formal/SproutCore`, then runs the axiom check, and first fails on a stale spec snapshot
   (below). The axiom check, `formal/AxiomCheck.lean` (`lake exe axiom-check --src formal`), imports
-  `SproutCore`, takes the package's modules from the environment, and runs `Lean.collectAxioms` on
-  every theorem and definition in them. It fails on any axiom outside `propext`,
+  `SproutCore` (constants only, `loadExts := false`: no imported `initialize` runs, which needs
+  `supportInterpreter` on Linux), takes the package's modules from the environment, and traces
+  every theorem and definition in them to its axioms with one shared walk (`Lean.collectAxioms`
+  without the olean-cached sets, which under-report for mutual-recursion cycles). It fails on any
+  axiom outside `propext`,
   `Classical.choice` and `Quot.sound`: a `sorry` is `sorryAx`, a `native_decide` is a
   `…native_decide.ax_*` axiom. It also fails on a source file under `formal/SproutCore` that no
-  import reaches, and on a package with no theorem.
+  import reaches, and on a package with no theorem. A `--src` with no `<Root>` directory is a
+  setup error (exit 2).
 - `just lean-oracle [N]`: N programs (default 500, seed 20261117, override with `LEAN_ORACLE_SEED`)
   from the Lean generator, each printed to a `.spr` and checked by both the model and
   `build/compile_driver_bin_stage1 --phase check`. Fails on a disagreement whose shape is not in
@@ -1425,7 +1429,8 @@ PATH. It installs on first use, so nothing changes for a contributor who never t
   runs with other seeds must pass, an allowlist entry whose witness does not disagree must fail
   the run, a model with a fuel budget of 1 (`--plant low-fuel`) must give fuel harness errors and
   no verdict or disagreement from one, the axiom check must fail on a planted `sorry`,
-  `native_decide`, declared axiom and unimported source file and pass a clean theorem, and the
+  `native_decide`, declared axiom and unimported source file, exit 2 on a missing `--src`, and
+  pass a clean theorem, and the
   snapshot check must fail on a doctored section and on a rule tag citing a section it does not
   hold.
 - Fuel: the checker's walks over metavariable bindings (`shallow`, `zonk`, `flow`, `joinTy`,
