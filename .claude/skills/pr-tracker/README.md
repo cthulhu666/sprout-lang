@@ -38,8 +38,17 @@ In this repo Claude Code loads it as `pr-tracker@skills-dir` in a trusted checko
 Do not install `pr-tracker@sprout` here: an installed marketplace plugin wins over the
 `@skills-dir` copy by manifest name, so worktree edits would stop taking effect
 ([name conflicts](https://code.claude.com/docs/en/plugins/loading.md#name-conflicts)).
-In another repo: `/plugin marketplace add cthulhu666/sprout-lang`, then
-`/plugin install pr-tracker@sprout`. `plugin.json` has no `version`, so each commit is an update
+In another repo, from its checkout:
+
+```
+claude plugin marketplace add cthulhu666/sprout-lang --scope project \
+  --sparse .claude-plugin .claude/skills/pr-tracker
+claude plugin install pr-tracker@sprout --scope project
+```
+
+`plugin install` does not fetch a marketplace that is only declared in settings, so `add` comes
+first. `add` rewrites `.claude/settings.json` without `"autoUpdate": true`; put it back on the
+`sprout` entry and commit the file. `plugin.json` has no `version`, so each commit is an update
 ([omit `version`](https://code.claude.com/docs/en/plugins/host-marketplace#release-a-new-version):
 "users track your commits instead").
 `.claude-plugin/types/` is written on first load and is gitignored; `tsc -p` needs the plugin to
