@@ -114,9 +114,9 @@ theorem Ty.varsList_eq_namedInList : ∀ ts : List Ty, Ty.varsList ts = namedInL
 end
 
 mutual
-/-- A surface type read with an `ok` map is `ok`. -/
-theorem Ty.elab_ok {σ : String → Ty} (hσ : ∀ s, (σ s).ok 0 = true) :
-    ∀ (t r : Ty), t.elab σ = some r → r.ok 0 = true
+/-- A written type read with an `ok n` map is `ok n`. -/
+theorem Ty.elab_ok {n : Nat} {σ : String → Ty} (hσ : ∀ s, (σ s).ok n = true) :
+    ∀ (t r : Ty), t.elab σ = some r → r.ok n = true
   | .named s, r, h => by
     simp only [Ty.elab, Option.some.injEq] at h
     subst h; exact hσ s
@@ -143,8 +143,8 @@ theorem Ty.elab_ok {σ : String → Ty} (hσ : ∀ s, (σ s).ok 0 = true) :
         exact Ty.ok_mkArr (Ty.elabList_ok hσ ps ps' hps) (Ty.elab_ok hσ r0 r' hr')
     · cases h
 
-theorem Ty.elabList_ok {σ : String → Ty} (hσ : ∀ s, (σ s).ok 0 = true) :
-    ∀ (ts rs : List Ty), Ty.elabList σ ts = some rs → Ty.okList 0 rs = true
+theorem Ty.elabList_ok {n : Nat} {σ : String → Ty} (hσ : ∀ s, (σ s).ok n = true) :
+    ∀ (ts rs : List Ty), Ty.elabList σ ts = some rs → Ty.okList n rs = true
   | [], rs, h => by simp only [Ty.elabList, Option.some.injEq] at h; subst h; rfl
   | t :: ts, rs, h => by
     simp only [Ty.elabList] at h
