@@ -32,8 +32,6 @@ def Bind.app (θ : Nat → Ty) : Bind → Binding
 def Env.app (θ : Nat → Ty) (env : Env) : Ctx :=
   env.map fun p => (p.1, Bind.app θ p.2)
 
-theorem Env.app_nil (θ : Nat → Ty) : Env.app θ [] = [] := rfl
-
 theorem Env.app_cons (θ : Nat → Ty) (x : String) (b : Bind) (env : Env) :
     Env.app θ ((x, b) :: env) = (x, Bind.app θ b) :: Env.app θ env := rfl
 
@@ -90,11 +88,6 @@ def Step.SurfList : List Step → Prop
   | .letS _ r :: rest => r.Surf ∧ Step.SurfList rest
   | .exprS e :: rest => e.Surf ∧ Step.SurfList rest
 end
-
-theorem Ty.surfList_iff {ts : List Ty} : Ty.surfList ts = true ↔ ∀ t ∈ ts, t.surf = true := by
-  induction ts with
-  | nil => simp [Ty.surfList]
-  | cons t ts ih => simp [Ty.surfList, ih]
 
 /-! ### Reading written types -/
 

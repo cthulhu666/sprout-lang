@@ -336,14 +336,6 @@ theorem Solves.back {θ : Nat → Ty} {s1 s2 : CState} (h : Solves θ s2) (e : E
     Solves θ s1 :=
   ⟨fun n t hn => h.bound n t (e.2 n t hn), h.solved⟩
 
-theorem Solves.ground {θ : Nat → Ty} {s : CState} (h : Solves θ s) (n : Nat) :
-    Ty.Solved (θ n) := h.solved n
-
-/-- `Solves.back`, for a fact stated at the earlier state. -/
-theorem Ext.lift {s1 s2 : CState} {P : (Nat → Ty) → Prop} (e : Ext s1 s2)
-    (h : ∀ θ, Solves θ s1 → P θ) : ∀ θ, Solves θ s2 → P θ :=
-  fun θ hθ => h θ (hθ.back e)
-
 /-- Close a goal `Solves θ s_i` from `Solves θ s_n` and the chain of `Ext` facts in context. -/
 syntax "solves_close" : tactic
 macro_rules

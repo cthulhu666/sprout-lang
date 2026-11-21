@@ -218,7 +218,7 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
     intro θ hθ
     have hpl := hpeel θ (hθ.back (e3.trans e4))
     have hlen : args.length = ps.length := by
-      have := Peel.length_slots hpl
+      have := Peel.length hpl
       simpa using this.symm
     obtain ⟨os, εp, hP, heq⟩ := hplain θ (hθ.back e4) hlen
     obtain ⟨os', hL⟩ := hlam θ hθ hlen
