@@ -255,15 +255,21 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
      as IO at its other uses, and a peer join of a nested join with an `!{IO}` function is
      order-dependent. The spec gaps and compiler bugs are `BACKLOG.md` entries.
    - **1b: T2**, inference soundness, and the axiom check of §7. One PR per step, in this order:
-     - **Judgment.** An inductive `HasType` over solved types (no metavariables; a scheme is
-       `∀n.` over `.gen`; a written variable is rigid), one rule per construct, effect subsumption
-       only where rule 8 puts it. The program level is existential: some partition into groups
-       and some order, each group typed monomorphically and then generalised (rule 16). That is
-       weaker than rule 16's *minimal* groups; the declaration-order rejects stay outside, since
-       they only remove accepts. It lands with proofs that it **rejects** the spec's own bad
+     - **Judgment (landed).** An inductive `HasType` over solved types (no metavariables; a scheme
+       is `∀n.` over `.gen`; a written variable is rigid), one rule per construct, effect
+       subsumption only where rule 8 puts it. The program level is existential: some partition
+       into groups and some order, each group typed monomorphically and then generalised (rule 16).
+       That is weaker than rule 16's *minimal* groups; the declaration-order rejects stay outside,
+       since they only remove accepts. It lands with proofs that it **rejects** the spec's own bad
        examples: rule 15's three, a generalised local `let`, `() -> T` against `Unit -> T`, an
        `!{IO}` value in a pure slot. Without them a permissive judgment makes T2 empty. Gaps in
-       the spec text go to `BACKLOG.md`. No checker change.
+       the spec text go to `BACKLOG.md`. No checker change. In `formal/SproutCore/Judgment.lean`
+       (rules), `JudgmentLemmas.lean` and `JudgmentExamples.lean` (the proofs, each rejected
+       program with an accepted twin, and the checker's verdict on all of them). Rule 15's
+       `x + 1` example needs `+`, which Core lacks, so `fn f(x: a) -> Int = x` stands in. The
+       judgment departs from the checker in two places, both `BACKLOG.md` entries against the
+       checker: a signature's `!{IO}` on a function-typed result (rule 9) and the arity of
+       `print_str`.
      - **Provable checker.** Every `partial def` becomes total: termination proofs for the
        structural ones, a fuel argument (not in `CState`, which `try` rolls back) for `shallow`,
        `zonk`, `flow`, `joinTy` and `peel`. The `for` loops in `infer` become recursive helpers,

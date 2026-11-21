@@ -1434,8 +1434,10 @@ recipes as CI-only. Lean comes from mise, pinned in the justfile's `lake` variab
 PATH. It installs on first use, so nothing changes for a contributor who never touches `formal/`.
 
 - `just lean-model`: `lake -d formal build` (which also runs the `#guard` regressions of
-  `formal/SproutCore/Tests.lean`), then fails on a `sorry` in `formal/SproutCore`, and
-  first on a stale spec snapshot (below). Stage 1a has no theorems; the axiom check waits for 1b.
+  `formal/SproutCore/Tests.lean` and builds the typing judgment, `Judgment.lean`, with its proofs
+  in `JudgmentLemmas.lean` and `JudgmentExamples.lean`), then fails on a `sorry` in
+  `formal/SproutCore`, and first on a stale spec snapshot (below). The axiom check waits for the
+  provable-checker step of 1b.
 - `just lean-oracle [N]`: N programs (default 500, seed 20261117, override with `LEAN_ORACLE_SEED`)
   from the Lean generator, each printed to a `.spr` and checked by both the model and
   `build/compile_driver_bin_stage1 --phase check`. Fails on a disagreement whose shape is not in

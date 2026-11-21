@@ -46,6 +46,22 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   the branches is accepted. Spec §7 rule 8 and its property 2: branch order does not decide it.
   Cause not traced; start at `infer_if_join` (`infer.sprout`). Found by the Lean oracle
   (`join-order` in `formal/oracle/ALLOWLIST`); add a `type_error/` or `run/` fixture with the fix.
+- [ ] `P3` **The Lean checker rejects `fn f(x: Int) -> Int -> Int !{IO}`; the spec accepts it.**
+  Spec §7 rule 9 puts the annotation on the innermost arrow: the type is `Int -> Int -> Int !{IO}`,
+  `f(1)` is pure and `f`'s own body may not print (the compiler: "`f` performs IO but is declared
+  pure"). `Check.FnInfo.build` rejects the form as "ill-formed". `Judgment.lean` accepts it
+  (`RetTy.writtenInner`, `okRetIO` in `JudgmentExamples.lean`), so T2 step 3 fails on it until the
+  checker follows. Fix `FnInfo.build`, add a `Tests.lean` guard, let the generator build the shape.
+- [ ] `P3` **The Lean checker types `print_str` as a value, so it skips the arity check.**
+  A `do` step `print_str()` checks in the model (`preludeEnv` is `.poly`, so the value rule of
+  spec §5.3 types the call as the function itself) and fails in the compiler ("'print_str'
+  expects 1 arguments, got 0"). Make it `.fnPoly 1 0 …`. The generator never miscounts, so the
+  oracle cannot see it; `Judgment.lean` gives it arity 1.
+- [ ] `P3` **The spec does not say whether an annotated top-level `let` keeps the annotation's
+  effect.** §5.2: the annotation "narrows the binding's type". `let f : Int -> Int !{IO} = \x -> x`
+  then `g(f)` with `g(h: Int -> Int)` is accepted by the compiler, so `f` keeps the initialiser's
+  pure arrow; read literally, `f` has the annotated `!{IO}` arrow and `g(f)` is rejected. State
+  which. The model follows the compiler (`LetAnn` in `Judgment.lean`).
 - [ ] `P3` **A type argument is judged covariantly, which is wrong for a mutable container.**
   `Ref` should be invariant in its argument. No reaching program is known — four shapes that
   laundered before bounded effect variables now reject, but via a bound travelling through
