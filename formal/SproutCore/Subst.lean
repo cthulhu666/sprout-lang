@@ -331,6 +331,39 @@ macro_rules
   | `(tactic| solves_close) =>
     `(tactic| repeat' (first | assumption | (refine Solves.back ?_ ‹Ext _ _›)))
 
+/-! ### Proof automation for the soundness layer
+
+`wp_step` (`CheckWF.lean`) has one rule per checker function, each a leaf lemma that proves only
+well-formedness. This layer's leaf lemmas also carry `Ext` and `Solves` facts, so it has its own
+`sound_step`, with the generic rules and its own leaf rules. A rule of one tactic is never tried by
+the other, so a failing leaf here cannot fall back to a lemma that says less. `leaf` and `wf_close`
+are shared: they close well-formedness goals and know no checker function. -/
+
+syntax "sound_step" : tactic
+
+macro_rules
+  | `(tactic| sound_step) => `(tactic| split)
+macro_rules
+  | `(tactic| sound_step) => `(tactic| dsimp only)
+macro_rules
+  | `(tactic| sound_step) => `(tactic| exact Wp.reject' _ _)
+macro_rules
+  | `(tactic| sound_step) => `(tactic| exact Wp.fuel')
+macro_rules
+  | `(tactic| sound_step) => `(tactic| with_reducible refine Wp.pure' ?_)
+macro_rules
+  | `(tactic| sound_step) => `(tactic| with_reducible refine Wp.modify' ?_)
+macro_rules
+  | `(tactic| sound_step) => `(tactic| with_reducible refine Wp.bind ?_)
+macro_rules
+  | `(tactic| sound_step) => `(tactic| with_reducible refine Wp.map' _ ?_)
+macro_rules
+  | `(tactic| sound_step) => `(tactic| leaf fresh_leaf)
+macro_rules
+  | `(tactic| sound_step) => `(tactic| leaf freshSkolem_leaf)
+macro_rules
+  | `(tactic| sound_step) => `(tactic| leaf fresh_loop_sound)
+
 theorem Wp.and' {α : Type} {x : M α} {Q1 Q2 : α → CState → Prop} {s : CState} (h1 : Wp x Q1 s)
     (h2 : Wp x Q2 s) : Wp x (fun a s' => Q1 a s' ∧ Q2 a s') s :=
   fun n a s' hr => ⟨h1 n a s' hr, h2 n a s' hr⟩
@@ -455,7 +488,7 @@ theorem bindMeta_leaf {Q : PUnit → CState → Prop} {s : CState} {n : Nat} {t 
   refine Wp.bind (zonk_leaf hs ht ?_)
   intro t' s1 e1 ht' hu' hz
   subst e1
-  wp_tac
+  repeat' sound_step
   rename_i hocc
   have hn' : n < s1.subst.size := hn
   refine h _ ?_ (Ext.set hu rfl) ?_ ?_

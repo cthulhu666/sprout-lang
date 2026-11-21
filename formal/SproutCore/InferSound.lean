@@ -99,11 +99,6 @@ theorem arityOk_of_good (θ : Nat → Ty) {env : Env} {f : Expr} {n : Nat}
 
 /-! ### The theorem -/
 
-set_option hygiene false in
-macro_rules
-  | `(tactic| wf_close) =>
-    `(tactic| (show ∀ t, _ = some t → Ty.surf t = true; exact hann))
-
 /-- `infer_sound` at the subterm `e`, with the environment left open. -/
 abbrev InferSoundAt (rules : Rules) (e : Expr) : Prop :=
   ∀ {env : Env} {Q : Ty × Eff → CState → Prop} {s : CState} (hs : s.WF) (he : Env.WF s.sz env)
@@ -122,7 +117,7 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
   | .var x, env, Q, s, hs, he, _, _, h => by
     unfold infer
     split
-    all_goals repeat' wp_step
+    all_goals repeat' sound_step
     · rename_i _ t heq
       refine h t .pure s (Ext.refl _) hs (by simpa [Bind.WF] using he.lookup heq) ?_
       intro θ hθ
@@ -181,7 +176,7 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
     unfold infer
     refine Wp.bind (lamParam_sound hs (fun t ht => by cases ht) hann ?_)
     intro pt s1 e1 w1 wpt hpt
-    repeat' (first | leaf inferB | wp_step)
+    repeat' (first | leaf inferB | sound_step)
     rename_i t ε s2 e2 w2 wt ht
     refine h (mkArr [pt] t ε) .pure s2 (e1.trans e2) w2 (by wf_close) ?_
     intro θ hθ
@@ -210,7 +205,7 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
         Wp (inferLamArgs rules env args slots eff) Q s :=
       fun hs he ha hsa hsl h => inferLamArgs_sound rules hr env args _ _ _ _ hs he ha hsa hsl h
     unfold infer
-    repeat' (first | leaf inferF | leaf plainK | leaf lamK | leaf arityCheck_sound | wp_step)
+    repeat' (first | leaf inferF | leaf plainK | leaf lamK | leaf arityCheck_sound | sound_step)
     rename_i s0 hag τ ε s1 e1 w1 wτ hf ps r ce s2 e2 w2 wps wr hpeel s3 e3 w3 eff s4 e4
       w4 hlam hplain
     refine h r eff s4 (e1.trans (e2.trans (e3.trans e4))) w4
@@ -235,7 +230,7 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
     have inferB : InferSoundAt rules body :=
       fun hs he hb hsb h => infer_sound rules hr body _ _ _ hs he hb hsb h
     unfold infer
-    repeat' (first | leaf inferR | leaf inferB | leaf bindLocal_leaf | wp_step)
+    repeat' (first | leaf inferR | leaf inferB | leaf bindLocal_leaf | sound_step)
     rename_i t1 ε1 hε s1 e1 w1 wt1 ht1 t ε s2 e2 w2 wt ht
     refine h t ε s2 (e1.trans e2) w2 wt ?_
     intro θ hθ
@@ -252,7 +247,7 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
     have inferE : InferSoundAt rules e :=
       fun hs he hb hsb h => infer_sound rules hr e _ _ _ hs he hb hsb h
     unfold infer
-    repeat' (first | leaf inferC | leaf inferT | leaf inferE | wp_step)
+    repeat' (first | leaf inferC | leaf inferT | leaf inferE | sound_step)
     rename_i tc ec s1 e1 w1 wtc htc s2 e2 w2 hbool tt et s3 e3 w3 wtt htt te ee s4 e4 w4
       wte hte r s5 e5 w5 wr hj
     refine h r (ec.join (et.join ee)) s5 ((((e1.trans e2).trans e3).trans e4).trans e5)
@@ -276,7 +271,7 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
         Wp (inferTuple rules env es) Q s :=
       fun hs he hes hses h => inferTuple_sound rules hr env es _ _ hs he hes hses h
     unfold infer
-    repeat' (first | leaf tupleK | wp_step)
+    repeat' (first | leaf tupleK | sound_step)
     rename_i ts eff s1 e1 w1 wts hts
     refine h (.tup ts) eff s1 e1 w1 (Ty.WF_tup.mpr wts) ?_
     intro θ hθ
@@ -286,7 +281,7 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
     have inferE : InferSoundAt rules e :=
       fun hs he hb hsb h => infer_sound rules hr e _ _ _ hs he hb hsb h
     unfold infer
-    repeat' (first | leaf inferE | wp_step)
+    repeat' (first | leaf inferE | sound_step)
     rename_i t ε s1 e1 w1 wt ht s2 e2 w2 hb
     refine h .bool ε s2 (e1.trans e2) w2 Ty.WF_bool ?_
     intro θ hθ
@@ -306,7 +301,7 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
     have inferF : InferSoundAt rules final :=
       fun hs he hb hsb h => infer_sound rules hr final _ _ _ hs he hb hsb h
     unfold infer
-    repeat' (first | leaf stepsK | leaf inferF | wp_step)
+    repeat' (first | leaf stepsK | leaf inferF | sound_step)
     rename_i env' eff s1 e1 w1 we hst t ε s2 e2 w2 wt ht
     refine h t (eff.join ε) s2 (e1.trans e2) w2 wt ?_
     intro θ hθ
@@ -347,7 +342,7 @@ theorem inferPlainArgs_sound (rules : Rules) (hr : rules.localLetMono = true) (e
       obtain ⟨os, εp, hp, heq⟩ := hq θ hθ (by simpa using hlen)
       exact ⟨none :: os, εp, PlainRel.lam a as _ _ os εp hlam hp, heq⟩
     · rename_i hlam
-      repeat' (first | leaf inferA | leaf plainK | wp_step)
+      repeat' (first | leaf inferA | leaf plainK | sound_step)
       rename_i t ε s1 e1 w1 wt ht s2 e2 w2 hfl eff' s3 e3 w3 hq
       refine h eff' s3 ((e1.trans e2).trans e3) w3 ?_
       intro θ hθ hlen
@@ -400,7 +395,7 @@ theorem inferLamArgs_sound (rules : Rules) (hr : rules.localLetMono = true) (env
       refine Wp.bind (lamParam_sound hs
         (fun t ht => by have h1 := Option.some.inj ht; subst h1; exact hs0) hann ?_)
       intro pt s1 e1 w1 wpt hpt
-      repeat' (first | leaf inferK | leaf lamK | wp_step)
+      repeat' (first | leaf inferK | leaf lamK | sound_step)
       rename_i t ε s2 e2 w2 wt ht s3 e3 w3 hfl eff' s4 e4 w4 hq
       refine h eff' s4 (((e1.trans e2).trans e3).trans e4) w4 rfl ?_
       intro θ hθ hlen
@@ -455,7 +450,7 @@ theorem inferTuple_sound (rules : Rules) (hr : rules.localLetMono = true) (env :
         Wp (inferTuple rules env es) Q s :=
       fun hs he hes hses h => inferTuple_sound rules hr env es _ _ hs he hes hses h
     unfold inferTuple
-    repeat' (first | leaf inferE | leaf tupleK | wp_step)
+    repeat' (first | leaf inferE | leaf tupleK | sound_step)
     rename_i t ε s1 e1 w1 wt ht ts eff s2 e2 w2 wts hts
     refine h (t :: ts) (ε.join eff) s2 (e1.trans e2) w2
       (Ty.WF.list_cons (wt.mono (by omega) (Nat.le_refl _)) wts) ?_
@@ -487,7 +482,7 @@ theorem inferSteps_sound (rules : Rules) (hr : rules.localLetMono = true) (env :
         Wp (inferSteps rules env rest) Q s :=
       fun hs he hrest hsrest h => inferSteps_sound rules hr _ rest _ _ hs he hrest hsrest h
     unfold inferSteps
-    repeat' (first | leaf inferR | leaf stepsK | leaf bindLocal_leaf | wp_step)
+    repeat' (first | leaf inferR | leaf stepsK | leaf bindLocal_leaf | sound_step)
     rename_i t ε hε s1 e1 w1 wt ht env' eff s2 e2 w2 we hst
     refine h env' eff s2 (e1.trans e2) w2 we ?_
     intro θ hθ
@@ -507,7 +502,7 @@ theorem inferSteps_sound (rules : Rules) (hr : rules.localLetMono = true) (env :
         Wp (inferSteps rules env rest) Q s :=
       fun hs he hrest hsrest h => inferSteps_sound rules hr _ rest _ _ hs he hrest hsrest h
     unfold inferSteps
-    repeat' (first | leaf inferE | leaf stepsK | wp_step)
+    repeat' (first | leaf inferE | leaf stepsK | sound_step)
     rename_i t ε s1 e1 w1 wt ht env' eff s2 e2 w2 we hst
     refine h env' (ε.join eff) s2 (e1.trans e2) w2 we ?_
     intro θ hθ
