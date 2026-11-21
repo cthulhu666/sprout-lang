@@ -1,4 +1,5 @@
 import SproutCore.Subst
+import SproutCore.JudgmentLemmas
 
 /-!
 # Lemmas about `Flows` and `Peel` (docs/lean-model-v0.md §9, 1b step 3a, part 2)
@@ -28,11 +29,8 @@ theorem Eff.meet_le_left (a b : Eff) : (a.meet b).le a = true := by cases a <;> 
 theorem Eff.meet_le_right (a b : Eff) : (a.meet b).le b = true := by cases a <;> cases b <;> rfl
 theorem Eff.join_pure_left (e : Eff) : Eff.pure.join e = e := by cases e <;> rfl
 theorem Eff.join_pure_right (e : Eff) : e.join .pure = e := by cases e <;> rfl
-theorem Eff.join_comm (a b : Eff) : a.join b = b.join a := by cases a <;> cases b <;> rfl
 theorem Eff.join_assoc (a b c : Eff) : (a.join b).join c = a.join (b.join c) := by
   cases a <;> cases b <;> cases c <;> rfl
-theorem Eff.le_pure_iff {e : Eff} : e.le .pure = true ↔ e = .pure :=
-  ⟨Eff.le_pure, fun h => h ▸ Eff.le_refl _⟩
 theorem Eff.beq_pure {e : Eff} : (e == .pure) = true ↔ e = .pure := by cases e <;> simp
 
 /-! ### Reflexivity -/
@@ -226,13 +224,6 @@ theorem flows_arr_shorter (Ar Br : Ty) (be : Eff) (B2 : List Ty) (hB2 : B2 ≠ [
   | _ :: _ :: _, [_], hl, _, _ => by simp at hl
 
 /-! ### `Peel` through a merge -/
-
-theorem Peel.length_slots {t : Ty} {n : Nat} {ss : List Ty} {r : Ty} {e : Eff}
-    (h : Peel t n ss r e) : ss.length = n := by
-  induction h with
-  | exact ps r e => rfl
-  | rest ps r e n h0 hn => simp; omega
-  | over ps r e n s2 r2 e2 hp hl _ ih => simp [ih]; omega
 
 theorem notMergeable_of_ok {q : Ty} {qs : List Ty} {r' : Ty} {e' : Eff}
     (h : (Ty.arr (q :: qs) r' e').ok 0 = true) : Ty.mergeable (q :: qs) r' e' = false := by

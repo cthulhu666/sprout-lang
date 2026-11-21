@@ -124,14 +124,14 @@ theorem flowsAll_of_zip_swap {f : Ty → Ty} :
   | [], _ :: _, hl, _ => by simp at hl
   | _ :: _, [], hl, _ => by simp at hl
 
-theorem ne_of_gt {aps eps : List Ty} (h1 : ¬(aps.isEmpty != eps.isEmpty) = true)
+theorem arr_params_ne_of_gt {aps eps : List Ty} (h1 : ¬(aps.isEmpty != eps.isEmpty) = true)
     (hgt : aps.length > eps.length) : eps ≠ [] := by
   intro h; subst h
   cases aps with
   | nil => simp at hgt
   | cons _ _ => simp at h1
 
-theorem ne_of_lt {aps eps : List Ty} (h1 : ¬(aps.isEmpty != eps.isEmpty) = true)
+theorem arr_params_ne_of_lt {aps eps : List Ty} (h1 : ¬(aps.isEmpty != eps.isEmpty) = true)
     (hlt : aps.length < eps.length) : aps ≠ [] := by
   intro h; subst h
   cases eps with
@@ -289,11 +289,11 @@ theorem flowF_sound : ∀ (k : Nat) (a e : Ty) (Q : PUnit → CState → Prop) (
       exact flow_arr_eq θ aps eps ar er ae ee (Nat.eq_of_beq_eq_true hlen)
         (fun p hp' => hp p hp' θ (hθ.back e3)) (hr θ hθ) hle
     · rename_i _ _ aps ar ae eps er ee hne hlen hgt s1 _ e1 _ hp s3 _ e3 _ hr
-      exact flow_arr_gt θ aps eps ar er ae ee hgt (ne_of_gt hne hgt)
+      exact flow_arr_gt θ aps eps ar er ae ee hgt (arr_params_ne_of_gt hne hgt)
         (fun p hp' => hp p hp' θ (hθ.back e3)) (hr θ hθ)
     · rename_i _ _ aps ar ae eps er ee hne hlen hgt hae s1 _ e1 _ hp s3 _ e3 _ hr
       have hlt : aps.length < eps.length := by simp at hlen hgt; omega
-      exact flow_arr_lt θ aps eps ar er ae ee hlt (ne_of_lt hne hlt) hae
+      exact flow_arr_lt θ aps eps ar er ae ee hlt (arr_params_ne_of_lt hne hlt) hae
         (fun p hp' => hp p hp' θ (hθ.back e3)) (hr θ hθ)
 
 theorem flow_sound {Q : PUnit → CState → Prop} {s : CState} {a e : Ty} (hs : s.WF)
@@ -771,11 +771,6 @@ macro_rules
 
 /-! ### `expectBool` -/
 
-theorem flows_bool_eq {t : Ty} (h : Flows t .bool) : t = .bool := by
-  cases h
-  · rfl
-  · simp [Ty.uncons] at *
-
 theorem expectBool_sound {Q : PUnit → CState → Prop} {s : CState} {t : Ty} {key detail : String}
     (hs : s.WF) (ht : Ty.WF s.sz 0 t)
     (h : ∀ s', s.sz ≤ s'.sz → Ext s s' → s'.WF → (∀ θ, Solves θ s' → Ty.app θ t = .bool) →
@@ -787,7 +782,7 @@ theorem expectBool_sound {Q : PUnit → CState → Prop} {s : CState} {t : Ty} {
       (fun _ _ => ?_) rfl) fun ok s1 hq => ?_)
   · refine Wp.bind (flow_sound hs ht Ty.WF_bool ?_)
     intro s' g e hw hf
-    exact Wp.pure' fun _ => ⟨g, e, hw, fun θ hθ => flows_bool_eq (hf θ hθ)⟩
+    exact Wp.pure' fun _ => ⟨g, e, hw, fun θ hθ => Flows.to_bool (hf θ hθ)⟩
   · exact Wp.pure' fun hf => by cases hf
   · cases ok with
     | false => exact Wp.reject' _ _
