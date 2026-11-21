@@ -6,9 +6,16 @@ import Lean
 docs/lean-model-v0.md §7. Imports a root module (default `SproutCore`) and walks every constant
 declared in a module of its package, the modules being those the environment lists under the
 root's first name component, so a theorem cannot escape by sitting in a file a hand-kept list
-forgot. `Lean.collectAxioms` runs on each theorem, definition, opaque and axiom. An unfinished
-proof is `sorryAx`, a `native_decide` is `Lean.ofReduceBool`: both fail. A source file under
-`--src` that no import reaches fails too: its theorems would not be checked.
+forgot. Every theorem, definition, opaque and axiom is traced to the axioms it rests on. An
+unfinished proof is `sorryAx`, a `native_decide` is `Lean.ofReduceBool`: both fail. A source file
+under `--src` that no import reaches fails too: its theorems would not be checked.
+
+The import loads constants only (`loadExts := false`), so no imported `initialize` runs. Running
+them would need `enableInitializersExecution` and, on Linux, an executable that exports the Lean
+runtime's symbols to the interpreter (`supportInterpreter`), or the first `initialize` of `Init`
+or `Plausible` fails with a missing native symbol. Nothing here reads an environment extension.
+`axiomsOf` is the traversal of `Lean.collectAxioms` without the extension that caches imported
+results, and with one cache for the whole run.
 
     axiom-check [--src <dir>] [--lib-path <dir>]… [<Root>]
 -/
@@ -40,16 +47,56 @@ partial def sourceModules (dir : System.FilePath) (m : Name) : IO (List Name) :=
       out := out ++ [m.str (e.path.fileStem.getD "")]
   return out
 
-/-- `enableInitializersExecution` is unsafe: it lets imported `initialize` blocks run. -/
-unsafe def main (args : List String) : IO UInt32 := do
+/-- The walk's state: the axiom sets known to be complete, and the constants being visited with
+their depth in the walk. -/
+structure Walk where
+  done : NameMap (Array Name) := {}
+  active : NameMap Nat := {}
+
+/-- The axioms `c` rests on, sorted, and the depth of the shallowest constant being visited that
+the walk ran into below `c` (`depth` or more when it ran into none). A constant met again while
+it is being visited adds nothing, which ends a cycle (inductive and constructor, mutual
+recursion). The sets of a cycle's members are then incomplete, so they are cached only when the
+walk met no constant above them: a shared cache that held an incomplete set would hand it to a
+later theorem and hide an axiom, which `Lean.collectAxioms` avoids by starting afresh. -/
+partial def axiomsOf (env : Environment) (c : Name) (depth : Nat) :
+    StateM Walk (Array Name × Nat) := do
+  if let some r := (← get).done.find? c then return (r, depth)
+  if let some d := (← get).active.find? c then return (#[], d)
+  modify fun w => { w with active := w.active.insert c depth }
+  let (own, deps) : Array Name × Array Name := match env.find? c with
+    | some (.axiomInfo v) => (#[c], v.type.getUsedConstants)
+    | some (.defnInfo v) => (#[], v.type.getUsedConstants ++ v.value.getUsedConstants)
+    | some (.thmInfo v) => (#[], v.type.getUsedConstants ++ v.value.getUsedConstants)
+    | some (.opaqueInfo v) => (#[], v.type.getUsedConstants ++ v.value.getUsedConstants)
+    | some (.ctorInfo v) => (#[], v.type.getUsedConstants)
+    | some (.recInfo v) => (#[], v.type.getUsedConstants)
+    | some (.inductInfo v) => (#[], v.type.getUsedConstants ++ v.ctors.toArray)
+    | some (.quotInfo _) | none => (#[], #[])
+  let mut axs : NameSet := own.foldl (·.insert ·) {}
+  let mut low := depth
+  for d in deps do
+    let (as, l) ← axiomsOf env d (depth + 1)
+    for a in as do
+      axs := axs.insert a
+    low := min low l
+  let r := axs.toArray.qsort Name.lt
+  modify fun w => { w with active := w.active.erase c }
+  if low ≥ depth then modify fun w => { w with done := w.done.insert c r }
+  return (r, low)
+
+def main (args : List String) : IO UInt32 := do
   let cfg ← match parseArgs args {} with
     | .ok c => pure c
     | .error e => do IO.eprintln e; return 2
-  initSearchPath (← findSysroot) cfg.libPaths
-  enableInitializersExecution
-  let env ← importModules #[{ module := cfg.root }] {} (loadExts := true)
   let pkg := cfg.root.getRoot
-  let mods := env.header.moduleNames.filter (·.getRoot == pkg)
+  initSearchPath (← findSysroot) cfg.libPaths
+  let env ← importModules #[{ module := cfg.root }] {}
+  -- the private view, so that every body is visible
+  let env := env.setExporting false
+  let pkgIdxs := (List.range env.header.moduleNames.size).filter fun i =>
+    env.header.moduleNames[i]!.getRoot == pkg
+  let mods := pkgIdxs.map (env.header.moduleNames[·]!)
   let mut failed := false
   if let some src := cfg.src then
     let dir := src / pkg.toString
@@ -62,19 +109,23 @@ unsafe def main (args : List String) : IO UInt32 := do
   let mut nDef := 0
   let mut used : NameSet := {}
   let mut bad : Array (Name × Array Name) := #[]
-  let ctx : Core.Context := { fileName := "<axiom-check>", fileMap := default }
-  for (n, ci) in env.constants.map₁.toList do
-    let some idx := env.getModuleIdxFor? n | continue
-    unless pkg == env.header.moduleNames[idx]!.getRoot do continue
-    match ci with
-    | .thmInfo _ => nThm := nThm + 1
-    | .defnInfo _ | .opaqueInfo _ | .axiomInfo _ => nDef := nDef + 1
-    | _ => continue
-    let (axs, _) ← (collectAxioms n : CoreM _).toIO ctx { env }
-    used := axs.foldl (·.insert ·) used
-    let off := axs.filter (!allowedAxioms.contains ·)
-    unless off.isEmpty do bad := bad.push (n, off)
-  IO.println s!"axiom-check: {pkg}: {mods.size} modules, {nThm} theorems, {nDef} definitions; \
+  let mut walk : Walk := {}
+  -- a module's `constNames` can list a name twice (`_sparseCasesOn_*.else_eq` do)
+  let mut done : NameSet := {}
+  for i in pkgIdxs do
+    for n in env.header.moduleData[i]!.constNames do
+      if done.contains n then continue
+      done := done.insert n
+      match env.find? n with
+      | some (.thmInfo _) => nThm := nThm + 1
+      | some (.defnInfo _) | some (.opaqueInfo _) | some (.axiomInfo _) => nDef := nDef + 1
+      | _ => continue
+      let ((axs, _), walk') := (axiomsOf env n 0).run walk
+      walk := walk'
+      used := axs.foldl (·.insert ·) used
+      let off := axs.filter (!allowedAxioms.contains ·)
+      unless off.isEmpty do bad := bad.push (n, off)
+  IO.println s!"axiom-check: {pkg}: {mods.length} modules, {nThm} theorems, {nDef} definitions; \
     axioms used: {used.toList}"
   if nThm == 0 then
     IO.println s!"axiom-check: {pkg} has no theorem: nothing was checked"
