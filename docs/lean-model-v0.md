@@ -99,6 +99,7 @@ What this says for Sprout:
 [7] <https://github.com/bytecodealliance/wasmtime/pull/15122>.
 [8] <https://github.com/michaelsproul/dblib-linear>.
 [9] <https://research.tudelft.nl/en/publications/intrinsically-typed-definitional-interpreters-for-linear-session->.
+[10] <https://link.springer.com/article/10.1023/A:1006277616879>.
 
 ## 4. Sprout Core
 
@@ -145,6 +146,10 @@ Each theorem is stated over the model's typing judgment and a small-step semanti
 - **T2 Inference soundness.** If the model's algorithm returns a type, the declarative judgment
   derives it. The judgment encodes rules 15 and 16, which the spec states as an algorithm ("first
   use commits"); writing them declaratively is part of the work and may show gaps in the text.
+  T2 serves G3: it makes the model's accepts trustworthy, so an accept-side disagreement points at
+  the compiler or the spec. It says nothing about the spec unless the judgment rejects what the
+  spec rejects, so the judgment lands with proofs that it does (§9 1b). It covers the default
+  rules (`rules := {}`); its effect half is rewritten when stage 4 adds effect variables.
 - **T3 Effect soundness, outside the variable channel.** A term typed pure, from which no function
   with an effect variable in its signature is reachable through calls, takes no `print_str` step.
   Direct callees are not enough: a pure `f` may call `g : … !{e}` at purity, and `g` may print.
@@ -194,9 +199,11 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
 
 ## 7. Drift gate
 
-- `just lean-model`: `lake build`, then fail on any `sorry`, and on any theorem whose axioms
-  (`#print axioms`) go beyond Lean's standard three (`propext`, `Classical.choice`, `Quot.sound`).
-  A `sorry` would show there as `sorryAx`, so the two checks agree.
+- `just lean-model`: `lake build`, then fail on any `sorry`, and on any theorem whose axioms go
+  beyond Lean's standard three (`propext`, `Classical.choice`, `Quot.sound`). The axiom check is
+  an executable that walks every module in the package and collects the axioms of every theorem,
+  so a theorem cannot escape it by sitting outside a hand-kept list. A `sorry` shows there as
+  `sorryAx`, so the two checks agree.
 - `just lean-oracle N`: N generated programs through both sides. Fixed seed in CI, so failures
   reproduce. A scheduled job runs a fresh seed.
 - **Spec snapshot.** Every spec section a rule tag (§4) cites is copied into
@@ -247,7 +254,35 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
      compiler bugs: a non-generalised function value passed to an `!{IO}` slot is then read back
      as IO at its other uses, and a peer join of a nested join with an `!{IO}` function is
      order-dependent. The spec gaps and compiler bugs are `BACKLOG.md` entries.
-   - **1b: T2**, inference soundness, and the axiom check of §7.
+   - **1b: T2**, inference soundness, and the axiom check of §7. One PR per step, in this order:
+     - **Judgment.** An inductive `HasType` over solved types (no metavariables; a scheme is
+       `∀n.` over `.gen`; a written variable is rigid), one rule per construct, effect subsumption
+       only where rule 8 puts it. The program level is existential: some partition into groups
+       and some order, each group typed monomorphically and then generalised (rule 16). That is
+       weaker than rule 16's *minimal* groups; the declaration-order rejects stay outside, since
+       they only remove accepts. It lands with proofs that it **rejects** the spec's own bad
+       examples: rule 15's three, a generalised local `let`, `() -> T` against `Unit -> T`, an
+       `!{IO}` value in a pure slot. Without them a permissive judgment makes T2 empty. Gaps in
+       the spec text go to `BACKLOG.md`. No checker change.
+     - **Provable checker.** Every `partial def` becomes total: termination proofs for the
+       structural ones, a fuel argument (not in `CState`, which `try` rolls back) for `shallow`,
+       `zonk`, `flow`, `joinTy` and `peel`. The `for` loops in `infer` become recursive helpers,
+       arrows get one canonical form (`zonk` reshapes them through `mkArr` today), and
+       well-formedness invariants on the state and the environment back every `!` accessor.
+       Running out of fuel is never a verdict: `expectBool` passes it through instead of turning
+       it into a reject, the oracle and `Tests.lean` report it as a harness error, and
+       `test-lean-oracle` plants it. A theorem shows more fuel never changes a verdict, and the
+       oracle's per-program verdicts are diffed before and after, not its counts. The axiom
+       check lands here, as an executable that walks every module in the package and fails on an
+       axiom outside the three, with a planted-`sorry` self-test; the fuel theorem is its first
+       subject.
+     - **3a.** `infer` is sound: under a well-formed state and environment, its result, with the
+       final substitution applied, is derivable. Instantiation and effects are included; they
+       cannot be split off.
+     - **3b.** `inferLet`, `inferFnGroup` and `checkProgram`: an accepted program is derivable.
+     Prior art: Algorithm W's soundness in Isabelle (Naraschewski and Nipkow, JAR 1999 [10]). Its
+     hard part was the fresh-variable invariant, which is what the well-formedness invariants are
+     for.
 2. **ADTs and match.** T1, T4, the unreachable-branch rule. Exit: the per-column gap and the
    fallbacks are written up in this doc.
 3. **Linearity.** T5 over linear ADTs, containment, `where linear`, binding groups, top-level
