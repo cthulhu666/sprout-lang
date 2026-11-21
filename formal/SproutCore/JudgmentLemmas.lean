@@ -235,6 +235,15 @@ theorem GroupTy.fn1_novars {Γ : Ctx} (w : FnWit) (hv : w.f.vars = [])
     GroupTy Γ [w.f.toDecl] ([w.entryOut] ++ Γ) :=
   GroupTy.fn1 w (by simp [hv]) (by simp [hv]) hgen hmem
 
+/-- A program of one `fn` with no written type variable and no `main`: the witness's member
+check is all that is left. -/
+theorem Program.typed_single_fn {p : Program} (w : FnWit) (hn : p.nodes = [w.f.toDecl])
+    (hm : ∀ sg body, Decl.mainFn sg body ∉ p.decls) (hv : w.f.vars = [])
+    (hgen : Generalises w.τ w.s) (hmem : MemberOk ([w.entryIn] ++ Ctx.prelude) w) : p.Typed := by
+  refine ⟨[w.entryOut] ++ Ctx.prelude, ?_, fun sg body h => absurd h (hm sg body)⟩
+  rw [hn]
+  exact Groups.cons1 (GroupTy.fn1_novars (Γ := Ctx.prelude) w hv hgen hmem) (Groups.nil _)
+
 /-- No `main`, and every declaration in the groups: the program is typed. -/
 theorem Program.typed_nomain {p : Program} {Γ : Ctx} (hg : Groups Ctx.prelude p.nodes Γ)
     (hm : ∀ sg body, Decl.mainFn sg body ∉ p.decls) : p.Typed :=
