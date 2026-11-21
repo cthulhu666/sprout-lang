@@ -2,7 +2,7 @@
 
 A side pane (or a band above the prompt) that lists PRs with their CI state, the
 `/sprout-review` runs for each, and the issues those runs found with their status.
-Companion to `.claude/skills/sprout-review/`.
+The same plugin ships the `/sprout-review` skill (`skills/sprout-review/`) that writes the ledger.
 
 ## Commands
 
@@ -28,12 +28,14 @@ Companion to `.claude/skills/sprout-review/`.
   when a review adds a PR. The footer `refresh` button fetches every PR, merged ones too. A merged
   PR keeps its last data until `refresh`. An open PR's header shows its mergeability, and its
   base branch when that is not `master`.
-- The review ledger every 5 s, only through `scripts/review_ledger.sh` (`runs`, `dir`, `issues`),
-  run from the repo root.
+- The review ledger every 5 s, only through the plugin's `scripts/review_ledger.sh` (`runs`,
+  `dir`, `issues`), run with the repo root as cwd.
 
 ## Loading
 
-Claude Code loads it as `pr-tracker@skills-dir` in a trusted checkout. No install step.
+In this repo Claude Code loads it as `pr-tracker@skills-dir` in a trusted checkout. No install step.
+In another repo: `/plugin marketplace add cthulhu666/sprout-lang`, then
+`/plugin install pr-tracker@sprout`. `plugin.json` has no `version`, so each commit is an update.
 `.claude-plugin/types/` is written on first load and is gitignored; `tsc -p` needs the plugin to
 have loaded once, because `tsconfig.json` extends it.
 
