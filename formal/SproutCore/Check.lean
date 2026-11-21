@@ -637,7 +637,7 @@ members or already placed. The last argument bounds the recursion: a group goes 
 so `#groups + 1` never runs out with groups pending. -/
 def orderGroups (edges : Array (List Nat)) (pending order : List (List Nat)) :
     Nat → Except CErr (List (List Nat))
-  | 0 => pure order
+  | 0 => if pending.isEmpty then pure order else throw (.reject "internal" "no group order")
   | b + 1 =>
     if pending.isEmpty then pure order else
     let ready := pending.filter fun g =>
