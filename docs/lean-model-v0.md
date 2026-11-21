@@ -242,10 +242,11 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
      The oracle's findings are in `formal/oracle/ALLOWLIST`, each with a witness: one compiler gap
      (an effectful `let` right-hand side, spec §5.2.1, already scheduled in `try-propagate-v0.md`),
      one spec gap (the compiler's value restriction on a top-level `let`, which the spec does not
-     state), and three compiler bugs, all `BACKLOG.md` entries: a pure top-level `let` calling a
-     non-generalised function value is rejected as IO; a non-generalised function value passed to
-     an `!{IO}` slot is then read back as IO at its other uses; and a peer join of a nested join
-     with an `!{IO}` function is order-dependent.
+     state), a second spec gap (whether an inferred lambda's arrow has an effect variable, which
+     decides whether a top-level `let` calling a non-generalised function value is pure), and two
+     compiler bugs: a non-generalised function value passed to an `!{IO}` slot is then read back
+     as IO at its other uses, and a peer join of a nested join with an `!{IO}` function is
+     order-dependent. The spec gaps and compiler bugs are `BACKLOG.md` entries.
    - **1b: T2**, inference soundness, and the axiom check of §7.
 2. **ADTs and match.** T1, T4, the unreachable-branch rule. Exit: the per-column gap and the
    fallbacks are written up in this doc.
