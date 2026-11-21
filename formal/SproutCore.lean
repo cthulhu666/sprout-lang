@@ -8,6 +8,7 @@ import SproutCore.GenProgram
 import SproutCore.Shrink
 import SproutCore.Tests
 import SproutCore.Judgment
+import SproutCore.Subst
 import SproutCore.JudgmentLemmas
 import SproutCore.JudgmentExamples
 import SproutCore.Witnesses
