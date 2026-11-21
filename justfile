@@ -983,6 +983,10 @@ test-lean-oracle: bootstrap-from-seed
     echo "$out" >&2; echo "test-lean-oracle: the axiom check missed an unimported module" >&2; exit 1
   fi
   grep -q 'SproutCore.Orphan' <<<"$out" || { echo "$out" >&2; echo "test-lean-oracle: no report naming Orphan" >&2; exit 1; }
+  echo "== axiom check: a --src with no <Root> directory is a setup error (exit 2) =="
+  rc=0; out=$({{lake}} -d formal exe axiom-check --src "$D/no-such-dir" 2>&1) || rc=$?
+  [ "$rc" = 2 ] || { echo "$out" >&2; echo "test-lean-oracle: a missing --src exited $rc, not 2" >&2; exit 1; }
+  grep -q 'no directory' <<<"$out" || { echo "$out" >&2; echo "test-lean-oracle: no report naming the missing --src" >&2; exit 1; }
   echo "== snapshot check notices a change =="
   LEAN_SNAPSHOT_DIR="$D/snap" python3 scripts/lean_spec_snapshot.py --write
   LEAN_SNAPSHOT_DIR="$D/snap" python3 scripts/lean_spec_snapshot.py --check
