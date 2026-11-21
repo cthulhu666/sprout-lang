@@ -41,7 +41,82 @@ inductive Ty where
   | unit
   | tup (ts : List Ty)
   | arr (ps : List Ty) (r : Ty) (e : Eff)
-  deriving BEq, Repr, Inhabited
+  deriving Repr, Inhabited
+
+/-! `deriving BEq` on a nested inductive is an `opaque` constant: no theorem can say what it
+returns. The checker's `genSlot` and `main` signature test compare types with `==`, so soundness
+needs a `BEq` it can unfold. This one is written out and proved lawful. -/
+
+mutual
+def Ty.beq : Ty → Ty → Bool
+  | .named a, .named b => a == b
+  | .mv a, .mv b => a == b
+  | .skolem a, .skolem b => a == b
+  | .gen a, .gen b => a == b
+  | .int, .int => true
+  | .bool, .bool => true
+  | .str, .str => true
+  | .unit, .unit => true
+  | .tup as, .tup bs => Ty.beqList as bs
+  | .arr ps r e, .arr qs s f => Ty.beqList ps qs && Ty.beq r s && e == f
+  | _, _ => false
+
+def Ty.beqList : List Ty → List Ty → Bool
+  | [], [] => true
+  | a :: as, b :: bs => Ty.beq a b && Ty.beqList as bs
+  | _, _ => false
+end
+
+instance : BEq Ty := ⟨Ty.beq⟩
+
+theorem Eff.eq_of_beq {e f : Eff} (h : (e == f) = true) : e = f := by
+  cases e <;> cases f <;> first | rfl | (exfalso; revert h; decide)
+
+mutual
+theorem Ty.eq_of_beq (a b : Ty) (h : Ty.beq a b = true) : a = b := by
+  cases a <;> cases b <;> first
+    | (exfalso; revert h; simp [Ty.beq]; done)
+    | (simp [Ty.beq] at h; simp [h]; done)
+    | skip
+  · rename_i as bs
+    simp only [Ty.beq] at h
+    rw [Ty.eq_of_beqList as bs h]
+  · rename_i ps r e qs s f
+    simp only [Ty.beq, Bool.and_eq_true] at h
+    obtain ⟨⟨h1, h2⟩, h3⟩ := h
+    rw [Ty.eq_of_beqList ps qs h1, Ty.eq_of_beq r s h2, Eff.eq_of_beq h3]
+
+theorem Ty.eq_of_beqList (as bs : List Ty) (h : Ty.beqList as bs = true) : as = bs := by
+  cases as <;> cases bs <;> first
+    | (exfalso; revert h; simp [Ty.beqList]; done)
+    | rfl
+    | skip
+  · rename_i a as b bs
+    simp only [Ty.beqList, Bool.and_eq_true] at h
+    rw [Ty.eq_of_beq a b h.1, Ty.eq_of_beqList as bs h.2]
+end
+
+mutual
+theorem Ty.beq_refl (a : Ty) : Ty.beq a a = true := by
+  cases a <;> first | (simp [Ty.beq]; done) | skip
+  · rename_i as
+    simp only [Ty.beq]
+    exact Ty.beqList_refl as
+  · rename_i ps r e
+    simp only [Ty.beq, Bool.and_eq_true]
+    refine ⟨⟨Ty.beqList_refl ps, Ty.beq_refl r⟩, ?_⟩
+    cases e <;> decide
+
+theorem Ty.beqList_refl (as : List Ty) : Ty.beqList as as = true := by
+  cases as <;> first | (simp [Ty.beqList]; done) | skip
+  · rename_i a as
+    simp only [Ty.beqList, Bool.and_eq_true]
+    exact ⟨Ty.beq_refl a, Ty.beqList_refl as⟩
+end
+
+instance : LawfulBEq Ty where
+  eq_of_beq h := Ty.eq_of_beq _ _ h
+  rfl := Ty.beq_refl _
 
 mutual
 
