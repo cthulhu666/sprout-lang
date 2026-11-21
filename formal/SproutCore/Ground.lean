@@ -347,10 +347,11 @@ end
 /-- `generalize [] t`, soundly. The type it generalises is the zonk of `t`; `h` gets that zonk, so
 the caller can pick `B` above its skolems. For every grounding that is fresh above such a `B` (a
 solution of the state that sends each unsolved metavariable of the zonk to its own skolem
-`B + m`), the scheme `generalize` returns is `Generalises` the grounded `t`. -/
+`B + m`), the scheme `generalize` returns is `Generalises` the grounded `t`. The scheme is closed
+(`ok n`) whatever the grounding: some fresh grounding exists (`exists_solves_with`). -/
 theorem generalize_sound {Q : Nat × Ty → CState → Prop} {s : CState} {t : Ty}
     (hs : s.WF) (hnf : s.NF) (ht : Ty.WF s.sz 0 t) (htn : t.NF)
-    (h : ∀ n t' zt, (∀ m ∈ metasOf zt, s.Unbound m) →
+    (h : ∀ n t' zt, t'.ok n = true → (∀ m ∈ metasOf zt, s.Unbound m) →
       (∀ B, zt.SkLt B → ∀ θ, Solves θ s → (∀ m ∈ metasOf zt, θ m = .skolem (B + m)) →
         Generalises (Ty.app θ t) ⟨n, t'⟩) → Q (n, t') s) :
     Wp (generalize [] t) Q s := by
@@ -364,15 +365,19 @@ theorem generalize_sound {Q : Nat × Ty → CState → Prop} {s : CState} {t : T
   have hg : gensOf zt = [] := List.eq_nil_iff_forall_not_mem.mpr fun i hi => by
     have := w.2 i hi; omega
   rcases hgg : genGo [] #[] zt with ⟨tab, t'⟩
-  refine Wp.pure' (h tab.size t' zt u ?_)
-  intro B hB θ hθ hm
-  have hsp := genGo_spec B θ zt #[] hm hg n hc hB (TabOK.empty B)
-  rw [hgg] at hsp
-  obtain ⟨_, hT, hok, hsk, hin⟩ := hsp
-  refine ⟨hok, hsk, tab.toList.map (skId B), by simp, hT.2, ?_⟩
-  rw [← a θ hθ]
-  exact hin _ ⟨[], by simp⟩
-
+  have key : ∀ B, zt.SkLt B → ∀ θ, Solves θ s1 → (∀ m ∈ metasOf zt, θ m = .skolem (B + m)) →
+      Generalises (Ty.app θ t) ⟨tab.size, t'⟩ := by
+    intro B hB θ hθ hm
+    have hsp := genGo_spec B θ zt #[] hm hg n hc hB (TabOK.empty B)
+    rw [hgg] at hsp
+    obtain ⟨_, hT, hok, hsk, hin⟩ := hsp
+    refine ⟨hok, hsk, tab.toList.map (skId B), by simp, hT.2, ?_⟩
+    rw [← a θ hθ]
+    exact hin _ ⟨[], by simp⟩
+  obtain ⟨B, hB⟩ := Ty.exists_skLt zt
+  obtain ⟨θ, hθ, hfresh⟩ := exists_solves_with hs hnf (fun m => .skolem (B + m)) (fun _ => rfl)
+  have hok := (key B hB θ hθ (fun m hm => hfresh m (u m hm))).1
+  exact Wp.pure' (h tab.size t' zt hok u key)
 
 /-! ### Closed schemes -/
 
