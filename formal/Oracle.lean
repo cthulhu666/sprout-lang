@@ -19,9 +19,11 @@ structure Cfg where
   allowlist : String := "formal/oracle/ALLOWLIST"
   count : Nat := 500
   seed : Nat := 20261117
-  /-- `no-local-let-mono` or `printer-bug`: the self-test's planted defects. -/
+  /-- `no-local-let-mono`, `printer-bug` or `low-fuel`: the self-test's planted defects. -/
   plant : String := ""
-  /-- `disagreement` or `harness-error`: succeed only if the planted defect is seen. -/
+  /-- The model's fuel budget per `shallow`/`zonk`/`flow`/`joinTy`/`peel` call. -/
+  fuel : Nat := defaultFuel
+  /-- `disagreement`, `harness-error` or `fuel-error`: succeed only if the planted defect is seen. -/
   expect : String := ""
   /-- With `--expect disagreement`: some new disagreement shape must contain this text. -/
   expectShape : String := ""
@@ -72,22 +74,30 @@ def normMsg (msg : String) : String :=
     cut ++ ": IO function where a pure one is required"
   else cut
 
-def shapeOf (m : Except String Unit) (c : CV) : Option String :=
+/-- A model run that ran out of fuel has no verdict, so it has no shape either. -/
+def shapeOf (m : Except CErr Unit) (c : CV) : Option String :=
   match m, c with
   | .ok _, .reject msg => some s!"model-accepts/compiler-rejects: {normMsg msg}"
-  | .error e, .accept => some s!"model-rejects/compiler-accepts: {msgKey e}"
+  | .error (.reject key _), .accept => some s!"model-rejects/compiler-accepts: {key}"
   | _, _ => none
 
-def verdictStr (m : Except String Unit) : String :=
+def isFuel (m : Except CErr Unit) : Bool :=
+  match m with
+  | .error .fuel => true
+  | _ => false
+
+def verdictStr (m : Except CErr Unit) : String :=
   match m with
   | .ok _ => "accept"
-  | .error e => s!"reject ({e})"
+  | .error .fuel => "HARNESS ERROR (fuel: the model's run was cut off)"
+  | .error e => s!"reject ({e.render})"
 
 /-- A verdict for the dump: `accept`, `reject <key>`, or `harness`. -/
-def modelDump (m : Except String Unit) : String :=
+def modelDump (m : Except CErr Unit) : String :=
   match m with
   | .ok _ => "accept"
-  | .error e => s!"reject {msgKey e}"
+  | .error (.reject key _) => s!"reject {key}"
+  | .error .fuel => "harness"
 
 def cvDump : CV → String
   | .accept => "accept"
@@ -102,6 +112,7 @@ def cvStr : CV → String
 structure Setup where
   cfg : Cfg
   rules : Rules
+  fuel : Nat
   popts : PrintOpts
   work : String
 
@@ -110,20 +121,22 @@ def compileProg (s : Setup) (p : Program) : IO CV := do
   IO.FS.writeFile file (printProgram s.popts p)
   runCompiler s.cfg file
 
-def evalProg (s : Setup) (p : Program) : IO (Except String Unit × CV) := do
-  return (checkProgram s.rules p, ← compileProg s p)
+def evalProg (s : Setup) (p : Program) : IO (Except CErr Unit × CV) := do
+  return (checkProgram s.rules p s.fuel, ← compileProg s p)
 
 /-- Greedy shrink: take the first smaller program with the same disagreement shape. `p` comes
 with its two verdicts, and the result does too. -/
-partial def shrinkLoop (s : Setup) (shape : String) (p : Program) (m : Except String Unit)
-    (c : CV) (budget : Nat) : IO (Program × Except String Unit × CV) := do
+partial def shrinkLoop (s : Setup) (shape : String) (p : Program) (m : Except CErr Unit)
+    (c : CV) (budget : Nat) : IO (Program × Except CErr Unit × CV) := do
   if budget == 0 then return (p, m, c)
   let mut budget := budget
   for cand in shrinkProgram p do
     if budget == 0 then break
     budget := budget - 1
     -- the shape fixes the model verdict a candidate needs, so skip the compiler on a miss
-    let m' := checkProgram s.rules cand
+    let m' := checkProgram s.rules cand s.fuel
+    -- a cut-off run is no verdict, so it cannot keep the shape
+    if isFuel m' then continue
     if m'.toBool != shape.startsWith "model-accepts" then continue
     let c' ← compileProg s cand
     if shapeOf m' c' == some shape then
@@ -156,6 +169,7 @@ def parseArgs : List String → Cfg → Except String Cfg
   | "--plant" :: v :: r, c => parseArgs r { c with plant := v }
   | "--expect" :: v :: r, c => parseArgs r { c with expect := v }
   | "--expect-shape" :: v :: r, c => parseArgs r { c with expectShape := v }
+  | "--fuel" :: v :: r, c => parseArgs r { c with fuel := v.toNat! }
   | "--dump-verdicts" :: v :: r, c => parseArgs r { c with dump := v }
   | a :: _, _ => .error s!"unknown argument {a}"
 
@@ -171,7 +185,9 @@ def main (args : List String) : IO UInt32 := do
   let popts : PrintOpts := { bug := cfg.plant == "printer-bug" }
   IO.FS.createDirAll cfg.out
   let work ← IO.FS.createTempDir
-  let s : Setup := { cfg, rules, popts, work := work.toString }
+  -- the planted low budget cuts off most runs; the self-test needs them reported, not decided
+  let fuel := if cfg.plant == "low-fuel" then 1 else cfg.fuel
+  let s : Setup := { cfg, rules, fuel, popts, work := work.toString }
   let allow ← parseAllow cfg.allowlist
   for (id, _, _) in allow do
     if (witnesses.lookup id).isNone then
@@ -180,6 +196,7 @@ def main (args : List String) : IO UInt32 := do
       return 2
   let mut nAccept := 0
   let mut nReject := 0
+  let mut nFuel := 0
   let mut harness : List String := []
   let mut bad : List String := []
   let mut allowed : List String := []
@@ -192,7 +209,13 @@ def main (args : List String) : IO UInt32 := do
     if cfg.dump != "" then dump := dump ++ [s!"{seed} {modelDump m} {cvDump c}"]
     match m with
     | .ok _ => nAccept := nAccept + 1
-    | .error _ => nReject := nReject + 1
+    | .error (.reject ..) => nReject := nReject + 1
+    | .error .fuel => nFuel := nFuel + 1
+    -- running out of fuel is never a verdict: a harness error, whatever the compiler said
+    if isFuel m then
+      harness := harness ++ [s!"seed {seed}: (fuel: the model's run was cut off at {fuel})"]
+      IO.FS.writeFile (cfg.out ++ s!"/harness-{seed}.spr") (printProgram popts p)
+    else
     match c with
     | .harness msg =>
       harness := harness ++ [s!"seed {seed}: {msg}"]
@@ -239,6 +262,13 @@ def main (args : List String) : IO UInt32 := do
       IO.println "self-test ok: the planted printer defect gave a harness error"
       return 0
     IO.println "self-test FAILED: expected a harness error and no disagreement"
+    return 1
+  | "fuel-error" =>
+    -- every harness error is a fuel cut-off, and none became a verdict or a disagreement
+    if nFuel > 0 && harness.length == nFuel && bad.isEmpty then
+      IO.println s!"self-test ok: {nFuel} runs ran out of fuel, none gave a verdict"
+      return 0
+    IO.println "self-test FAILED: expected fuel harness errors, no verdict from one, no disagreement"
     return 1
   | _ =>
     for st in stale do

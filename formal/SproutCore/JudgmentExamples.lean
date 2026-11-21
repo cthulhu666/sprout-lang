@@ -1052,21 +1052,21 @@ section agree
 
 open SproutCore.Tests
 
-#guard !accepts r15a
-#guard !accepts r15b
-#guard !accepts r15c
-#guard !accepts r9a
-#guard !accepts r9b
-#guard !accepts r9c
-#guard !accepts r8arg
-#guard !accepts r8ret
-#guard !accepts r8contra
-#guard !accepts (joinPure true)
-#guard !accepts (joinPure false)
-#guard !accepts r11param
-#guard !accepts r11print
-#guard !accepts r5let
-#guard !accepts r56
+#guard rejects r15a
+#guard rejects r15b
+#guard rejects r15c
+#guard rejects r9a
+#guard rejects r9b
+#guard rejects r9c
+#guard rejects r8arg
+#guard rejects r8ret
+#guard rejects r8contra
+#guard rejects (joinPure true)
+#guard rejects (joinPure false)
+#guard rejects r11param
+#guard rejects r11print
+#guard rejects r5let
+#guard rejects r56
 
 #guard accepts okLetGen
 #guard accepts okFnGen
@@ -1080,14 +1080,14 @@ open SproutCore.Tests
 #guard accepts c56
 #guard accepts c5
 #guard accepts c15
-#guard !accepts r9ret
+#guard rejects r9ret
 
-#guard !accepts r5arity
-#guard !accepts r5zero
+#guard rejects r5arity
+#guard rejects r5zero
 
 -- The one divergence. The judgment accepts `-> Int -> Int !{IO}` (spec §7 rule 9, and the
 -- compiler), `Check.FnInfo.build` rejects it as ill-formed (BACKLOG).
-#guard !accepts okRetIO
+#guard rejects okRetIO
 
 end agree
 
