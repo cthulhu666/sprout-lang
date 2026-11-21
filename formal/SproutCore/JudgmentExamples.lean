@@ -862,7 +862,7 @@ theorem r9ret_rejected : ¬ r9ret.Typed := by
     rw [e1] at hel'
     obtain rfl := Option.some.inj hel'
     exact hn ⟨rfl, rfl⟩
-  | writtenInner a' r0 r' hel' hr0 hatt =>
+  | writtenInner a' r0 r' hel' hatt =>
     simp [bindParams] at hbody
     obtain ⟨Γ', ε₁, ε₂, hsteps, -, hε⟩ := hbody.doB_inv
     cases hsteps with
@@ -904,7 +904,7 @@ theorem okRetIO_typed : okRetIO.Typed := by
     ⟨by decide, by decide, [], rfl, by decide, rfl⟩ ?_) (Groups.nil _)
   refine ⟨[.int], .arr [.int] .int .io, .pure, mkArr [.int] .int .pure, .pure,
     ParamsTy.written _ _ _ _ _ rfl ParamsTy.nil,
-    RetTy.writtenInner _ (.arr [.int] .int .pure) _ rfl rfl rfl, rfl,
+    RetTy.writtenInner _ (.arr [.int] .int .pure) _ rfl rfl, rfl,
     HasType.lam _ "y" none _ .int .int .pure rfl (HasType.var _ _ (.local .int) _ rfl rfl),
     Flows.arr _ _ _ _ _ _ _ _ rfl rfl Flows.int rfl Flows.int, rfl⟩
 
