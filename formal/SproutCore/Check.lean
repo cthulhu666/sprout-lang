@@ -289,6 +289,10 @@ partial def peel (t : Ty) (n : Nat) : M (List Ty × Ty × Eff) := do
     if n == ps.length then pure (ps, r, e)
     -- spec §7 rule 9: calling a `() -> T` requires the empty argument list
     else if ps.isEmpty then reject "mismatch" "call of a function taking no arguments with some"
+    -- spec §5.3, §7 rule 9: no arrow but `() -> T` takes zero arguments, so the run-time count
+    -- check of a value call can never pass (the compiler: "requires arguments but was called with
+    -- none")
+    else if n == 0 then reject "arity" "call of a function requiring arguments with none"
     else if n < ps.length then
       -- spec §5.3: applying a function-typed value is checked at run time; typed as the rest
       pure (ps.take n, mkArr (ps.drop n) r e, .pure)

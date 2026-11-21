@@ -92,6 +92,20 @@ private def ap0Decl : Decl :=
     (some (.int, .pure)) (.app (.app (.var "h") [.var "y"]) []),
   fnY (.app (.var "ap2") [.var "k2", .var "y"])]⟩
 
+/-! ### A call with no arguments needs a `() -> T` (spec §5.3, §7 rule 9) -/
+
+-- `fn g(h: Int -> Int) -> Int = h()`: a parameter, called with none. Rejected.
+#guard rejectKey ⟨[.fn "g" [("h", some (.arr [.int] .int .pure))] (some (.int, .pure))
+  (.app (.var "h") [])]⟩ == "arity"
+
+-- `fn g() -> Int = let p = print_str in p()`: an alias of `print_str`, called with none. Rejected.
+#guard rejectKey ⟨[.fn "g" [] (some (.int, .io))
+  (.letIn "p" (.var "print_str") (.doB [.exprS (.app (.var "p") [])] (.int 0)))]⟩ == "arity"
+
+-- ... and `print_str()` itself.
+#guard rejectKey ⟨[.mainFn (some (.unit, .io)) (.doB [.exprS (.app (.var "print_str") [])] .unit)]⟩
+  == "arity"
+
 /-! ### A peer join of arrows of different stored arity (spec §7 rule 8) -/
 
 private def lam2 (b : Expr) : Expr := .lam "x" none (.lam "y" none b)
