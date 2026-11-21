@@ -2256,10 +2256,6 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
 - [ ] `P1` **Implement `complete_in_state`** (tab completion) in `analysis_service_driver.sprout`;
   it is the last stub, returning "not yet implemented". Approach: reuse the `type_of_in_source`
   machinery and filter by prefix over visible names from imports plus declared names.
-- [ ] `P1` **`sprout_tag: null pointer` crash in native REPL block-mode.** Three block-mode tests
-  exit 250 (mixed submissions run sequentially; multi-line class declaration; multi-line function
-  declaration). The crash is in the REPL binary itself, not the analysis service — likely a null
-  GC allocation in the block-mode parser path for multi-line input.
 - [ ] `P2` **A rendered effect variable leaks its generated name.** `list_fold` hovers as
   `(a -> b -> a !{$e14}) -> … !{$e14}` though the prelude declares `!{e}`. `types.effect_suffix`
   prints `EffectVar name` verbatim and no rename reaches it — `build_var_rename` covers type
