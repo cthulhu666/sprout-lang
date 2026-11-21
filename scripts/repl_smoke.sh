@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Gate: the REPL on piped stdin, with lines that are not valid UTF-8.
+# Gate: the REPL on piped stdin: `:{ ... :}` blocks over several lines, and lines that are not
+# valid UTF-8.
 #
 # A `String` cannot hold such a line, so the REPL reads it as an error. Outside a `:{ ... :}` block
 # the line is skipped with a message. Inside one it cancels the block: the block must not run
@@ -44,6 +45,23 @@ has "$out" 'input line is not valid UTF-8; skipped'
 check "an unreadable line outside a block is skipped, with a message" $?
 has "$out" -x '2'
 check "the line after a skipped one is evaluated" $?
+
+# Blocks spanning several lines: a function body, a class and its instance, and blocks mixed with
+# single-line submissions that use what earlier ones declared.
+out="$(printf ':{\nfn fact(n: Int) -> Int =\n  if n <= 1 then 1\n  else n * fact(n - 1)\n:}\nfact(5)\n' | "$SPROUTD" 2>&1)"
+check "a multi-line function block runs" $?
+has "$out" -x '120'
+check "a multi-line function block declares its function" $?
+
+out="$(printf ':{\nclass Sized a\n  fn size(v: a) -> Int\n:}\n:{\ninstance Sized Int\n  fn size(v: Int) -> Int = v\n:}\nsize(4)\n' | "$SPROUTD" 2>&1)"
+check "a class block and an instance block run" $?
+has "$out" -x '4'
+check "a method declared by class and instance blocks is callable" $?
+
+out="$(printf 'let x = 1\n:{\nfn g(a: Int) -> Int =\n  a + x\n:}\ng(2)\nprint_str("hi")\n:{\nfn h() -> Int = 3\n:}\nh()\n' | "$SPROUTD" 2>&1)"
+check "blocks mixed with single lines run" $?
+has "$out" -x '3' && has "$out" -x 'hi' && [ "$(grep -cx '3' <<<"$out")" -eq 2 ]
+check "each submission sees the ones before it" $?
 
 if [ "$fail" -eq 0 ]; then echo "==> repl smoke: OK"; else echo "==> repl smoke: FAILED"; fi
 exit $fail
