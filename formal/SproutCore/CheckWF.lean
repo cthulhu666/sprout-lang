@@ -1761,12 +1761,12 @@ macro_rules
   | `(tactic| wp_step) => `(tactic| leaf inferFnGroup_wp)
 
 theorem nodes_src {nodes : Array Node} (h : ∀ nd ∈ nodes.toList, Node.Src nd) (i : Nat) :
-    Node.Src nodes[i]! := by
-  by_cases hi : i < nodes.size
-  · rw [getElem!_pos nodes i hi]
+    Node.Src (nodes[i]?.getD default) := by
+  cases hg : nodes[i]? with
+  | none => exact Node.Src_default
+  | some nd =>
+    obtain ⟨hi, rfl⟩ := Array.getElem?_eq_some_iff.mp hg
     exact h _ (Array.mem_toList_iff.mpr (Array.getElem_mem hi))
-  · rw [getElem!_neg nodes i hi]
-    exact Node.Src_default
 
 theorem runPlan_wp {Q : PUnit → CState → Prop} {s : CState} {rules : Rules} {pl : Plan}
     (hs : s.WF) (hpl : pl.Src) (h : ∀ s', s.sz ≤ s'.sz → s'.WF → Q ⟨⟩ s') :
@@ -1777,7 +1777,7 @@ theorem runPlan_wp {Q : PUnit → CState → Prop} {s : CState} {rules : Rules} 
     (fun (env : Env) s1 => s1.WF ∧ s.sz ≤ s1.sz ∧ Env.WF s1.sz env) pl.order preludeEnv
     ⟨hs, Nat.le_refl _, Env.WF.prelude⟩ ?_ ?_)
   · intro g hg env s1 ⟨h1, g1, hE⟩
-    have hmem : ∀ nd ∈ g.map (fun i => pl.nodes[i]!), Node.Src nd := by
+    have hmem : ∀ nd ∈ g.map (fun i => pl.nodes[i]?.getD default), Node.Src nd := by
       intro nd hnd
       obtain ⟨i, _, rfl⟩ := List.mem_map.mp hnd
       exact nodes_src hpl.1 i
@@ -1788,7 +1788,7 @@ theorem runPlan_wp {Q : PUnit → CState → Prop} {s : CState} {rules : Rules} 
       repeat' wp_step
       all_goals ((try dsimp only); refine ⟨by wf_close, by omega, by wf_close⟩)
     · have hfn : ∀ f ∈ List.filterMap (fun nd => match nd with | Node.fnN f => some f | _ => none)
-          (g.map fun i => pl.nodes[i]!), f.Src := by
+          (g.map fun i => pl.nodes[i]?.getD default), f.Src := by
         intro f hf
         obtain ⟨nd, hnd, hf'⟩ := List.mem_filterMap.mp hf
         cases nd with
@@ -1848,6 +1848,51 @@ theorem bindMeta_set_eq {s : CState} {n : Nat} (h : Ty.WF s.sz 0 (.mv n)) (v : O
 theorem instTy_idx {ms : Array Ty} {sz n i : Nat} (hm : ms.size = n) (h : Ty.WF sz n (.gen i)) :
     ∃ hi : i < ms.size, instTy ms (.gen i) = ms[i] :=
   ⟨hm ▸ Ty.WF_gen.mp h, instTy_gen_eq ms i (hm ▸ Ty.WF_gen.mp h)⟩
+
+/-! ### The remaining accessors
+
+`checkPlan`, `orderGroups` and `runPlan` read arrays and lists by total functions (`getD`,
+`headD`, `reachAt`), not `!`: the indices are in range, but proving it means a loop invariant for
+each of `checkPlan`'s nine loops, and nothing downstream needs it. The rewrite is the same
+function as the `!` it replaced, in the logic and at run time (`getElem!_eq_getD`,
+`head!_eq_headD`); the per-program verdicts of the oracle were diffed before and after.
+`msgKey`'s `head!` is backed by `splitOn_ne_nil`. `set!` is `setIfInBounds`: it never panics. -/
+
+theorem getElem!_eq_getD {α : Type} [Inhabited α] (a : Array α) (i : Nat) :
+    a[i]! = a[i]?.getD default := by
+  simp only [getElem!_def]
+  cases a[i]? <;> rfl
+
+theorem head!_eq_headD {α : Type} [Inhabited α] (l : List α) : l.head! = l.headD default := by
+  cases l <;> rfl
+
+theorem splitOnAux_ne_nil (s sep : String) (b i j : String.Pos.Raw) (r : List String) :
+    s.splitOnAux sep b i j r ≠ [] := by
+  induction b, i, j, r using String.splitOnAux.induct s sep with
+  | case1 b i j r h =>
+    rw [String.splitOnAux]
+    simp [h]
+  | case2 b i j r h1 h2 _ _ h3 ih =>
+    rw [String.splitOnAux]
+    simpa (config := {zetaDelta := true}) [h1, h2, h3] using ih
+  | case3 b i j r h1 h2 _ _ h3 ih =>
+    rw [String.splitOnAux]
+    simpa (config := {zetaDelta := true}) [h1, h2, h3] using ih
+  | case4 b i j r h1 h2 ih =>
+    rw [String.splitOnAux]
+    simpa [h1, h2] using ih
+
+theorem splitOn_ne_nil (e sep : String) : e.splitOn sep ≠ [] := by
+  unfold String.splitOn
+  split
+  · simp
+  · exact splitOnAux_ne_nil _ _ _ _ _ _
+
+/-- `msgKey` reads a real head: `splitOn` never returns `[]`. -/
+theorem msgKey_head (e : String) : ∃ x xs, e.splitOn ":" = x :: xs ∧ msgKey e = x := by
+  cases h : e.splitOn ":" with
+  | nil => exact absurd h (splitOn_ne_nil e ":")
+  | cons x xs => exact ⟨x, xs, rfl, by simp only [msgKey, h]; rfl⟩
 
 /-! ### Canonical arrows
 
