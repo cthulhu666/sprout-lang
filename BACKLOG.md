@@ -60,6 +60,12 @@ Legend:
   then `g(f)` with `g(h: Int -> Int)` is accepted by the compiler, so `f` keeps the initialiser's
   pure arrow; read literally, `f` has the annotated `!{IO}` arrow and `g(f)` is rejected. State
   which. The model follows the compiler (`LetAnn` in `Judgment.lean`).
+- [ ] `P3` **The spec does not say what a written `a -> a !{IO}` means when `a` is solved to an
+  arrow.** §7 rule 9 puts `!{IO}` on the innermost arrow of a spelled-out type. The model reads
+  the written type first: `a := Int -> Int` gives `(Int -> Int) -> (Int -> Int)` with IO on the
+  outer arrow, while the spelled-out `(Int -> Int) -> Int -> Int !{IO}` puts it on the innermost
+  one. Witness: `let f : a -> a !{IO} = \(h: Int -> Int) -> h`. State which reading holds in
+  §7 rule 9. `Ty.elab` (`Judgment.lean`) and `Check.elabTy` test the written result.
 - [ ] `P3` **A type argument is judged covariantly, which is wrong for a mutable container.**
   `Ref` should be invariant in its argument. No reaching program is known — four shapes that
   laundered before bounded effect variables now reject, but via a bound travelling through
