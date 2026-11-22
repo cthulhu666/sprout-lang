@@ -720,17 +720,14 @@ theorem nodup_flatMap_mem {α β : Type} (g : α → List β) :
     · exact (List.nodup_append.mp h).1
     · exact nodup_flatMap_mem g (List.nodup_append.mp h).2.1 x hx
 
-def skolemId : Ty → Nat
-  | .skolem k => k
-  | _ => 0
-
+/-- `skId` on skolems is the skolem's own id, for any `B`. -/
 theorem ids_map (sks : List (String × Ty)) (h : ∀ q ∈ sks, ∃ k, q.2 = .skolem k) :
-    (sks.map fun q => skolemId q.2).map Ty.skolem = sks.map Prod.snd := by
+    (sks.map fun q => skId 0 q.2).map Ty.skolem = sks.map Prod.snd := by
   rw [List.map_map]
   apply List.map_congr_left
   intro q hq
   obtain ⟨k, hk⟩ := h q hq
-  simp [hk, skolemId]
+  simp [hk, skId]
 
 theorem skMap_keys : ∀ (sks : List (String × Ty)), (sks.map Prod.fst).Nodup →
     (sks.map Prod.fst).map (skMap sks) = sks.map Prod.snd
@@ -811,9 +808,9 @@ theorem member_wit {s : CState} {θ : Nat → Ty} {B : Nat} {E : Env} (hθ : Sol
     · obtain ⟨hn, hok, hnsk, hinst⟩ := mem.sch o.1 o.2.1 hb
       have hc : b.f.complete = true := by rw [← mem.sch_some, hb]; rfl
       have hbt : Ty.app θ b.t = b.t := Ty.app_of_ok_gen θ _ (b.ok_t mem hc)
-      have hnd : ((sks.map fun q => skolemId q.2)).Nodup :=
+      have hnd : ((sks.map fun q => skId 0 q.2)).Nodup :=
         nodup_of_map Ty.skolem (by rw [ids_map sks mem.sk]; exact hndk)
-      refine ⟨hok, hnsk, sks.map fun q => skolemId q.2, by simp [hn], hnd, ?_⟩
+      refine ⟨hok, hnsk, sks.map fun q => skId 0 q.2, by simp [hn], hnd, ?_⟩
       show Ty.inst _ o.2.1 = Ty.app θ b.t
       rw [ids_map sks mem.sk, hbt]
       exact hinst
