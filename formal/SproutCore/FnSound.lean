@@ -202,19 +202,6 @@ theorem ParamsTy.inst {σ σ' : String → Ty} (ts : List Ty)
     simp at this
 
 
-/-! ### Loops that know their prefix -/
-
-/-- `Wp.forIn_prefix_done` for a loop no step of which ends early (`done` is not reachable). -/
-theorem Wp.forIn_prefix {α β : Type} {f : α → β → M (ForInStep β)} {Q : β → CState → Prop}
-    (I : List α → β → CState → Prop) (l : List α) (init : β) {s : CState} (h0 : I [] init s)
-    (hf : ∀ pre a post b s1, pre ++ a :: post = l → I pre b s1 →
-      Wp (f a b) (fun r s2 => ∃ b', r = ForInStep.yield b' ∧ I (pre ++ [a]) b' s2) s1)
-    (hq : ∀ b s1, I l b s1 → Q b s1) : Wp (ForIn.forIn l init f) Q s :=
-  Wp.forIn_prefix_done I l init h0
-    (fun pre a post b s1 hl hI => Wp.mono (hf pre a post b s1 hl hI)
-      fun r s2 ⟨b', hr, hI'⟩ => by subst hr; exact hI')
-    hq
-
 /-! ### Fresh skolems -/
 
 theorem Ty.skolem_inj {a b : Nat} (h : Ty.skolem a = Ty.skolem b) : a = b := by cases h; rfl
