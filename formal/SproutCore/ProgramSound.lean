@@ -30,8 +30,7 @@ set_option linter.unusedVariables false
 /-- A declaration's written types are surface types and its terms are source terms (the parser
 builds no metavariable, skolem or `gen`). -/
 def Decl.Surf : Decl → Prop
-  | .fn _ ps sg b => (∀ p ∈ ps, ∀ t, p.2 = some t → t.surf = true) ∧
-      (∀ r e, sg = some (r, e) → r.surf = true) ∧ b.Surf
+  | .fn n ps sg b => FnInfo.Surf ⟨n, ps, sg, b⟩
   | .letD _ a i => (∀ t, a = some t → t.surf = true) ∧ i.Surf
   | .mainFn _ b => b.Surf
 
@@ -198,7 +197,7 @@ theorem runPlan_sound {p : Program} {pl : Plan} (hinv : Plan.Inv p pl) (hp : p.S
               rw [hnd'] at hfe
               simp only [Option.some.injEq] at hfe
               subst hfe
-              simpa [Plan.declAt, hnd', Node.toDecl, FnInfo.Surf, Decl.Surf] using hs1
+              simpa [Plan.declAt, hnd', Node.toDecl, Decl.Surf] using hs1
           refine Wp.bind (inferFnGroup_sound h1 hnf1 hcl hne hfsurf ?_)
           intro env' s' ex w hcl' ⟨zts, hu, hz⟩
           refine Wp.pure' ⟨_, rfl, e1.trans ex, w, hcl', ?_⟩
