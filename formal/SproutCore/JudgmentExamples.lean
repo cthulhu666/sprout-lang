@@ -36,8 +36,9 @@ at two types (omitted and written annotations), `okJoin_typed` a peer join of a 
 `okMain_typed` a `main` with a `do` block, `okRetIO_typed` the innermost-arrow reading of a
 signature's `!{IO}`, `okLetAnnIO_typed` `let f : a -> a !{IO} = \(h: Int -> Int) -> h`, where
 `a` is solved to an arrow and the refusal of an `!{IO}` arrow with an arrow result (§7 rule 9)
-does not apply, since it is on the written result. The `#guard`s at the end record that the checker gives the same verdict on
-every program here, except the one the BACKLOG entry names (`okRetIO`).
+does not apply, since it is on the written result. The `#guard`s at the end record that the
+checker gives the same verdict on every program here, except the one the BACKLOG entry names
+(`okRetIO`).
 -/
 
 namespace SproutCore.Judgment
@@ -1044,8 +1045,6 @@ theorem c5_typed : c5.Typed := by
   exact HasType.lam _ "s" none _ .str .unit .io rfl
     (printCall rfl (HasType.var _ _ (.local .str) _ rfl rfl))
 
-/-! ### The checker agrees on every program above, except one -/
-
 /-- `let f : a -> a !{IO} = \(h: Int -> Int) -> h` and a unit `main`. The initialiser forces the
 annotation's variable `a` to `Int -> Int`, so the written `a -> a !{IO}` reads as an `!{IO}` arrow
 whose result is an arrow. `Ty.elab` refuses an `!{IO}` arrow whose WRITTEN result is an arrow, not
@@ -1076,6 +1075,8 @@ theorem okLetAnnIO_typed : okLetAnnIO.Typed := by
     simp [okLetAnnIO] at hm
     obtain ⟨rfl, rfl⟩ := hm
     exact ⟨.unit, rfl, Or.inl rfl, .unit, .pure, HasType.unit _, Flows.unit⟩
+
+/-! ### The checker agrees on every program above, except one -/
 
 section agree
 
