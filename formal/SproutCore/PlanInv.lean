@@ -651,6 +651,15 @@ structure Plan.Inv (p : Program) (pl : Plan) : Prop where
   order_ne : ∀ g ∈ pl.order, g ≠ []
   order_perm : pl.order.flatten.Perm (List.range pl.nodes.size)
 
+/-- `runPlan`'s index guard holds for every group of an invariant plan. -/
+theorem Plan.Inv.guard_true {p : Program} {pl : Plan} (h : Plan.Inv p pl) :
+    ∀ g ∈ pl.order, g.all (fun i => i < pl.nodes.size && i < pl.edges.size) = true := by
+  intro g hg
+  rw [List.all_eq_true]
+  intro i hi
+  have := h.order_lt g hg i hi
+  simp [this, h.edges_size]
+
 theorem checkPlan_inv {p : Program} {pl : Plan} (h : checkPlan p = .ok pl) : Plan.Inv p pl := by
   unfold checkPlan at h
   rw [bind_ok_iff] at h
