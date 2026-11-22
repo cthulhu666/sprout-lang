@@ -317,8 +317,9 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
        compiler accept `let f : a -> a !{IO} = \(h: Int -> Int) -> h`, where the initialiser makes
        `a` an arrow. Spec §7 rule 9 is a rule about spelling, so `Ty.elab` now refuses on the
        written result (`okLetAnnIO_typed` is the regression test), and `Check.elabTy` tests the
-       written result too, so the two agree for every map, with no premise on the map. Stage 1b is
-       complete.
+       written result too, so the two agree for every map, with no premise on the map. A `fn`
+       signature reads the same way: `Check.FnInfo.build` and `RetTy` (`written`,
+       `writtenInner`) split on the written result. Stage 1b is complete.
      Prior art: Algorithm W's soundness in Isabelle (Naraschewski and Nipkow, JAR 1999 [10]). Its
      hard part was the fresh-variable invariant, which is what the well-formedness invariants are
      for.

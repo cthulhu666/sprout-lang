@@ -65,7 +65,8 @@ Legend:
   the written type first: `a := Int -> Int` gives `(Int -> Int) -> (Int -> Int)` with IO on the
   outer arrow, while the spelled-out `(Int -> Int) -> Int -> Int !{IO}` puts it on the innermost
   one. Witness: `let f : a -> a !{IO} = \(h: Int -> Int) -> h`. State which reading holds in
-  §7 rule 9. `Ty.elab` (`Judgment.lean`) and `Check.elabTy` test the written result.
+  §7 rule 9. `Ty.elab`, `RetTy` (`Judgment.lean`), `Check.elabTy` and `FnInfo.build` test the
+  written result.
 - [ ] `P3` **A type argument is judged covariantly, which is wrong for a mutable container.**
   `Ref` should be invariant in its argument. No reaching program is known — four shapes that
   laundered before bounded effect variables now reject, but via a bound travelling through
