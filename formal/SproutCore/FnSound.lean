@@ -969,7 +969,7 @@ theorem group_assemble {s : CState} {base : Env} {bs : List BuiltT}
 
 theorem inferFnGroup_sound {Q : Env → CState → Prop} {s : CState} {base : Env}
     {fns : List FnInfo} (hs : s.WF) (hnf : s.NF) (hbase : Env.Closed base) (hne : fns ≠ [])
-    (hsrc : ∀ f ∈ fns, f.body.Src) (hfns : ∀ f ∈ fns, f.Surf)
+    (hfns : ∀ f ∈ fns, f.Surf)
     (h : ∀ env' s', Ext s s' → s'.WF → Env.Closed env' →
       (∃ zts : List Ty, (∀ zt ∈ zts, ∀ m ∈ metasOf zt, s'.Unbound m) ∧
         ∀ B, (∀ zt ∈ zts, zt.SkLt B) → ∀ θ, Solves θ s' →
@@ -1080,7 +1080,7 @@ theorem inferFnGroup_sound {Q : Env → CState → Prop} {s : CState} {base : En
       have hfs : b.f.Surf := hfns b.f (by rw [← hpf]; exact List.mem_map_of_mem hbm)
       have hnf2 : s2.NF := e2.nf (e1.nf hnf)
       refine Wp.bind (checkBody_sound h2 hnf2 ?_ ?_ ?_ ?_ hmem2.r_wf.1 hmem2.r_wf.2
-        (hsrc b.f (by rw [← hpf]; exact List.mem_map_of_mem hbm)) hfs.2.2 ?_)
+        (Expr.src_of_surf _ hfs.2.2) hfs.2.2 ?_)
       · exact (hwf.mono e2.sz).append (hbase.wf _)
       · intro p hp
         rcases List.mem_append.mp hp with hp | hp

@@ -27,59 +27,6 @@ set_option linter.unusedVariables false
 
 /-! ### Source conditions -/
 
-mutual
-theorem Ty.wf_of_surf : ∀ t : Ty, t.surf = true → ∀ sz g, Ty.WF sz g t
-  | .named _, _, _, _ => Ty.WF_named
-  | .mv _, h, _, _ => by simp [Ty.surf] at h
-  | .skolem _, h, _, _ => by simp [Ty.surf] at h
-  | .gen _, h, _, _ => by simp [Ty.surf] at h
-  | .int, _, _, _ => Ty.WF_int
-  | .bool, _, _, _ => Ty.WF_bool
-  | .str, _, _, _ => Ty.WF_str
-  | .unit, _, _, _ => Ty.WF_unit
-  | .tup ts, h, sz, g => by
-    simp only [Ty.surf] at h
-    exact Ty.WF_tup.mpr (Ty.wfList_of_surf ts h sz g)
-  | .arr ps r e, h, sz, g => by
-    simp only [Ty.surf, Bool.and_eq_true] at h
-    exact Ty.WF_arr.mpr ⟨Ty.wfList_of_surf ps h.1 sz g, Ty.wf_of_surf r h.2 sz g⟩
-
-theorem Ty.wfList_of_surf : ∀ ts : List Ty, Ty.surfList ts = true → ∀ sz g,
-    ∀ t ∈ ts, Ty.WF sz g t
-  | [], _, _, _ => by simp
-  | t :: ts, h, sz, g => by
-    simp only [Ty.surfList, Bool.and_eq_true] at h
-    intro u hu
-    rcases List.mem_cons.mp hu with e | hu
-    · rw [e]; exact Ty.wf_of_surf t h.1 sz g
-    · exact Ty.wfList_of_surf ts h.2 sz g u hu
-end
-
-mutual
-theorem Expr.src_of_surf : ∀ e : Expr, e.Surf → e.Src
-  | .var _, _ => trivial
-  | .int _, _ => trivial
-  | .bool _, _ => trivial
-  | .str _, _ => trivial
-  | .unit, _ => trivial
-  | .lam _ ann b, h => ⟨fun t ht => Ty.wf_of_surf t (h.1 t ht) 0 0, Expr.src_of_surf b h.2⟩
-  | .app f as, h => ⟨Expr.src_of_surf f h.1, Expr.srcList_of_surf as h.2⟩
-  | .letIn _ r b, h => ⟨Expr.src_of_surf r h.1, Expr.src_of_surf b h.2⟩
-  | .ite c t e, h => ⟨Expr.src_of_surf c h.1, Expr.src_of_surf t h.2.1, Expr.src_of_surf e h.2.2⟩
-  | .tup es, h => Expr.srcList_of_surf es h
-  | .notE e, h => Expr.src_of_surf e h
-  | .doB steps f, h => ⟨Expr.stepSrc_of_surf steps h.1, Expr.src_of_surf f h.2⟩
-
-theorem Expr.srcList_of_surf : ∀ es : List Expr, Expr.SurfList es → Expr.SrcList es
-  | [], _ => trivial
-  | e :: es, h => ⟨Expr.src_of_surf e h.1, Expr.srcList_of_surf es h.2⟩
-
-theorem Expr.stepSrc_of_surf : ∀ steps : List Step, Step.SurfList steps → Step.SrcList steps
-  | [], _ => trivial
-  | .letS _ r :: rest, h => ⟨Expr.src_of_surf r h.1, Expr.stepSrc_of_surf rest h.2⟩
-  | .exprS e :: rest, h => ⟨Expr.src_of_surf e h.1, Expr.stepSrc_of_surf rest h.2⟩
-end
-
 /-- A declaration's written types are surface types and its terms are source terms (the parser
 builds no metavariable, skolem or `gen`). -/
 def Decl.Surf : Decl → Prop
@@ -214,7 +161,7 @@ theorem runPlan_sound {p : Program} {pl : Plan} (hinv : Plan.Inv p pl) (hp : p.S
           have hsurf : Decl.Surf (Decl.letD nm a i) := by
             have := hord [i0] hgm i0 (by simp)
             simpa [Plan.declAt, hnode, Node.toDecl] using this
-          refine Wp.bind (inferLet_sound h1 hnf1 hcl hsurf.1 (Expr.src_of_surf _ hsurf.2) hsurf.2 ?_)
+          refine Wp.bind (inferLet_sound h1 hnf1 hcl hsurf.1 hsurf.2 ?_)
           intro env' s' ex w hcl' ⟨zt, hu, hz⟩
           refine Wp.pure' ⟨_, rfl, e1.trans ex, w, hcl', ?_⟩
           have hnf' : s'.NF := ex.nf hnf1
@@ -252,8 +199,7 @@ theorem runPlan_sound {p : Program} {pl : Plan} (hinv : Plan.Inv p pl) (hp : p.S
               simp only [Option.some.injEq] at hfe
               subst hfe
               simpa [Plan.declAt, hnd', Node.toDecl, FnInfo.Surf, Decl.Surf] using hs1
-          refine Wp.bind (inferFnGroup_sound h1 hnf1 hcl hne
-            (fun f hf => Expr.src_of_surf _ (hfsurf f hf).2.2) hfsurf ?_)
+          refine Wp.bind (inferFnGroup_sound h1 hnf1 hcl hne hfsurf ?_)
           intro env' s' ex w hcl' ⟨zts, hu, hz⟩
           refine Wp.pure' ⟨_, rfl, e1.trans ex, w, hcl', ?_⟩
           have hnf' : s'.NF := ex.nf hnf1

@@ -211,7 +211,7 @@ theorem elabTy_map_leaf {Q : Ty → CState → Prop} {s : CState} {a : Ty} {f : 
 
 theorem inferLet_sound {Q : Env → CState → Prop} {s : CState} {base : Env} {name : String}
     {ann : Option Ty} {init : Expr} (hs : s.WF) (hnf : s.NF) (hbase : Env.Closed base)
-    (hann : ∀ a, ann = some a → Ty.surf a = true) (hsrc : init.Src) (hsurf : init.Surf)
+    (hann : ∀ a, ann = some a → Ty.surf a = true) (hsurf : init.Surf)
     (h : ∀ env' s', Ext s s' → s'.WF → Env.Closed env' →
       (∃ zt, (∀ m ∈ metasOf zt, s'.Unbound m) ∧ ∀ B, zt.SkLt B → ∀ θ, Solves θ s' →
         (∀ m ∈ metasOf zt, θ m = .skolem (B + m)) →
@@ -219,7 +219,8 @@ theorem inferLet_sound {Q : Env → CState → Prop} {s : CState} {base : Env} {
     Wp (inferLet {} base name ann init) Q s := by
   unfold inferLet
   dsimp only
-  refine Wp.bind (infer_sound {} rfl init base _ s hs hnf (hbase.wf _) hbase.nf hsrc hsurf ?_)
+  refine Wp.bind (infer_sound {} rfl init base _ s hs hnf (hbase.wf _) hbase.nf
+    (Expr.src_of_surf _ hsurf) hsurf ?_)
   intro t ε s1 e1 w1 wt nt ht
   dsimp only
   split
