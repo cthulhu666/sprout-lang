@@ -413,14 +413,15 @@ inductive ParamsTy (σ : String → Ty) : List (String × Option Ty) → List Ty
 performs when called with its declared parameters. Omitted: the function is pure and the return
 type is "one type" (rule 16). Written `-> T !{IO}`: `!{IO}` is the function's own effect, unless
 `T` is a function type; then spec §7 rule 9 puts it on `T`'s innermost arrow (`-> A -> B !{IO}` is
-`A -> B !{IO}` returned by a pure call), and the call itself is pure. The checker rejects that
-second form (`Check.FnInfo.build`) and the compiler accepts it (BACKLOG, "The Lean checker rejects
-`fn f(x: Int) -> Int -> Int !{IO}`"); the judgment follows the spec. -/
+`A -> B !{IO}` returned by a pure call), and the call itself is pure. The two rules split on the
+WRITTEN `T` (`a.isArr`), as `Ty.elab` and `Check.elabTy` do, not on `σ`'s reading of it. The
+checker rejects that second form (`Check.FnInfo.build`) and the compiler accepts it (BACKLOG,
+"The Lean checker rejects `fn f(x: Int) -> Int -> Int !{IO}`"); the judgment follows the spec. -/
 inductive RetTy (σ : String → Ty) : Option (Ty × Eff) → Ty → Eff → Prop
   | written (a r : Ty) (e : Eff) :
-      a.elab σ = some r → ¬ (r.isArr = true ∧ e = .io) → RetTy σ (some (a, e)) r e
+      a.elab σ = some r → ¬ (a.isArr = true ∧ e = .io) → RetTy σ (some (a, e)) r e
   | writtenInner (a r0 r : Ty) :
-      a.elab σ = some r0 → r0.attachIO = some r →
+      a.isArr = true → a.elab σ = some r0 → r0.attachIO = some r →
       RetTy σ (some (a, .io)) r .pure
   | omitted (r : Ty) : r.Solved → RetTy σ none r .pure
 

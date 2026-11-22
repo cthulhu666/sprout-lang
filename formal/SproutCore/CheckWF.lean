@@ -1832,9 +1832,9 @@ theorem build_wp {Q : List Ty × Ty × Eff × Ty → CState → Prop} {s : CStat
       let (r, e) ← match f.sig with
         | some (t, e) => do pure (← elabTy m t, e)
         | none => do pure (← fresh, Eff.pure)
-      match r, e with
-      | .arr .., .io => reject "ill-formed" "effect on a function returning a function"
-      | _, _ => pure ()
+      match f.sig with
+      | some (.arr .., .io) => reject "ill-formed" "effect on a function returning a function"
+      | _ => pure ()
       pure (ps, r, e, mkArr ps r e)) Q s1)
     (fun (ps : List Ty) s1 => s1.WF ∧ s.sz ≤ s1.sz ∧ ∀ x ∈ ps, Ty.WF s1.sz g x)
     f.params [] ⟨hs, Nat.le_refl _, by simp⟩ ?_ ?_)

@@ -293,7 +293,7 @@ theorem elabTy_leaf_gen {Q : Ty → CState → Prop} {s : CState} {a : Ty} {f : 
 /-- The facts `build` keeps. `RetB` is the return type's relation to the signature. -/
 def RetB (m : String → Ty) (sig : Option (Ty × Eff)) (r : Ty) (e : Eff) : Prop :=
   match sig with
-  | some (a, e0) => a.elab m = some r ∧ e = e0 ∧ ¬ (r.isArr = true ∧ e0 = .io)
+  | some (a, e0) => a.elab m = some r ∧ e = e0 ∧ ¬ (a.isArr = true ∧ e0 = .io)
   | none => e = .pure ∧ ∃ j, r = .mv j
 
 theorem build_sound {Q : List Ty × Ty × Eff × Ty → CState → Prop} {s : CState} {f : FnInfo}
@@ -305,7 +305,7 @@ theorem build_sound {Q : List Ty × Ty × Eff × Ty → CState → Prop} {s : CS
       (∀ x ∈ ps, Ty.WF s'.sz g x ∧ x.NF) →
       (Ty.WF s'.sz g r ∧ r.NF) → t = mkArr ps r e → ps.length = f.params.length →
       (∀ θ, Solves θ s' → ParamsTy m f.params (ps.map (Ty.app θ))) →
-      RetB m f.sig r e → (¬ (r.isArr = true ∧ e = .io)) →
+      RetB m f.sig r e →
       (f.complete = true → s' = s ∧ ParamsTy m f.params ps ∧ (∀ x ∈ ps, x.ok g = true) ∧
         r.ok g = true) →
       Q (ps, r, e, t) s') :
@@ -374,8 +374,7 @@ theorem build_sound {Q : List Ty × Ty × Eff × Ty → CState → Prop} {s : CS
       have hj2 : j < s2.sz := Ty.WF_mv.mp hd
       refine Wp.bind (Wp.pure' (a := ((Ty.mv j, Eff.pure) : Ty × Eff)) ?_)
       dsimp only
-      refine Wp.pure' (h ps (.mv j) .pure _ s2 (e1.trans e2) h2 (hnk2.trans hnk) ?_ ⟨hd.mono (Nat.le_refl _) (Nat.zero_le g), Ty.NF_mv⟩ rfl hlen ?_ ?_
-        (by simp [Ty.isArr]) ?_)
+      refine Wp.pure' (h ps (.mv j) .pure _ s2 (e1.trans e2) h2 (hnk2.trans hnk) ?_ ⟨hd.mono (Nat.le_refl _) (Nat.zero_le g), Ty.NF_mv⟩ rfl hlen ?_ ?_ ?_)
       · intro y hy
         exact ⟨((hr y hy).1).mono e2.sz (Nat.le_refl _), (hr y hy).2⟩
       · intro θ hθ
@@ -392,11 +391,12 @@ theorem build_sound {Q : List Ty × Ty × Eff × Ty → CState → Prop} {s : CS
       split
       · exact Wp.bind (Wp.reject' _ _)
       · rename_i hne
-        have hno : ¬ (r.isArr = true ∧ e0 = .io) := by
+        have hno : ¬ (a0.isArr = true ∧ e0 = .io) := by
           rintro ⟨hA, hI⟩
-          cases r <;> simp [Ty.isArr] at hA
-          exact hne _ _ _ rfl hI
-        refine Wp.pure' (h ps r e0 _ s1 e1 h1 hnk hr ⟨hwr, hnr⟩ rfl hlen hP1 ?_ hno ?_)
+          cases a0 <;> simp [Ty.isArr] at hA
+          subst hI
+          exact hne _ _ _ rfl
+        refine Wp.pure' (h ps r e0 _ s1 e1 h1 hnk hr ⟨hwr, hnr⟩ rfl hlen hP1 ?_ ?_)
         · rw [hsig]; unfold RetB; exact ⟨hel, rfl, hno⟩
         · intro hc
           simp only [FnInfo.complete, hsig, Bool.and_eq_true, List.all_eq_true] at hc
@@ -449,7 +449,7 @@ theorem scheme_sound {Q : Nat × Ty → CState → Prop} {s : CState} {f : FnInf
   dsimp only
   obtain ⟨hW, hN, hO, hS⟩ := gmap_props f s.sz
   refine Wp.bind (build_sound (g := f.writtenVars.length) (m := f.gmap) hs hW hN hO hsp hsr ?_)
-  intro ps r e t s' e1 w1 hnk hps hr ht hlen hP1 hRB hno hcomp
+  intro ps r e t s' e1 w1 hnk hps hr ht hlen hP1 hRB hcomp
   obtain ⟨rfl, hP, hokps, hokr⟩ := hcomp hc
   have hw : AllWritten f.params := by
     simp only [FnInfo.complete, Bool.and_eq_true, List.all_eq_true] at hc
@@ -988,7 +988,7 @@ theorem inferFnGroup_sound {Q : Env → CState → Prop} {s : CState} {base : En
       obtain ⟨k, hk, _⟩ := hrng2 q hq; exact ⟨k, hk⟩
     obtain ⟨hW, hN, hO⟩ := skMap_props hsks s2.sz 0
     refine Wp.bind (build_sound (m := skMap sks) (g := 0) h2 hW hN hO hfs.1 hfs.2.1 ?_)
-    intro ps r e t s3 e3 h3 hnk3 hps hr ht hlen hP1 hRB hno hcomp
+    intro ps r e t s3 e3 h3 hnk3 hps hr ht hlen hP1 hRB hcomp
     have fin : ∀ sch : Option (Nat × Ty), sch.isSome = f.complete →
         (∀ n sc, sch = some (n, sc) → n = sks.length ∧ sc.ok n = true ∧ sc.noSk = true ∧
           Ty.inst (sks.map Prod.snd) sc = t) →

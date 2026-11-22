@@ -549,9 +549,10 @@ def FnInfo.build (f : FnInfo) (m : String → Ty) : M (List Ty × Ty × Eff × T
   let (r, e) ← match f.sig with
     | some (t, e) => do pure (← elabTy m t, e)
     | none => do pure (← fresh, Eff.pure)
-  match r, e with
-  | .arr .., .io => reject "ill-formed" "effect on a function returning a function"
-  | _, _ => pure ()
+  -- spec §7 rule 9, on the WRITTEN result as `elabTy` does; an omitted one is a fresh meta
+  match f.sig with
+  | some (.arr .., .io) => reject "ill-formed" "effect on a function returning a function"
+  | _ => pure ()
   pure (ps, r, e, mkArr ps r e)
 
 /-- A body is checked against the declared return type and effect. -/
