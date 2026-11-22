@@ -9,13 +9,13 @@ list of non-empty groups of node indices whose concatenation is a permutation of
 `List.range pl.nodes.size`. The permutation needs the reachability matrix to be transitive, so the
 file proves the checker's Warshall loop computes the transitive closure of the edge relation
 (`warshall_k`); the groups then partition the nodes (`groups_loop`) and `orderGroups` only moves
-whole groups (`orderGroups_perm`). Each loop is read through `forIn_prefix`, a loop invariant that
-knows which prefix of the list was processed.
+whole groups (`orderGroups_perm`). Each loop is read through `Except.forIn_prefix`, a loop
+invariant that knows which prefix of the list was processed.
 -/
 
 namespace SproutCore
 
-theorem forIn_prefix {α β ε : Type} (f : α → β → Except ε (ForInStep β))
+theorem Except.forIn_prefix {α β ε : Type} (f : α → β → Except ε (ForInStep β))
     (I : List α → β → Prop) (l : List α)
     (step : ∀ pre a post b b', pre ++ a :: post = l → I pre b → f a b = .ok (.yield b') →
       I (pre ++ [a]) b')
@@ -217,7 +217,7 @@ theorem warshall_j {n : Nat} {E : Nat → Nat → Prop} {k i : Nat} {R0 : Array 
     Cl n E k R0 pi R ∧ ∀ b ∈ pj, reachAt R0 i k = true → reachAt R0 k b = true →
       reachAt R i b = true
   have hI : I (List.range' 0 n 1) R' := by
-    refine forIn_prefix _ I (List.range' 0 n 1) ?_ ?_ (List.range' 0 n 1) [] R R' (by simp)
+    refine Except.forIn_prefix _ I (List.range' 0 n 1) ?_ ?_ (List.range' 0 n 1) [] R R' (by simp)
       ⟨hR, by simp⟩ h
     · intro pre j post R1 R2 hpre ⟨hcl, hrow⟩ hfj
       have hj : j < n := by
@@ -273,7 +273,7 @@ theorem warshall_i {n : Nat} {E : Nat → Nat → Prop} {k : Nat} {R0 : Array (A
         pure (ForInStep.yield (reachSet R i j)) else pure (ForInStep.yield R)) >>= fun R =>
       pure (ForInStep.yield R)) : Except CErr (Array (Array Bool))) = .ok R') :
     Cl n E k R0 (List.range' 0 n 1) R' := by
-  refine forIn_prefix _ (fun pi R => Cl n E k R0 pi R) (List.range' 0 n 1) ?_ ?_
+  refine Except.forIn_prefix _ (fun pi R => Cl n E k R0 pi R) (List.range' 0 n 1) ?_ ?_
     (List.range' 0 n 1) [] R0 R' (by simp) h0 h
   · intro pre i post R1 R2 hpre hcl hfi
     have hi : i < n := by
@@ -307,7 +307,7 @@ theorem warshall_k {n : Nat} {E : Nat → Nat → Prop} (hE : ∀ a b, E a b →
     Sq n R ∧ (∀ a b, reachAt R a b = true → TC E a b) ∧
       (∀ a b, PVS E S a b → reachAt R a b = true)
   have hI : I (List.range' 0 n 1) R := by
-    refine forIn_prefix _ I (List.range' 0 n 1) ?_ ?_ (List.range' 0 n 1) [] R0 R (by simp)
+    refine Except.forIn_prefix _ I (List.range' 0 n 1) ?_ ?_ (List.range' 0 n 1) [] R0 R (by simp)
       ⟨hs0, hsound0, ?_⟩ h
     · intro pre k post R1 R2 hpre ⟨hs1, hsound1, hcomp1⟩ hfk
       have hk : k < n := by
@@ -372,7 +372,7 @@ theorem reach_init {n : Nat} {edges : Array (List Nat)} (hsz : edges.size = n)
     Sq n R ∧ (∀ a b, reachAt R a b = true → EdgeRel edges a b) ∧
       (∀ a ∈ pi, ∀ b, EdgeRel edges a b → reachAt R a b = true)
   have hI : I (List.range' 0 n 1) R := by
-    refine forIn_prefix _ I (List.range' 0 n 1) ?_ ?_ (List.range' 0 n 1) [] _ R (by simp)
+    refine Except.forIn_prefix _ I (List.range' 0 n 1) ?_ ?_ (List.range' 0 n 1) [] _ R (by simp)
       ⟨Sq.replicate n, ?_, by simp⟩ h
     · intro pre i post R1 R2 hpre ⟨hs1, hsound1, hdone1⟩ hfi
       have hi : i < n := by
@@ -392,7 +392,7 @@ theorem reach_init {n : Nat} {edges : Array (List Nat)} (hsz : edges.size = n)
             (∀ a ∈ pre, ∀ b, EdgeRel edges a b → reachAt R a b = true) ∧
             ∀ b ∈ pj, reachAt R i b = true
         have hJ : J es R3 := by
-          refine forIn_prefix _ J es ?_ ?_ es [] R1 R3 (by simp) ⟨hs1, hsound1, hdone1, by simp⟩ hj
+          refine Except.forIn_prefix _ J es ?_ ?_ es [] R1 R3 (by simp) ⟨hs1, hsound1, hdone1, by simp⟩ hj
           · intro pre' j post R4 R5 hpre' ⟨hs4, hsound4, hdone4, hrow4⟩ hfj
             have hjn : j < n := hb es (Array.mem_toList_iff.mpr (Array.mem_of_getElem? hes))
               j (by rw [← hpre']; simp)
@@ -554,7 +554,7 @@ theorem groups_loop {n : Nat} {R : Array (Array Bool)}
       (∀ i ∈ pi, i ∈ s.2) ∧
       ∀ j ∈ s.2, ∀ x, x < n → reachAt R j x = true → reachAt R x j = true → x ∈ s.2
   have hI : I (List.range' 0 n 1) res := by
-    refine forIn_prefix _ I (List.range' 0 n 1) ?_ ?_ (List.range' 0 n 1) [] _ res (by simp)
+    refine Except.forIn_prefix _ I (List.range' 0 n 1) ?_ ?_ (List.range' 0 n 1) [] _ res (by simp)
       ⟨rfl, List.nodup_nil, List.nodup_nil, by simp, by simp, by simp, by simp⟩ h
     · intro pre i post s1 s2 hpre ⟨hflat, hnd, hgnd, hlt, hne, hcov, hcl⟩ hfi
       have hi : i < n := by
@@ -675,7 +675,7 @@ theorem checkPlan_inv {p : Program} {pl : Plan} (h : checkPlan p = .ok pl) : Pla
     let I : List Decl → Array Node × List (Nat × Option (Ty × Eff) × Expr) → Prop := fun pre s =>
       s.1.toList.map Node.toDecl = pre.filter (fun d => match d with | .mainFn .. => false | _ => true) ∧
         ∀ sg body, Decl.mainFn sg body ∈ pre ↔ ∃ pos, (pos, sg, body) ∈ s.2
-    have := forIn_prefix _ I p.decls ?_ ?_ p.decls [] _ st (by simp) ⟨by simp, by simp⟩ h1
+    have := Except.forIn_prefix _ I p.decls ?_ ?_ p.decls [] _ st (by simp) ⟨by simp, by simp⟩ h1
     · exact this
     · intro pre d post s1 s2 hpre ⟨hn, hm⟩ hf
       cases d with
@@ -711,7 +711,7 @@ theorem checkPlan_inv {p : Program} {pl : Plan} (h : checkPlan p = .ok pl) : Pla
   have hedges : edges.size = st.1.size ∧ ∀ es ∈ edges.toList, ∀ j ∈ es, j < st.1.size := by
     let I : List (Node × Nat) → Array (List Nat) → Prop := fun pre s =>
       s.size = pre.length ∧ ∀ es ∈ s.toList, ∀ j ∈ es, j < st.1.size
-    have := forIn_prefix _ I st.1.toList.zipIdx ?_ ?_ st.1.toList.zipIdx [] _ edges (by simp)
+    have := Except.forIn_prefix _ I st.1.toList.zipIdx ?_ ?_ st.1.toList.zipIdx [] _ edges (by simp)
       ⟨by simp, by simp⟩ h3
     · simpa [I] using this
     · intro pre x post s1 s2 hpre ⟨hsz, hb⟩ hf
@@ -722,7 +722,7 @@ theorem checkPlan_inv {p : Program} {pl : Plan} (h : checkPlan p = .ok pl) : Pla
       simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hy
       subst hy
       have hesb : ∀ j ∈ es, j < st.1.size := by
-        refine forIn_prefix _ (fun _ es => ∀ j ∈ es, j < st.1.size)
+        refine Except.forIn_prefix _ (fun _ es => ∀ j ∈ es, j < st.1.size)
           (Node.refs (List.map Node.name st.1.toList) nd) ?_ ?_
           (Node.refs (List.map Node.name st.1.toList) nd) [] [] es (by simp) (by simp) hes
         · intro pre' r post' es1 es2 hpre' hes1 hfr
