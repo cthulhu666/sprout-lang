@@ -39,13 +39,6 @@ def Program.Surf (p : Program) : Prop := ∀ d ∈ p.decls, Decl.Surf d
 
 /-! ### The prelude -/
 
-theorem Env.Closed.prelude : Env.Closed preludeEnv := by
-  intro p hp
-  simp only [preludeEnv, List.mem_singleton] at hp
-  subst hp
-  show Ty.ok 0 (.arr [.str] .unit .io) = true
-  decide
-
 theorem Env.app_prelude (θ : Nat → Ty) : Env.app θ preludeEnv = Ctx.prelude := by
   simp only [Env.app, preludeEnv, Ctx.prelude, List.map_cons, List.map_nil, Bind.app]
   rfl

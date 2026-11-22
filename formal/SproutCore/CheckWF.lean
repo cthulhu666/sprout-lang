@@ -1416,12 +1416,6 @@ theorem Env.WF.lookup {sz : Nat} {env : Env} {x : String} {b : Bind} (h : Env.WF
   obtain ⟨l1, l2, rfl, _⟩ := List.lookup_eq_some_iff.mp hl
   exact h (x, b) (by simp)
 
-theorem Env.WF.prelude {sz : Nat} : Env.WF sz preludeEnv := by
-  intro p hp
-  simp only [preludeEnv, List.mem_singleton] at hp
-  subst hp
-  simp [Bind.WF]
-
 /-! ### Named-free environments (see `Ty.NF`) -/
 
 def Bind.NF : Bind → Prop
@@ -1444,11 +1438,125 @@ theorem Env.NF.lookup {env : Env} {x : String} {b : Bind} (h : Env.NF env)
   obtain ⟨l1, l2, rfl, _⟩ := List.lookup_eq_some_iff.mp hl
   exact h (x, b) (by simp)
 
-theorem Env.NF.prelude : Env.NF preludeEnv := by
+/-! ### Closed environments
+
+What a group leaves behind: closed schemes only. A closed environment is well formed at every
+size and named-free, so the prelude's `WF` and `NF` follow from its being closed. -/
+
+mutual
+theorem Ty.wf_of_okn {n : Nat} : ∀ (t : Ty), t.ok n = true → ∀ sz, Ty.WF sz n t
+  | .named _, h, _ => by simp [Ty.ok] at h
+  | .mv _, h, _ => by simp [Ty.ok] at h
+  | .gen i, h, _ => by simpa [Ty.ok] using h
+  | .skolem _, _, _ => Ty.WF_skolem
+  | .int, _, _ => Ty.WF_int
+  | .bool, _, _ => Ty.WF_bool
+  | .str, _, _ => Ty.WF_str
+  | .unit, _, _ => Ty.WF_unit
+  | .tup ts, h, sz => by
+    simp only [Ty.ok] at h
+    exact Ty.WF_tup.mpr (Ty.wfList_of_okn ts h sz)
+  | .arr ps r e, h, sz => by
+    simp only [Ty.ok, Bool.and_eq_true, Bool.not_eq_true'] at h
+    exact Ty.WF_arr.mpr ⟨Ty.wfList_of_okn ps h.1.1 sz, Ty.wf_of_okn r h.1.2 sz⟩
+
+theorem Ty.wfList_of_okn {n : Nat} : ∀ (ts : List Ty), Ty.okList n ts = true → ∀ sz,
+    ∀ t ∈ ts, Ty.WF sz n t
+  | [], _, _ => by simp
+  | t :: ts, h, sz => by
+    simp only [Ty.okList, Bool.and_eq_true] at h
+    intro u hu
+    rcases List.mem_cons.mp hu with e | hu
+    · rw [e]; exact Ty.wf_of_okn t h.1 sz
+    · exact Ty.wfList_of_okn ts h.2 sz u hu
+end
+
+-- A type with no `.named`: closed under `n` scheme variables, which `ok n` says.
+mutual
+theorem Ty.nf_of_ok {n : Nat} : ∀ t : Ty, t.ok n = true → Ty.NF t
+  | .named _, h => by simp [Ty.ok] at h
+  | .mv _, _ => Ty.NF_mv
+  | .gen _, _ => by simp [Ty.NF, namedIn]
+  | .skolem _, _ => Ty.NF_skolem
+  | .int, _ => Ty.NF_int
+  | .bool, _ => Ty.NF_bool
+  | .str, _ => Ty.NF_str
+  | .unit, _ => Ty.NF_unit
+  | .tup ts, h => by
+    simp only [Ty.ok] at h
+    exact Ty.NF_tup.mpr (Ty.nfList_of_ok ts h)
+  | .arr ps r e, h => by
+    simp only [Ty.ok, Bool.and_eq_true, Bool.not_eq_true'] at h
+    exact Ty.NF_arr.mpr ⟨Ty.nfList_of_ok ps h.1.1, Ty.nf_of_ok r h.1.2⟩
+
+theorem Ty.nfList_of_ok {n : Nat} : ∀ ts : List Ty, Ty.okList n ts = true → ∀ t ∈ ts, Ty.NF t
+  | [], _ => by simp
+  | t :: ts, h => by
+    simp only [Ty.okList, Bool.and_eq_true] at h
+    have h1 := Ty.nf_of_ok t h.1
+    have h2 := Ty.nfList_of_ok ts h.2
+    intro u hu
+    rcases List.mem_cons.mp hu with e | hu
+    · rw [e]; exact h1
+    · exact h2 u hu
+end
+
+/-- A top-level binding after its group: a closed scheme. -/
+def Bind.Closed : Bind → Prop
+  | .mono _ => False
+  | .poly n t => t.ok n = true
+  | .fnMono _ _ => False
+  | .fnPoly _ n t => t.ok n = true
+
+/-- The environment of a group's run holds only closed schemes. -/
+def Env.Closed (env : Env) : Prop := ∀ p ∈ env, Bind.Closed p.2
+
+theorem Env.Closed.nil : Env.Closed [] := by intro p hp; cases hp
+
+theorem Env.Closed.cons {env : Env} {x : String} {b : Bind} (h : Env.Closed env)
+    (hb : Bind.Closed b) : Env.Closed ((x, b) :: env) := by
+  intro p hp
+  rcases List.mem_cons.mp hp with rfl | hp
+  · exact hb
+  · exact h p hp
+
+theorem Env.Closed.append {e1 e2 : Env} (h1 : Env.Closed e1) (h2 : Env.Closed e2) :
+    Env.Closed (e1 ++ e2) := by
+  intro p hp
+  rcases List.mem_append.mp hp with hp | hp
+  · exact h1 p hp
+  · exact h2 p hp
+
+theorem Bind.Closed.wf {b : Bind} (h : b.Closed) (sz : Nat) : Bind.WF sz b := by
+  cases b with
+  | mono t => exact False.elim h
+  | poly n t => exact Ty.wf_of_okn _ h sz
+  | fnMono k t => exact False.elim h
+  | fnPoly k n t => exact Ty.wf_of_okn _ h sz
+
+theorem Bind.Closed.nf {b : Bind} (h : b.Closed) : Bind.NF b := by
+  cases b with
+  | mono t => exact False.elim h
+  | poly n t => exact Ty.nf_of_ok _ h
+  | fnMono k t => exact False.elim h
+  | fnPoly k n t => exact Ty.nf_of_ok _ h
+
+theorem Env.Closed.wf {env : Env} (h : Env.Closed env) (sz : Nat) : Env.WF sz env :=
+  fun p hp => (h p hp).wf sz
+
+theorem Env.Closed.nf {env : Env} (h : Env.Closed env) : Env.NF env :=
+  fun p hp => (h p hp).nf
+
+theorem Env.Closed.prelude : Env.Closed preludeEnv := by
   intro p hp
   simp only [preludeEnv, List.mem_singleton] at hp
   subst hp
-  simp [Bind.NF]
+  show Ty.ok 0 (.arr [.str] .unit .io) = true
+  decide
+
+theorem Env.WF.prelude {sz : Nat} : Env.WF sz preludeEnv := Env.Closed.prelude.wf sz
+
+theorem Env.NF.prelude : Env.NF preludeEnv := Env.Closed.prelude.nf
 
 /-! ### Source terms: the types a program writes mention no metavariable and no `gen`. -/
 

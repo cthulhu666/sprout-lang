@@ -325,36 +325,6 @@ theorem Ty.wf_of_ok {t : Ty} (h : t.ok 0 = true) (sz g : Nat) : Ty.WF sz g t := 
   obtain ⟨h1, h2⟩ := Ty.mg_of_ok t h
   exact ⟨fun m hm => by simp [h1] at hm, fun i hi => by simp [h2] at hi⟩
 
--- A type with no `.named`: closed under `n` scheme variables, which `ok n` says.
-mutual
-theorem Ty.nf_of_ok {n : Nat} : ∀ t : Ty, t.ok n = true → Ty.NF t
-  | .named _, h => by simp [Ty.ok] at h
-  | .mv _, _ => Ty.NF_mv
-  | .gen _, _ => by simp [Ty.NF, namedIn]
-  | .skolem _, _ => Ty.NF_skolem
-  | .int, _ => Ty.NF_int
-  | .bool, _ => Ty.NF_bool
-  | .str, _ => Ty.NF_str
-  | .unit, _ => Ty.NF_unit
-  | .tup ts, h => by
-    simp only [Ty.ok] at h
-    exact Ty.NF_tup.mpr (Ty.nfList_of_ok ts h)
-  | .arr ps r e, h => by
-    simp only [Ty.ok, Bool.and_eq_true, Bool.not_eq_true'] at h
-    exact Ty.NF_arr.mpr ⟨Ty.nfList_of_ok ps h.1.1, Ty.nf_of_ok r h.1.2⟩
-
-theorem Ty.nfList_of_ok {n : Nat} : ∀ ts : List Ty, Ty.okList n ts = true → ∀ t ∈ ts, Ty.NF t
-  | [], _ => by simp
-  | t :: ts, h => by
-    simp only [Ty.okList, Bool.and_eq_true] at h
-    have h1 := Ty.nf_of_ok t h.1
-    have h2 := Ty.nfList_of_ok ts h.2
-    intro u hu
-    rcases List.mem_cons.mp hu with e | hu
-    · rw [e]; exact h1
-    · exact h2 u hu
-end
-
 /-! ### Lambda parameters, arity, local bindings -/
 
 theorem elabTy_unit_leaf {Q : Ty → CState → Prop} {s : CState} {a : Ty} (hsf : Ty.surf a = true)
