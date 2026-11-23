@@ -2243,10 +2243,6 @@ theorem runPlan_wp {Q : PUnit → CState → Prop} {s : CState} {rules : Rules} 
       intro nd hnd
       obtain ⟨i, _, rfl⟩ := List.mem_map.mp hnd
       exact nodes_src hpl.1 i
-    -- the guard on `g`: its reject branch proves nothing is returned
-    split
-    rotate_left
-    · exact Wp.bind (Wp.reject' _ _)
     split
     · rename_i nm a i heq
       have hl := hmem (Node.letN nm a i) (by rw [heq]; simp)
@@ -2320,11 +2316,11 @@ theorem instTy_idx {ms : Array Ty} {sz n i : Nat} (hm : ms.size = n) (h : Ty.WF 
 `checkPlan`, `orderGroups` and `runPlan` read arrays and lists by total functions (`getD`,
 `headD`, `reachAt`), not `!`: safety needs no index proof. The range invariants of the plan it
 builds are `Plan.Inv`, proved by `checkPlan_inv` (PlanInv.lean). The reads that select a node or an
-edge list are not silent: an index out of range there is an `internal` rejection (`checkPlan`, the
-guard in `orderGroups`, the guard on each group in `runPlan`), because a default node would be an
-`fn` that passes the declaration-order rules. What stays total is `reachAt`/`reachSet` (indices
-are `[0:n]` loop bounds or edge targets already checked as nodes) and `runPlan`'s reads after its
-guard. On in-range indices these are the `!` they replaced (`getElem!_eq_getD`,
+edge list in `checkPlan` and `orderGroups` are not silent: an index out of range there is an
+`internal` rejection, because a default node would be an `fn` that passes the declaration-order
+rules. What stays total is `reachAt`/`reachSet` (indices are `[0:n]` loop bounds or edge targets
+already checked as nodes) and `runPlan`'s reads, which `Plan.Inv` (`order_lt`, `edges_size`)
+keeps in range for a plan `checkPlan` built. On in-range indices these are the `!` they replaced (`getElem!_eq_getD`,
 `head!_eq_headD`); the per-program verdicts of the oracle were diffed before and after.
 `set!` is `setIfInBounds`: it never panics. -/
 

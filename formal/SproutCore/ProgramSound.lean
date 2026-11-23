@@ -136,84 +136,81 @@ theorem runPlan_sound {p : Program} {pl : Plan} (hinv : Plan.Inv p pl) (hp : p.S
     have hgm : g ∈ pl.order := by rw [← hpre]; simp
     have hnf1 : s1.NF := e1.nf CState.NF.init
     split
-    · rename_i hguard
+    · rename_i nm a i heq
       split
-      · rename_i nm a i heq
-        split
-        · exact Wp.bind (Wp.reject' _ _)
-        · obtain ⟨i0, hg0⟩ : ∃ i0, g = [i0] := by
-            cases g with
-            | nil => simp at heq
-            | cons i0 rest =>
-              cases rest with
-              | nil => exact ⟨i0, rfl⟩
-              | cons j rest' => simp at heq
-          subst hg0
-          have hnode : pl.nodes[i0]?.getD default = Node.letN nm a i := by simpa using heq
-          have hsurf : Decl.Surf (Decl.letD nm a i) := by
-            have := hord [i0] hgm i0 (by simp)
-            simpa [Plan.declAt, hnode, Node.toDecl] using this
-          refine Wp.bind (inferLet_sound h1 hnf1 hcl hsurf.1 hsurf.2 ?_)
-          intro env' s' ex w hcl' ⟨zt, hu, hz⟩
-          refine Wp.pure' ⟨_, rfl, e1.trans ex, w, hcl', ?_⟩
-          have hnf' : s'.NF := ex.nf hnf1
-          obtain ⟨θ, hθg⟩ := pick_grounding (zts := [zt]) w hnf' (by simpa using hu)
-            (P := fun θ => GroupTy (Env.app θ env) [Decl.letD nm a i] (Env.app θ env'))
-            (fun B hB θ hθ hm => hz B (hB zt (by simp)) θ hθ (hm zt (by simp)))
-          refine ⟨Env.app θ env', fun θ' => Env.app_closed hcl' θ' θ, ?_⟩
-          rw [hΓ θ] at hθg
-          have := Groups.snoc_perm hgr hθg (gd := [Decl.letD nm a i]) (List.Perm.refl _)
-          simpa [List.flatMap_append, Plan.declAt, hnode, Node.toDecl] using this
-      · rename_i hnotlet
-        split
-        · exact Wp.bind (Wp.reject' _ _)
-        · rename_i hlen'
-          simp only [bne_iff_ne, ne_eq, Decidable.not_not] at hlen'
-          have hlen := hlen'
-          have hne : (List.filterMap (fun nd => match nd with | Node.fnN f => some f | _ => none)
-              (List.map (fun i => pl.nodes[i]?.getD default) g)) ≠ [] := by
-            intro h0
-            have h3 := congrArg List.length h0
-            have hpos : (List.map (fun i => pl.nodes[i]?.getD default) g).length ≠ 0 := by
-              intro h
-              exact hinv.order_ne g hgm (List.length_eq_zero_iff.mp (by simpa using h))
-            exact hpos (hlen.symm.trans h3)
-          have hfsurf : ∀ f ∈ (List.filterMap (fun nd => match nd with | Node.fnN f => some f | _ => none)
-              (List.map (fun i => pl.nodes[i]?.getD default) g)), f.Surf := by
-            intro f hf
-            obtain ⟨nd, hnd, hfe⟩ := List.mem_filterMap.mp hf
-            obtain ⟨i1, hi1, rfl⟩ := List.mem_map.mp hnd
-            have hs1 := hord g hgm i1 hi1
-            cases hnd' : pl.nodes[i1]?.getD default with
-            | letN nm a i => rw [hnd'] at hfe; simp at hfe
-            | fnN f' =>
-              rw [hnd'] at hfe
-              simp only [Option.some.injEq] at hfe
-              subst hfe
-              simpa [Plan.declAt, hnd', Node.toDecl, Decl.Surf] using hs1
-          refine Wp.bind (inferFnGroup_sound h1 hnf1 hcl hne hfsurf ?_)
-          intro env' s' ex w hcl' ⟨zts, hu, hz⟩
-          refine Wp.pure' ⟨_, rfl, e1.trans ex, w, hcl', ?_⟩
-          have hnf' : s'.NF := ex.nf hnf1
-          obtain ⟨θ, hθg⟩ := pick_grounding (zts := zts) w hnf' hu
-            (P := fun θ => GroupTy (Env.app θ env) _ (Env.app θ env')) hz
-          refine ⟨Env.app θ env', fun θ' => Env.app_closed hcl' θ' θ, ?_⟩
-          rw [hΓ θ] at hθg
-          have hperm : (g.map pl.declAt).Perm (List.map FnInfo.toDecl (List.filterMap
-              (fun nd => match nd with | Node.fnN f => some f | _ => none)
-              (List.map (fun i => pl.nodes[i]?.getD default) g)).reverse) := by
-            rw [List.map_reverse]
-            refine List.Perm.trans ?_ (List.reverse_perm _).symm
-            obtain ⟨fs, hfs⟩ := exists_fnN _ hlen
-            have hd : g.map pl.declAt =
-                (List.map (fun i => pl.nodes[i]?.getD default) g).map Node.toDecl := by
-              rw [List.map_map]; rfl
-            rw [hd, hfs]
-            simp only [List.filterMap_map, Function.comp_def, List.filterMap_some, List.map_map]
-            exact List.Perm.refl _
-          have := Groups.snoc_perm hgr hθg hperm
-          simpa [List.flatMap_append] using this
-    · exact Wp.bind (Wp.reject' _ _)
+      · exact Wp.bind (Wp.reject' _ _)
+      · obtain ⟨i0, hg0⟩ : ∃ i0, g = [i0] := by
+          cases g with
+          | nil => simp at heq
+          | cons i0 rest =>
+            cases rest with
+            | nil => exact ⟨i0, rfl⟩
+            | cons j rest' => simp at heq
+        subst hg0
+        have hnode : pl.nodes[i0]?.getD default = Node.letN nm a i := by simpa using heq
+        have hsurf : Decl.Surf (Decl.letD nm a i) := by
+          have := hord [i0] hgm i0 (by simp)
+          simpa [Plan.declAt, hnode, Node.toDecl] using this
+        refine Wp.bind (inferLet_sound h1 hnf1 hcl hsurf.1 hsurf.2 ?_)
+        intro env' s' ex w hcl' ⟨zt, hu, hz⟩
+        refine Wp.pure' ⟨_, rfl, e1.trans ex, w, hcl', ?_⟩
+        have hnf' : s'.NF := ex.nf hnf1
+        obtain ⟨θ, hθg⟩ := pick_grounding (zts := [zt]) w hnf' (by simpa using hu)
+          (P := fun θ => GroupTy (Env.app θ env) [Decl.letD nm a i] (Env.app θ env'))
+          (fun B hB θ hθ hm => hz B (hB zt (by simp)) θ hθ (hm zt (by simp)))
+        refine ⟨Env.app θ env', fun θ' => Env.app_closed hcl' θ' θ, ?_⟩
+        rw [hΓ θ] at hθg
+        have := Groups.snoc_perm hgr hθg (gd := [Decl.letD nm a i]) (List.Perm.refl _)
+        simpa [List.flatMap_append, Plan.declAt, hnode, Node.toDecl] using this
+    · rename_i hnotlet
+      split
+      · exact Wp.bind (Wp.reject' _ _)
+      · rename_i hlen'
+        simp only [bne_iff_ne, ne_eq, Decidable.not_not] at hlen'
+        have hlen := hlen'
+        have hne : (List.filterMap (fun nd => match nd with | Node.fnN f => some f | _ => none)
+            (List.map (fun i => pl.nodes[i]?.getD default) g)) ≠ [] := by
+          intro h0
+          have h3 := congrArg List.length h0
+          have hpos : (List.map (fun i => pl.nodes[i]?.getD default) g).length ≠ 0 := by
+            intro h
+            exact hinv.order_ne g hgm (List.length_eq_zero_iff.mp (by simpa using h))
+          exact hpos (hlen.symm.trans h3)
+        have hfsurf : ∀ f ∈ (List.filterMap (fun nd => match nd with | Node.fnN f => some f | _ => none)
+            (List.map (fun i => pl.nodes[i]?.getD default) g)), f.Surf := by
+          intro f hf
+          obtain ⟨nd, hnd, hfe⟩ := List.mem_filterMap.mp hf
+          obtain ⟨i1, hi1, rfl⟩ := List.mem_map.mp hnd
+          have hs1 := hord g hgm i1 hi1
+          cases hnd' : pl.nodes[i1]?.getD default with
+          | letN nm a i => rw [hnd'] at hfe; simp at hfe
+          | fnN f' =>
+            rw [hnd'] at hfe
+            simp only [Option.some.injEq] at hfe
+            subst hfe
+            simpa [Plan.declAt, hnd', Node.toDecl, Decl.Surf] using hs1
+        refine Wp.bind (inferFnGroup_sound h1 hnf1 hcl hne hfsurf ?_)
+        intro env' s' ex w hcl' ⟨zts, hu, hz⟩
+        refine Wp.pure' ⟨_, rfl, e1.trans ex, w, hcl', ?_⟩
+        have hnf' : s'.NF := ex.nf hnf1
+        obtain ⟨θ, hθg⟩ := pick_grounding (zts := zts) w hnf' hu
+          (P := fun θ => GroupTy (Env.app θ env) _ (Env.app θ env')) hz
+        refine ⟨Env.app θ env', fun θ' => Env.app_closed hcl' θ' θ, ?_⟩
+        rw [hΓ θ] at hθg
+        have hperm : (g.map pl.declAt).Perm (List.map FnInfo.toDecl (List.filterMap
+            (fun nd => match nd with | Node.fnN f => some f | _ => none)
+            (List.map (fun i => pl.nodes[i]?.getD default) g)).reverse) := by
+          rw [List.map_reverse]
+          refine List.Perm.trans ?_ (List.reverse_perm _).symm
+          obtain ⟨fs, hfs⟩ := exists_fnN _ hlen
+          have hd : g.map pl.declAt =
+              (List.map (fun i => pl.nodes[i]?.getD default) g).map Node.toDecl := by
+            rw [List.map_map]; rfl
+          rw [hd, hfs]
+          simp only [List.filterMap_map, Function.comp_def, List.filterMap_some, List.map_map]
+          exact List.Perm.refl _
+        have := Groups.snoc_perm hgr hθg hperm
+        simpa [List.flatMap_append] using this
   · intro env s1 ⟨e1, h1, hcl, Γ, hΓ, hgr⟩
     have hnf1 : s1.NF := e1.nf CState.NF.init
     have hgr' : Groups Ctx.prelude p.nodes Γ := by
