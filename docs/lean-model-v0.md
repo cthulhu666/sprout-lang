@@ -277,10 +277,10 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
        never a verdict: `expectBool` passes it through, the oracle and `Tests.lean` report it as
        a harness error, `test-lean-oracle` plants it, and the oracle's per-program verdicts were
        diffed before and after, not its counts. The axiom check is `formal/AxiomCheck.lean`
-       (§7). The plan code reads arrays by total functions; an index out of range where it picks
-       a node or an edge list is an `internal` rejection, not a default node. 3b proved the index
-       invariants (`PlanInv.lean`); `Plan.Inv.guard_true` proves `runPlan`'s guard holds for
-       a plan `checkPlan` built, and it stays as fail-closed defence.
+       (§7). The plan code reads arrays by total functions; where `checkPlan` picks a node or an
+       edge list, an index out of range is an `internal` rejection, not a default node. 3b proved
+       the index invariants (`PlanInv.lean`), so `runPlan` has no index guard: `runPlan_sound`
+       takes `Plan.Inv`, whose `order_lt` and `edges_size` keep every read in range.
      - ~~**3a.**~~ Landed. `infer_sound_run` (`formal/SproutCore/InferSound.lean`): a successful
        `infer {} env e` from a well-formed, named-free state and environment, on a source
        expression, gives a type and effect that every grounding `θ` solving the final state turns
