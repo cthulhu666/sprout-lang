@@ -12,6 +12,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 SEED_GATE = HERE / "seed_gate.sh"
 GUIDELINES = HERE / "guidelines_reminder.sh"
+REDIRECT = HERE / "code_review_redirect.sh"
 S = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/shell-hooks-scratch").resolve()
 WT = S.parent / (S.name + "-wt")
 
@@ -95,6 +96,84 @@ check("guidelines: stderr stays empty (Claude never reads exit-0 stderr)", r.std
 
 r = hook(GUIDELINES, {"tool_input": {"file_path": "/x/README.md"}}, cwd=HERE.parent)
 check("guidelines: a non-Sprout path stays silent", r.returncode == 0 and r.stdout.strip() == "")
+
+# --- code-review redirect ----------------------------------------------------
+def redirect(stdin, cwd=HERE.parent):
+    return subprocess.run(
+        ["bash", str(REDIRECT)], input=stdin, capture_output=True, text=True, cwd=str(cwd)
+    )
+
+
+def expansion(name, args):
+    return json.dumps(
+        {"hook_event_name": "UserPromptExpansion", "command_name": name, "command_args": args}
+    )
+
+
+def reason_of(r):
+    try:
+        d = json.loads(r.stdout)
+        return d["reason"] if d.get("decision") == "block" else None
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+r = redirect(expansion("code-review", "medium 909"))
+check(
+    "redirect: /code-review <args> is blocked and names the wrapper with the args",
+    r.returncode == 0 and "/pr-tracker:sprout-review medium 909" in (reason_of(r) or ""),
+    r.stdout[:200] + r.stderr[:200],
+)
+
+r = redirect(expansion("code-review", ""))
+why = reason_of(r) or ""
+check(
+    "redirect: no args gives no trailing or double space",
+    "/pr-tracker:sprout-review instead" in why and "  " not in why,
+    why,
+)
+
+r = redirect(expansion("code-review", 'fix "quoted" arg'))
+check(
+    "redirect: a double quote in args still yields valid JSON",
+    'fix "quoted" arg' in (reason_of(r) or ""),
+    r.stdout[:200],
+)
+
+r = redirect(expansion("pr-tracker:sprout-review", "high"))
+check("redirect: the wrapper itself passes silently", r.returncode == 0 and r.stdout == "")
+
+r = redirect(expansion("code-reviewer", ""))
+check("redirect: a prefix lookalike is not blocked", r.returncode == 0 and r.stdout == "")
+
+r = redirect("not json{")
+check("redirect: garbage stdin passes silently", r.returncode == 0 and r.stdout == "")
+
+r = redirect("")
+check("redirect: empty stdin passes silently", r.returncode == 0 and r.stdout == "")
+
+settings = json.loads((HERE.parent / ".claude/settings.json").read_text())
+cmds = [
+    h["command"]
+    for evs in settings["hooks"].values()
+    for e in evs
+    for h in e["hooks"]
+]
+check(
+    "settings: every hook command points at an existing script",
+    all(
+        (HERE.parent / "scripts" / c.rsplit("/scripts/", 1)[1]).exists()
+        for c in cmds
+    ),
+)
+check(
+    "settings: code-review redirect is wired on UserPromptExpansion",
+    any(
+        e.get("matcher") == "code-review"
+        and any("code_review_redirect.sh" in h["command"] for h in e["hooks"])
+        for e in settings["hooks"].get("UserPromptExpansion", [])
+    ),
+)
 
 shutil.rmtree(WT, ignore_errors=True)
 print("\nSUITE", "PASSED" if all(results) else "FAILED")

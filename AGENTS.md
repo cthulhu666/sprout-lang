@@ -75,7 +75,8 @@ ledger for all worktrees, invisible to `git status`), with findings and items fi
 `.claude/skills/pr-tracker/` (`/prs`) shows each PR's runs and issues; the one plugin ships both,
 and other repos install it as `pr-tracker@sprout` from this repo's marketplace.
 `/pr-tracker:sprout-review [low|medium|high|xhigh|max] [<pr#>|<branch>|<path>]`, default `high`.
-It reports and stops. Test with `just test-review-ledger`.
+It reports and stops. Test with `just test-review-ledger`. A typed `/code-review` is blocked by a
+UserPromptExpansion hook (`scripts/code_review_redirect.sh`) that points to the wrapper.
 
 **Seed gate** — `scripts/seed_gate.sh`, a PreToolUse Bash hook. Intercepts `git commit` and blocks if
 `stdlib/compiler/*.sprout` or `stdlib/*.sprout` is staged without a refreshed

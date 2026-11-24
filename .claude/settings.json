@@ -20,6 +20,17 @@
         ]
       }
     ],
+    "UserPromptExpansion": [
+      {
+        "matcher": "code-review",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)\"/scripts/code_review_redirect.sh"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
