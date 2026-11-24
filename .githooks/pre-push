@@ -5,11 +5,12 @@
 
 set -euo pipefail
 
+repo_root="$(git rev-parse --show-toplevel)"
 # Claude Code worktrees point core.hooksPath at the main checkout; run this worktree's copy.
-own="$(git rev-parse --show-toplevel)/.githooks/pre-push"
-if [[ -f "$own" && ! "$own" -ef "$0" ]]; then exec "$own" "$@"; fi
+own="$repo_root/.githooks/${0##*/}"
+if [[ -x "$own" && ! "$own" -ef "$0" ]]; then exec "$own" "$@"; fi
 
-cd "$(git rev-parse --show-toplevel)"
+cd "$repo_root"
 
 remote="$1"
 zero='^0+$'  # git's null object id: 40 zeros, or 64 in a SHA-256 repo

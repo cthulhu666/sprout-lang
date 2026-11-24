@@ -8,11 +8,11 @@
 
 set -euo pipefail
 
-# Claude Code worktrees point core.hooksPath at the main checkout; run this worktree's copy.
-own="$(git rev-parse --show-toplevel)/.githooks/pre-commit"
-if [[ -f "$own" && ! "$own" -ef "$0" ]]; then exec "$own" "$@"; fi
-
 repo_root="$(git rev-parse --show-toplevel)"
+# Claude Code worktrees point core.hooksPath at the main checkout; run this worktree's copy.
+own="$repo_root/.githooks/${0##*/}"
+if [[ -x "$own" && ! "$own" -ef "$0" ]]; then exec "$own" "$@"; fi
+
 cd "$repo_root"
 
 files=$(git diff --cached --name-only --diff-filter=ACMR -z \
