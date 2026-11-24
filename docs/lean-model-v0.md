@@ -1,7 +1,7 @@
 # A Lean model of Sprout's core typing rules (v0)
 
-Status: **approved 2026-11-17; stage 1 in progress.** Non-normative. Proposes tooling; changes
-no language rule.
+Status: **approved 2026-11-17; stage 1 done, stage 2 in progress.** Non-normative. Proposes
+tooling; changes no language rule.
 `docs/spec-v0.md` stays the source of truth. The model is checked against it, never the reverse.
 
 ## 1. Problem
@@ -100,6 +100,13 @@ What this says for Sprout:
 [8] <https://github.com/michaelsproul/dblib-linear>.
 [9] <https://research.tudelft.nl/en/publications/intrinsically-typed-definitional-interpreters-for-linear-session->.
 [10] <https://link.springer.com/article/10.1023/A:1006277616879>.
+[11] Maranget, "Warnings for pattern matching", JFP 17(3), 2007,
+<https://doi.org/10.1017/S0956796807006223>.
+[12] <https://github.com/wasabi315/coverage-checking> (`src/CoverageCheck/Exhaustiveness.agda`).
+[13] Cohen, "A Mechanized First-Order Theory of Algebraic Data Types with Pattern Matching",
+ITP 2025, <https://doi.org/10.4230/LIPIcs.ITP.2025.5>.
+[14] <https://github.com/CakeML/cakeml/tree/master/compiler/backend/pattern_matching>.
+[15] Tan, Owens, Kumar, "A verified type system for CakeML", IFL 2015, <https://cakeml.org/ifl15.pdf>.
 
 ## 4. Sprout Core
 
@@ -324,6 +331,31 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
      for.
 2. **ADTs and match.** T1, T4, the unreachable-branch rule. Exit: the per-column gap and the
    fallbacks are written up in this doc.
+   Core gains `type` declarations (parameters, positional fields, recursive and mutually
+   recursive; not `linear`, records, `wrap` or existentials), the type `.adt n args`, saturated
+   constructor calls, a nullary constructor as a value and a bare one as a function value (§5.3),
+   and `match` with `_`, variable, Int, Bool, String, `()`, tuple and nested constructor patterns.
+   The checker follows the spec: exhaustiveness per column, as §5.5 words it, and §5.5's four
+   unreachable-branch cases. One PR per step:
+   - **2a: checker and oracle.** Syntax, checker, printer, generator (with the "remove an arm" and
+     "move an arm earlier" mutations), shrinker. Each compiler fallback the oracle reaches is an
+     allowlist entry with a witness or a `BACKLOG.md` entry. `checkProgram_fuel_mono` covers the new
+     code; T2 and the well-formedness invariants cover programs without ADTs until 2c.
+   - **2b: T4.** Typed values. A full usefulness check (Maranget's `U_rec` [11], no or-patterns):
+     if it accepts, every value of the column types matches a row. The per-column rule accepts
+     whatever the full check accepts; the gap between them is a decidable predicate, written up
+     with its witnesses (`(true, true) | (false, false)`, `(Nothing, _) | (_, Nothing)`). Every
+     branch the unreachable rule flags is useless. Maranget's proof assumes no type is empty
+     [11, 12]; Sprout accepts `type T = | C(T)`, which has no values. The direction T4 needs, an
+     accepted match leaves no value unmatched, does not use that assumption; its converse does.
+   - **2c: T2 over ADTs and match.** Judgment rules for constructors, patterns and `match`.
+   - **2d: T1.** A small-step semantics for Core, with progress and preservation. The checker's
+     per-column rule lets a run get stuck on a match; the full check of 2b rules it out. CakeML's
+     type soundness also keeps a failed match as an allowed outcome [15].
+   Prior art: an Agda proof of `U_rec`'s correctness and termination, with non-emptiness as a
+   module parameter [12]; a Rocq-verified Maranget-style match compiler with sound exhaustiveness
+   checking [13]; CakeML's HOL4 checker, which reads constructor sets from the patterns, not the
+   types [14]. No Lean formalisation of usefulness was found.
 3. **Linearity.** T5 over linear ADTs, containment, `where linear`, binding groups, top-level
    `let`, lambda capture, discards. Exit: every grid cell Core can express is generated and
    agrees. That is about half the grid: the `inst`, `instb`, `method`, `mbound`, `ext` and `exist`
