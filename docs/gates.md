@@ -263,6 +263,12 @@ checklist to stderr and exited 0 for its whole life, so the one gate that points
 `.claude/hooks/just-test-tee` already used. Only a hook that exits 2 may use stderr, and that text
 becomes the blocking message.
 
+A hook command names its script from the worktree root:
+`"$(git rev-parse --show-toplevel)"/scripts/…`. The hook runs in the shell's current directory, so
+a relative `scripts/seed_gate.sh` fails after a `cd` into a subdirectory, and the failure is
+non-blocking: the gate is skipped, not refused. `$CLAUDE_PROJECT_DIR` would run the main checkout's
+copy instead of the worktree's.
+
 ## Example canary — `just run-example-canary`
 
 Emits IR, links and *runs* `examples/tuples.sprout`, `examples/factorial.sprout`,
