@@ -5,6 +5,10 @@
 
 set -euo pipefail
 
+# Claude Code worktrees point core.hooksPath at the main checkout; run this worktree's copy.
+own="$(git rev-parse --show-toplevel)/.githooks/pre-push"
+if [[ -f "$own" && ! "$own" -ef "$0" ]]; then exec "$own" "$@"; fi
+
 cd "$(git rev-parse --show-toplevel)"
 
 remote="$1"

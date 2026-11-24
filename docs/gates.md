@@ -190,6 +190,11 @@ those paths it refuses and names the ref. Check out that ref and push again, or 
 verify-bootstrap-fixed-point` there and push with `--no-verify`. `SPROUT_PRE_PUSH_CHECK` replaces
 the check command; it exists for `just test-pre-push`.
 
+Claude Code worktrees pin `core.hooksPath` to the main checkout's `.githooks`, so each hook first
+hands off (`exec`) to the worktree's own copy when it differs. A hook edit on a branch therefore
+runs before merge. The hand-off itself only runs once master, in the main checkout, has it. Tested
+by `just test-hook-handoff`.
+
 `just pr-rebase` does this in one command (`scripts/pr_rebase.sh`; tested by `just test-pr-rebase`).
 It rebases onto `origin/master`, reseeds each replayed commit that touches `stdlib/compiler/` or
 the seed (a commit that carries a seed needs one even when only `stdlib/prelude.sprout` changed),

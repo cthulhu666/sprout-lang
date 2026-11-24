@@ -871,6 +871,11 @@ test-pr-rebase:
 test-pre-push:
   bash scripts/test_pre_push.sh
 
+# Exercise the worktree hand-off in `.githooks/pre-commit` and `pre-push` against throwaway repos.
+[group('test')]
+test-hook-handoff:
+  bash scripts/test_hook_handoff.sh
+
 # Exercise `bench-vm` against a stub `gcloud`: the VM is deleted on every exit path, by name only.
 # Also covers the parsing helpers in scripts/bench_vm_remote.sh. No network, no cloud calls.
 [group('test')]
@@ -4898,6 +4903,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "review-ledger|test-review-ledger"
     "pr-rebase|test-pr-rebase"
     "pre-push|test-pre-push"
+    "hook-handoff|test-hook-handoff"
     "bench-vm|test-bench-vm"
     "error-line-marker|test-error-line-marker"
     "setup-dev|test-setup-dev"
