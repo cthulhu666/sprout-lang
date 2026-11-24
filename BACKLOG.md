@@ -40,8 +40,9 @@ Legend:
   `use(p: String -> String !{IO})`, `use(if c then (if c then \x -> x else \y -> y) else p)` is
   rejected "a function that performs IO cannot be used where a pure one is required"; swapping
   the branches is accepted. Spec §7 rule 8 and its property 2: branch order does not decide it.
-  Cause not traced; start at `infer_if_join` (`infer.sprout`). Found by the Lean oracle
-  (`join-order` in `formal/oracle/ALLOWLIST`); add a `type_error/` or `run/` fixture with the fix.
+  A `match` does the same from three arms: `| 0 -> \x -> x | 1 -> \y -> y | _ -> p` is rejected,
+  `p` first is accepted. Cause not traced; start at `infer_if_join` (`infer.sprout`). Found by the
+  Lean oracle (`join-order`, `join-order-match`); add a `type_error/` or `run/` fixture with it.
 - [ ] `P3` **The Lean checker rejects `fn f(x: Int) -> Int -> Int !{IO}`; the spec accepts it.**
   Spec §7 rule 9 puts the annotation on the innermost arrow: the type is `Int -> Int -> Int !{IO}`,
   `f(1)` is pure and `f`'s own body may not print (the compiler: "`f` performs IO but is declared
@@ -121,8 +122,8 @@ Legend:
   constraint types.** `validate_decl` matches `| _ -> Nothing` there. The `FnDecl` half is **stale**
   (measured 2026-08-18): an unresolved uppercase name in a param/return annotation is already
   rejected by the bundler's `unresolved_in_types`, so that half is consolidation, not a missing
-  check. Confirm each position empirically first. The lowercase case is a separate gap, filed in
-  §9.
+  check, and spec §5.6's "`FnDecl` ... not yet validated" is stale. Confirm each position
+  empirically first. The lowercase case is a separate gap, filed in §9.
 - [ ] `P3` **rng_below draws from 15 bits.** `stdlib/rng.sprout` `rng_below` takes
   `state / 65536`, which is below 32768. So `n > 32768` never yields a value >= 32768, and an `n`
   that does not divide 32768 is slightly biased. Fix by drawing more bits (or rejection
@@ -150,6 +151,29 @@ Legend:
 - [ ] `P3` **Full Maranget usefulness matrix for product exhaustiveness.**
   `(true,true)|(false,false)` on `(Bool,Bool)` is not yet rejected; sound to over-accept per spec
   §5.5.
+- [ ] `P3` **The spec does not say whether `Bool`, `Unit` and tuples count for §5.5's "after all
+  constructors" case.** The compiler rejects `| true -> 1 | false -> 2 | _ -> 3`, `| () -> 1 |
+  _ -> 2` and `| (a, b) -> 1 | (c, d) -> 2` as unreachable (`prefix_covers_toplevel` in
+  `infer.sprout`); §5.5's four cases name catch-alls, repeated literals and ADT constructors only.
+  Decide, and say so in §5.5. Found by the Lean oracle (`unreachable-bool`, `unreachable-unit`,
+  `unreachable-tuple` in `formal/oracle/ALLOWLIST`).
+- [ ] `P3` **A branch covering a constructor without catch-alls does not make a later one
+  unreachable.** `| C () -> 1 | C _ -> 2 | D -> 3` and `| C (a, b) -> 1 | D -> 2 | _ -> 3` are
+  accepted; spec §5.5 makes the last branch of each unreachable (a constructor "already covered
+  completely", a branch "after all constructors"). `prefix_has_full_ctor` in `infer.sprout` counts
+  a branch only when every sub-pattern is `_` or a variable. Found by the Lean oracle
+  (`unreachable-ctor-repeat`, `unreachable-after-ctors`); add a `type_error/` fixture with the fix.
+- [ ] `P3` **A constructor field may name a type variable its declaration does not bind.**
+  `type T = | C a` is accepted, and `a` then acts as an opaque type no value has. Spec §5.6 allows
+  only "a lowercase type variable ... bound by the enclosing type declaration's parameter list".
+  Found by the Lean oracle (`free-tyvar`); add a `type_error/` fixture with the fix.
+- [ ] `P3` **The spec does not say that a field applies each type to its parameter count.**
+  `type T = | C (P Int Int)` for a one-parameter `P` is accepted, as is a signature `x: P Int Int`
+  or `x: P`; a field so written makes `C` unusable (`Type mismatch: P Int vs P`). §5.6 checks a
+  field's type names only. Found by the Lean oracle (`field-type-arity`); the model rejects it.
+- [ ] `P3` **The spec does not say whether a pattern may bind one name twice.** `| (a, a) -> a` is
+  accepted, and the body sees one of the two. §5.5 and §7 rule 6 are silent. Decide (reject, or
+  say which binding wins). The Lean model accepts, as the compiler does.
 
 **Bindings, patterns and surface syntax**
 

@@ -47,12 +47,62 @@ def witnessJoinOrder : Program :=
         (.ite (.bool false) (.lam "x" none (.var "x")) (.lam "y" none (.var "y")))
         (.var "p")])]⟩
 
+/-- `fn f(x: t) -> Int = match x with arms`. -/
+def matchOn (t : Ty) (arms : List (Pat × Expr)) : Decl :=
+  .fn "f" [("x", some t)] (some (.int, .pure)) (.matchE (.var "x") arms)
+
+/-- `| true -> 1 | false -> 2 | _ -> 3`: a branch after both `Bool` literals. -/
+def witnessUnreachableBool : Program :=
+  ⟨[matchOn .bool [(.bool true, .int 1), (.bool false, .int 2), (.wild, .int 3)]]⟩
+
+/-- `| () -> 1 | _ -> 2`: a branch after the unit pattern. -/
+def witnessUnreachableUnit : Program := ⟨[matchOn .unit [(.unit, .int 1), (.wild, .int 2)]]⟩
+
+/-- `| (a, b) -> 1 | (c, d) -> 2` on `(Int, Int)`: a branch after an all-catch-all tuple. -/
+def witnessUnreachableTuple : Program := ⟨[matchOn (.tup [.int, .int])
+  [(.tup [.var "a", .var "b"], .int 1), (.tup [.var "c", .var "d"], .int 2)]]⟩
+
+/-- `type U = | C Unit | D`, `| C () -> 1 | C _ -> 2 | D -> 3`: `C ()` covers `C` completely. -/
+def witnessCtorRepeat : Program := ⟨[.typeD "U" [] [("C", [.unit]), ("D", [])],
+  matchOn (.adt "U" []) [(.ctor "C" [.unit], .int 1), (.ctor "C" [.wild], .int 2),
+    (.ctor "D" [], .int 3)]]⟩
+
+/-- `type U = | C (Int, Int) | D`, `| C (a, b) -> 1 | D -> 2 | _ -> 3`: the `_` comes after every
+constructor is covered. -/
+def witnessAfterCtors : Program := ⟨[.typeD "U" [] [("C", [.tup [.int, .int]]), ("D", [])],
+  matchOn (.adt "U" []) [(.ctor "C" [.tup [.var "a", .var "b"]], .int 1), (.ctor "D" [], .int 2),
+    (.wild, .int 3)]]⟩
+
+/-- `type T = | C a`: a field names a type variable the declaration does not bind. -/
+def witnessFreeTyVar : Program := ⟨[.typeD "T" [] [("C", [.named "a"])]]⟩
+
+/-- `type P a = | P0 | P1 a`, `type T = | C (P Int Int)`: a field applies a type to too many
+arguments. -/
+def witnessFieldArity : Program := ⟨[.typeD "P" ["a"] [("P0", []), ("P1", [.named "a"])],
+  .typeD "T" [] [("C", [.adt "P" [.int, .int]])]]⟩
+
+/-- `fn f(c: Int, p: Int -> Int !{IO}) -> Int -> Int !{IO} = match c with | 0 -> \x -> x |
+1 -> \y -> y | _ -> p`: a match joining two pure lambdas, then an `!{IO}` function. -/
+def witnessJoinOrderMatch : Program :=
+  ⟨[.fn "f" [("c", some .int), ("p", some (.arr [.int] .int .io))]
+    (some (.arr [.int] .int .io, .pure))
+    (.matchE (.var "c") [(.int 0, .lam "x" none (.var "x")), (.int 1, .lam "y" none (.var "y")),
+      (.wild, .var "p")])]⟩
+
 /-- Witness by allowlist id. -/
 def witnesses : List (String × Program) :=
   [("let-rhs-io", witnessLetRhsIO),
    ("value-restriction", witnessValueRestriction),
    ("nongen-call", witnessNonGenCall),
    ("nongen-slot", witnessNonGenSlot),
-   ("join-order", witnessJoinOrder)]
+   ("join-order", witnessJoinOrder),
+   ("join-order-match", witnessJoinOrderMatch),
+   ("unreachable-bool", witnessUnreachableBool),
+   ("unreachable-unit", witnessUnreachableUnit),
+   ("unreachable-tuple", witnessUnreachableTuple),
+   ("unreachable-ctor-repeat", witnessCtorRepeat),
+   ("unreachable-after-ctors", witnessAfterCtors),
+   ("free-tyvar", witnessFreeTyVar),
+   ("field-type-arity", witnessFieldArity)]
 
 end SproutCore

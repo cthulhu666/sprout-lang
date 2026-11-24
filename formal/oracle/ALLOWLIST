@@ -35,3 +35,25 @@ nongen-slot | model-accepts/compiler-rejects: _ performs IO but is declared pure
 # first", and the note under rule 8 (property 2): branch order does not decide it. `if` joins
 # through `infer_if_join` and `unify_actual_expected` in infer.sprout/unifier.sprout.
 join-order | model-accepts/compiler-rejects: If branches must have same type: IO function where a pure one is required | compiler rejects a join of a nested join with an IO function, where the swapped order is accepted (spec §7 rule 8: branch order does not decide)
+# Spec gap: the compiler rejects a branch after both `Bool` literals, after `()`, and after a
+# tuple pattern of catch-alls as unreachable (`prefix_covers_toplevel` in infer.sprout). Spec §5.5's
+# four cases name catch-alls, repeated literals and ADT constructors only; the model follows them.
+unreachable-bool | model-accepts/compiler-rejects: Unreachable match branch | the spec does not say whether Bool counts as an ADT for §5.5's "after all constructors" case
+unreachable-unit | model-accepts/compiler-rejects: Unreachable match branch | the spec does not say whether Unit counts as an ADT for §5.5's "after all constructors" case
+unreachable-tuple | model-accepts/compiler-rejects: Unreachable match branch | the spec does not say whether a tuple counts as an ADT for §5.5's "after all constructors" case
+# Compiler bug: `prefix_has_full_ctor` in infer.sprout counts an earlier branch as covering a
+# constructor only when every sub-pattern is `_` or a variable. `C ()` or `C (a, b)` covers `C`
+# completely too, so spec §5.5 makes a later `C _`, or a `_` after every constructor, unreachable.
+unreachable-ctor-repeat | model-rejects/compiler-accepts: unreachable | compiler misses a repeat of a constructor an earlier branch covers without catch-alls (spec §5.5)
+unreachable-after-ctors | model-rejects/compiler-accepts: unreachable | compiler misses a branch after every constructor is covered without catch-alls (spec §5.5)
+# Compiler bug: spec §5.6 allows a lowercase type variable in a field only when the declaration's
+# parameter list binds it; the compiler accepts `type T = | C a` and reads `a` as an opaque type.
+free-tyvar | model-rejects/compiler-accepts: unknown-type | compiler accepts a field type variable the declaration does not bind (spec §5.6)
+# Spec gap: §5.6 checks the type names in a field, not how many arguments each is applied to. The
+# compiler accepts `type T = | C (P Int Int)` for a one-parameter `P`, and no value of `C` can then
+# be built or matched. The model rejects it: such a field has no type.
+field-type-arity | model-rejects/compiler-accepts: type-arity | the spec does not say that a field's type must apply each type to its parameter count
+# Compiler bug, the `join-order` one through `match`: arms join as peers (spec §7 rule 5, rule 8),
+# but `| 0 -> \x -> x | 1 -> \y -> y | _ -> p` with `p: Int -> Int !{IO}` against an `!{IO}`
+# result is rejected, while the same arms with `p` first are accepted.
+join-order-match | model-accepts/compiler-rejects: Match branch type mismatch: IO function where a pure one is required | compiler rejects a match whose arms join two pure lambdas and then an IO function, where `p` first is accepted (spec §7 rule 8: branch order does not decide)

@@ -197,18 +197,40 @@ def partialCtor : Program := ⟨[maybeD, matchFn (maybeOf .int)
 
 /-- `true | false | _`: `Bool` is not an ADT, so none of the four cases flags the `_`.
 Compiler: rejects ("Unreachable match branch"); it treats `Bool` like an ADT. The model follows
-the spec's four cases. -/
+the spec's four cases; a spec gap, allowlisted as `unreachable-bool`. -/
 def boolThenWild : Program := ⟨[matchFn .bool
   [(.bool true, .int 1), (.bool false, .int 2), (.wild, .int 3)]]⟩
 
 #guard accepts boolThenWild
 
 /-- `(a, b) | (c, d)`: a tuple pattern is no case of the four. Compiler: rejects ("Unreachable
-match branch"); it flags a branch after an all-catch-all tuple. The model follows the spec. -/
+match branch"); it flags a branch after an all-catch-all tuple. The model follows the spec; a spec
+gap, allowlisted as `unreachable-tuple`. -/
 def tupleRepeat : Program := ⟨[matchFn (.tup [.int, .int])
   [(.tup [.var "a", .var "b"], .int 1), (.tup [.var "c", .var "d"], .int 2)]]⟩
 
 #guard accepts tupleRepeat
+
+/-- `() | _`: the same for `Unit`. Compiler: rejects; allowlisted as `unreachable-unit`. -/
+def unitThenWild : Program := ⟨[matchFn .unit [(.unit, .int 1), (.wild, .int 2)]]⟩
+
+#guard accepts unitThenWild
+
+/-- `type U = | C Unit | D`, `| C () -> 1 | C _ -> 2 | D -> 3`: `C ()` covers `C` completely, so
+`C _` repeats it. Compiler: accepts, since it counts only an all-catch-all `C` branch; a compiler
+bug, allowlisted as `unreachable-ctor-repeat`. -/
+def ctorRepeatUnit : Program := ⟨[.typeD "U" [] [("C", [.unit]), ("D", [])],
+  matchFn (.adt "U" []) [(.ctor "C" [.unit], .int 1), (.ctor "C" [.wild], .int 2),
+    (.ctor "D" [], .int 3)]]⟩
+
+#guard rejectKey ctorRepeatUnit == "unreachable"
+
+/-- `(a, a)` binds `a` twice; the spec says nothing about it, so the model reads it as two
+bindings, the later one in scope. Compiler: accepts. -/
+def patBindsTwice : Program :=
+  ⟨[matchFn (.tup [.int, .int]) [(.tup [.var "a", .var "a"], .var "a")]]⟩
+
+#guard accepts patBindsTwice
 
 /-- A reachable `_` after a per-column-covered constructor is not flagged:
 `type P = | P (Maybe Int) (Maybe Int)`, `| P Nothing _ | P _ Nothing | _` (`P (Just 1) (Just 2)`
@@ -352,14 +374,15 @@ def unknownField : Program := ⟨[.typeD "T" [] [("C", [.adt "Foo" []])]]⟩
 
 /-- A type variable the declaration does not bind: `type T = | C a`. Compiler: accepts. Spec
 §5.6 allows only "a lowercase type variable … bound by the enclosing type declaration's parameter
-list"; the model follows it. -/
+list"; the model follows it. A compiler bug, allowlisted as `free-tyvar`. -/
 def freeVarField : Program := ⟨[.typeD "T" [] [("C", [.named "a"])]]⟩
 
 #guard rejectKey freeVarField == "unknown-type"
 
 /-- A field applies a type to the wrong number of arguments: `type T = | C (Maybe Int Int)`.
 Compiler: accepts. §5.6 names the checks on a field's type names, not their argument count; the
-model rejects, since such a field has no type to instantiate. -/
+model rejects, since such a field has no type to instantiate. A spec gap, allowlisted as
+`field-type-arity`. -/
 def fieldArity : Program := ⟨[maybeD, .typeD "T" [] [("C", [.adt "Maybe" [.int, .int]])]]⟩
 
 #guard rejectKey fieldArity == "type-arity"
@@ -393,7 +416,9 @@ def all : List (String × Program) := [
   ("unitMatch", unitMatch), ("afterWild", afterWild), ("afterVar", afterVar),
   ("afterAllCtors", afterAllCtors), ("repeatedLit", repeatedLit), ("repeatedUnit", repeatedUnit),
   ("repeatedCtor", repeatedCtor), ("partialCtor", partialCtor), ("boolThenWild", boolThenWild),
-  ("tupleRepeat", tupleRepeat), ("pairCtorGap", pairCtorGap), ("unknownCtorPat", unknownCtorPat),
+  ("tupleRepeat", tupleRepeat), ("unitThenWild", unitThenWild),
+  ("ctorRepeatUnit", ctorRepeatUnit), ("patBindsTwice", patBindsTwice),
+  ("pairCtorGap", pairCtorGap), ("unknownCtorPat", unknownCtorPat),
   ("unknownCtorExpr", unknownCtorExpr), ("ctorCallArity", ctorCallArity),
   ("ctorPatArity", ctorPatArity), ("bareCtor", bareCtor), ("nullaryCall", nullaryCall),
   ("nullaryValue", nullaryValue), ("ctorArgMismatch", ctorArgMismatch),
