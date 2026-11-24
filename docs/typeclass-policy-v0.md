@@ -110,12 +110,11 @@ diagnostic: the declaration is accepted, and the error surfaces at the call site
 author never wrote ("No instance of `Label` for `String`").
 
 **The repo has already taken a position here, against banning it.**
-`tests/stdlib/test_instance_head_arity.spr` — "the shapes the instance-head arity rule must ACCEPT"
-— deliberately accepts `instance Boxed (Half k)` on a `type alias`, because an alias head "is
-outside the rule's scope … and must not be judged by a number the writer never declared".
-`instance-head-kinds-v0.md` §2 lists alias heads as a non-goal *of the arity check*, notes they "do
-not dispatch today", and §11 defers their arity check "once they dispatch" — anticipating that they
-will. So the recorded direction was to make alias heads *work*, not to reject them — and that is
+`tests/stdlib/test_instance_head_arity.spr`, the shapes the instance-head kind rule must accept,
+deliberately accepts `instance Boxed (Half k)` on a `type alias`.
+`instance-head-kinds-v0.md` (since superseded by `kind-inference-v0.md`) §2 lists alias heads as a
+non-goal *of the arity check*, notes they "do not dispatch today", and §11 defers their check
+"once they dispatch" — anticipating that they will. So the recorded direction was to make alias heads *work*, not to reject them — and that is
 what landed (`docs/alias-instance-heads-v0.md`). §5.1's expansion clause is the rule this doc needed
 anyway, and the type-synonym item in §5.3 is resolved rather than frozen.
 
@@ -397,7 +396,7 @@ instance are no longer both accepted.
   record-opacity bypass**, which it does not (§5.1).
 - `haskell-lessons-learned.md` #4: the Sprout implication becomes the decided rule.
 - `cross-language-design-lessons.md` §0: audit row #12 (invisible dispatch) updated if P2 lands.
-- `instance-head-kinds-v0.md`: its Deferred list carries MPTC, which P3 forecloses — reconcile when
+- `instance-head-kinds-v0.md` (superseded by `kind-inference-v0.md`): its Deferred list carries MPTC, which P3 forecloses — reconcile when
   P3 lands. Its alias-head entry is *not* in conflict with P3 as now written, because P3 no longer
   freezes type-synonym instances (open question #4). Two earlier drafts of this doc got this wrong
   in opposite directions — first claiming a conflict, then claiming agreement on a ban.

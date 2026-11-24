@@ -1,0 +1,16 @@
+# A method-level `where` is kind-checked against the variable's use in the method
+# signature. `j` is a parameter's type, so it has kind `Type`; `Container` is over
+# a type constructor.
+module main
+
+class Container c
+  fn size(x: c Int) -> Int
+
+instance Container Maybe
+  fn size(x: Maybe Int) -> Int = 1
+
+class Mapper t
+  fn run(x: t, y: j) -> Int where Container j
+#~^^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

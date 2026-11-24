@@ -1,0 +1,1 @@
+class `Tagless` takes a type of kind `Type`, but the instance head `Box` has kind `Type -> Type` (a type constructor that takes one type)

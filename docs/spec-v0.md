@@ -3858,47 +3858,88 @@ instance Summable IntVec
   …
 ```
 
-**An instance head must leave exactly as many arguments unapplied as the class
-variable's use applies.**  A class variable used bare (`fn describe(x: t)`) stands
-for a type, so its instance heads must be saturated; used applied (`fn label(xs: t
-Int)`) it stands for a type constructor, so its heads must leave that many arguments
-off.  Every method of the class, and each of its superclasses, must agree on the
-count; a class whose own methods disagree is rejected at the *class* declaration,
-because no head could satisfy it.  Sprout has no kind syntax and no kind variables,
-so with one class parameter (enforced: *A class takes one type parameter*, above) this
-single count is the whole of the kind.
+**A class variable and every type it is applied to have a kind, and every constraint
+and instance head must respect it.**  A kind is `Type` (a type that has values) or
+`k1 -> k2` (a type constructor that takes a type of kind `k1` and yields one of kind
+`k2`); `Maybe` is `Type -> Type`, `Result` is `Type -> Type -> Type`.  Kinds are
+inferred, never written, and there are no kind variables in programs.  A class
+variable used bare (`fn describe(x: t)`) has kind `Type`, so its instance heads must be
+saturated; used applied (`fn label(xs: t Int)`) it has kind `Type -> Type`, so its heads
+must leave one argument off.  With one class parameter (*A class takes one type
+parameter*, above), the kind of that variable is the kind of the class.
+
+Kinds are inferred over dependency groups of `type`, `record`, `wrap` and `class`
+declarations (Haskell 2010 §4.6).  Each type parameter and class variable starts as an
+unknown kind.  Every constructor field, `wrap` body and method signature has kind
+`Type`; an existential constraint `C t`, a method-level `where C' u` and a superclass
+`S t` each require the variable's kind to equal the class's.  The constraints of one group are
+unified together, and only then is each kind still unknown defaulted to `Type`; a later
+group reads the defaulted kind and cannot change it.  Two consequences:
+
+- A phantom parameter is `Type`.  After `wrap Tagged u = Int`, `Tagged Maybe` is a kind
+  error, because `Tagged` takes a type.
+- A class whose variable no method mentions has kind `Type`, so only saturated heads
+  are instances of it.
+
+Each `fn` and `instance` is then checked alone: its type variables get
+fresh kinds from its signature, and each constraint `C t`, including one whose `t` is a
+variable, requires kind(`t`) = kind(`C`).  The constraints checked are those of a `fn`,
+a class method, an instance method, an instance context, a superclass, an existential
+(`exists … where`, `any C`) and a derived instance; an instance head `C H` requires
+kind(`H`) = kind(`C`).  A `fn` or instance method that has no `where` has nothing to
+check.  An alias counts as its expansion, so `type alias E = Result String` has kind
+`Type -> Type`.  The built-in kinds are `Type` for `Int`, `Double`, `Bool`, `String`,
+`Char`, `Unit`, `Bytes` and `Builder`, `Type -> Type` for `Vector`, `Map` and `Ref`,
+and `Type` for the function, thunk and tuple types and their arguments.
+
+A `deriving` clause forwards the derived class over each type parameter a field stores
+(§5.8), so a stored parameter of kind other than `Type` cannot be derived over (`type Wrap f a deriving
+(Eq) = Wrap(f a)` would need `Eq f`); the declaration is rejected at the type.
+
+A constructor field, a record field, a `wrap` body and a class method signature are
+judged: each must have kind `Type`, and a variable used at two kinds in one of them is an
+error.  The types written in a `fn` or instance-method signature are read but not judged:
+`fn f(x: Int Bool)` is accepted by this pass, as are alias declarations and annotations
+(`docs/kind-inference-v0.md`).
 
 | declaration | rejected because |
 |---|---|
-| `class Boxed t` with `fn label(xs: t Int)`, then `instance Boxed (Tagged k v)` | the head leaves 0, the use applies 1 |
-| `class Plain t` with `fn describe(x: t)`, then `instance Plain (Tagged k)` | the head leaves 1, the use applies 0 |
-| `fn f(…) where Pretty Tagged`, `Pretty`'s variable used bare | the constraint head leaves 2 |
+| `class Boxed t` with `fn label(xs: t Int)`, then `instance Boxed (Tagged k v)` | the head has kind `Type`, the class wants `Type -> Type` |
+| `class Plain t` with `fn describe(x: t)`, then `instance Plain (Tagged k)` | the head has kind `Type -> Type`, the class wants `Type` |
+| `fn f(…) where Pretty Tagged`, `Pretty`'s variable used bare | `Tagged` has kind `Type -> Type -> Type` |
+| `fn g(x: f a) -> Int where Foo f`, `Foo`'s variable used bare | `f` has kind `Type -> Type` |
+| `class Tagless t` with no method mentioning `t`, then `instance Tagless Box` | `Tagless` has kind `Type` |
 | `class Mixed t` with `fn one(x: t)` and `fn two(x: t Int)` | its own methods disagree |
 | `class Wrapper t where Functor t` with `fn unwrap(x: t)` | it disagrees with its superclass |
+| `wrap Tagged u = Int`, then `Foo (Tagged Maybe)` | `Tagged` takes a type, `Maybe` is a type constructor |
+| `type T = T(Maybe)` | a field must have kind `Type`; `Maybe` takes a type |
+| `fn g(…) where ToString (Box, Int)` | a tuple part must have kind `Type`; `Box` takes a type |
+| `type Wrap f a deriving (Eq) = Wrap(f a)` | a derived instance constrains only parameters of kind `Type` |
 
 ```
-class `Boxed` applies its variable to 1 argument, so an instance head must leave 1 unapplied; this head leaves 0
-class `Pretty` applies its variable to 0 arguments, so a constraint head must leave 0 unapplied; this head leaves 2
-class `Mixed` applies its variable to 1 argument in one method and 0 in another; one class variable cannot be both
-class `Wrapper` applies its variable to 0 arguments, but its superclass `Functor` applies its own to 1
+class `Boxed` takes a type of kind `Type -> Type` (a type constructor that takes one type), but the instance head `Tagged k v` has kind `Type`
+class `Foo` takes a type of kind `Type`, but in the constraint `Foo f` the variable `f` has kind `Type -> Type` (a type constructor that takes one type)
+class `Pretty` takes a type of kind `Type`, but in the constraint `Pretty Tagged` the type `Tagged` has kind `Type -> Type -> Type` (a type constructor that takes two types)
+class `Mixed` uses its variable at kind `Type` in one place and `Type -> Type` (a type constructor that takes one type) in another; one class variable cannot be both
+class `Wrapper` uses its variable at kind `Type`, but its superclass `Functor` takes `Type -> Type`
+in the constraint `Foo (Tagged Maybe)` the type `Maybe` has kind `Type -> Type` (a type constructor that takes one type), but `Tagged` takes a type of kind `Type`
+in constructor `T` the type `Maybe` has kind `Type -> Type` (a type constructor that takes one type), but it is used where a type of kind `Type` is needed
+in the constraint `ToString (f f)` the type `f` is applied to `f`, so its kind would have to contain itself
+cannot derive `Eq` for `Wrap`: its parameter `f` has kind `Type -> Type` (a type constructor that takes one type), and a derived instance can constrain only parameters of kind `Type`
 ```
 
-The rule covers every constructor-headed constraint, not only instance heads: a
-`where` clause on a function, on a method, or in an instance context names a
-dictionary that must exist, and one at the wrong arity names none.  What a head
-leaves is its constructor's declared parameter count minus the arguments written,
-so `instance Semigroup String` leaves 0 because `String` takes none — while a bare
-`Tagged`, whose constructor takes two, leaves 2 and is rejected under a bare class
-variable.  A tuple or function head has no constructor to count and leaves 0.  A
-type-variable head is untouched: as an
-instance head the rule above rejects it, and as a constraint it is forwarded.  A
-class whose variable appears in no method signature and under no superclass is
-unconstrained, and admits a head at any arity.
+A constraint in a class method's `where` is reported with the prefix ``in method `m` of
+class `C`:``, and one in an instance method's with ``in method `m`:``.  A clash in a
+class method's signature is reported as ``in the signature of method `m` of class `C` …``,
+one in a record field as ``in the field `f` of `R` …`` and one in a `wrap` body as ``in
+the body of `W` …``.  The error is at the declaration, since type expressions carry no position.
 
-Type application is curried, so without this rule the head and the dispatch type
-disagree about depth and their spines misalign *silently*: `instance Boxed (Tri a b
-c) where ToString b` bound `b` to the wrong argument and printed a raw pointer.
-Rationale and the recorder invariant it rests on: `docs/instance-head-kinds-v0.md`.
+Type application is curried, so a head whose kind differs from the class's would leave
+a different number of arguments than the dispatch type and their spines would misalign
+*silently*: `instance Boxed (Tri a b c) where ToString b` bound `b` to the wrong
+argument and printed a raw pointer.  Equal kinds leave equal numbers unapplied, which is
+what dispatch relies on.  Rationale, prior art and the compatibility census:
+`docs/kind-inference-v0.md`.
 
 **An instance defines every method its class declares.**  Classes have no default
 method bodies, so an instance that leaves one out is rejected at the instance:
@@ -3940,12 +3981,14 @@ than an extra Sprout restriction.
 **An instance head is its type-alias expansion.**  A `type alias` is transparent
 (§5.6.2), so `instance C Name` where `type alias Name = String` *is* the instance
 `instance C String`: it dispatches at `String`, and declaring both is an overlap.
-The head is expanded before selection, arity checking and the overlap check all
+The head is expanded before selection, kind checking and the overlap check all
 read it, so a local alias of a foreign type is not a distinct head.  `wrap` is
 **not** an alias — it declares a distinct nominal type, and `instance C Tag` on
 `wrap Tag = String` stays separate from `instance C String`.  An alias applied to
-fewer arguments than it declares is left unexpanded and rejected by the head-arity
-rule above.  Rationale: `docs/alias-instance-heads-v0.md`.
+fewer arguments than it declares is left unexpanded, and the kind check does not judge
+it.  A later check reports it: after `type alias Half a = Tagged a`, `instance Boxed Half`
+is rejected because its method's type does not match the class's for that head.
+Rationale: `docs/alias-instance-heads-v0.md`.
 
 Admitting concrete type arguments (`instance C (List Int)`) is GHC's
 `FlexibleInstances` extension, which pairs the relaxation with *full-head

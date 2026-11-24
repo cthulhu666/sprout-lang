@@ -1,0 +1,7 @@
+# `f Int` makes `f` a type constructor, so the bare field `f` is not a type.
+module main
+
+type W f = W(f Int, f)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

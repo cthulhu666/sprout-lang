@@ -1,0 +1,1 @@
+class `Functor` takes a type of kind `Type -> Type` (a type constructor that takes one type), but in the constraint `Functor f` the variable `f` has kind `Type`

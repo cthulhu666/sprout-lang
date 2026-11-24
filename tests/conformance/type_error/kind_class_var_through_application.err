@@ -1,0 +1,1 @@
+in the signature of method `foo2` of class `Foo` the type `t Int` has kind `Type`, but `Wrapper` takes a type of kind `Type -> Type` (a type constructor that takes one type)

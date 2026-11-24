@@ -1,0 +1,13 @@
+# `A` and `B` form one group through method-level `where`s. `A` uses `t Int`, so its
+# variable takes a type; `B`'s `where A u` has `u` at kind `Type`. The blame is that
+# constraint, not `A` using its variable at two kinds.
+module main
+
+class A t
+  fn one(x: t Int, y: b) -> Int where B b
+
+class B t
+  fn two(x: t, y: u) -> Int where A u
+#~^^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

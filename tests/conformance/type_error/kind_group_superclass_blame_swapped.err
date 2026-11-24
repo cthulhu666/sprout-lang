@@ -1,0 +1,1 @@
+class `A` uses its variable at kind `Type`, but its superclass `B` takes `Type -> Type` (a type constructor that takes one type)

@@ -1,0 +1,13 @@
+# A tuple part must have kind `Type`. `Box` takes a type, so `(Box, Int)` is ill-kinded
+# even though no class variable is involved.
+module main
+
+type Box a = Box(a)
+
+class Pretty t
+  fn pretty(x: t) -> String
+
+fn g(x: Int) -> Int where Pretty (Box, Int) = x
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(to_string(g(1)))

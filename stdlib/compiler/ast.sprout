@@ -929,8 +929,8 @@ fn expand_head(table: Dict AliasHead, te: TypeExpr, fuel: Int) -> TypeExpr =
 # Rebuilds the head from the alias RHS with the alias's parameters bound to the
 # arguments it was applied to, re-applying any extra arguments outside: under
 # `type alias Half a = Tagged a`, the head `Half k` becomes `Tagged k`. An
-# UNDER-applied alias yields Nothing — there is nothing to substitute, and the
-# existing instance-head arity diagnostic is the right one to fire.
+# UNDER-applied alias yields Nothing — there is nothing to substitute, so the head
+# stays as written and a later check rejects it.
 fn alias_expansion(table: Dict AliasHead, te: TypeExpr) -> Maybe TypeExpr =
   match type_expr_spine(te, []) with
   | (TypeName name, args) ->

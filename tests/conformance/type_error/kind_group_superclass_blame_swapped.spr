@@ -1,0 +1,12 @@
+# The same group as `kind_group_superclass_blame`, declared in the other order. The blame is
+# the same: `A`'s superclass clause.
+module main
+
+class A t where B t
+  fn one(x: t) -> Int
+#~^^ ERROR
+
+class B t
+  fn two(x: t Int, y: u) -> Int where A u
+
+fn main() -> Unit !{IO} = print("unreachable")

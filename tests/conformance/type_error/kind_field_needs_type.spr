@@ -1,0 +1,7 @@
+# A constructor field must have kind `Type`. `Maybe` takes a type.
+module main
+
+type T = T(Maybe)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

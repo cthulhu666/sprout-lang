@@ -1,0 +1,15 @@
+# A class whose variable nothing mentions has kind `Type`: nothing says otherwise,
+# and kinds default to `Type` (Haskell 2010 §4.6). `Box` takes a type, so the head
+# `Box` has kind `Type -> Type` and does not fit. `instance Tagless (Box a)` does.
+module main
+
+type Box a = Box(a)
+
+class Tagless t
+  fn describe() -> String
+
+instance Tagless Box
+  fn describe() -> String = "box"
+#~^^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

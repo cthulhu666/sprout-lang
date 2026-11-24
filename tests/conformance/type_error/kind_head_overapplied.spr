@@ -1,0 +1,11 @@
+# An instance head applies a type to more arguments than it takes. `Box` takes one
+# type, so `Box a` has kind `Type` and cannot be applied to `b`.
+module main
+
+type Box a = Box(a)
+
+class Pretty t
+  fn pretty(x: t) -> String
+
+instance Pretty (Box a b)
+#~^ ERROR

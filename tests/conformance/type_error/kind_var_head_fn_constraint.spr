@@ -1,0 +1,15 @@
+# A constraint on a type variable is kind-checked like any other. `x: f a` makes `f`
+# a type constructor that takes one type, but `Foo`'s variable stands for a type, so
+# `where Foo f` can hold for no `f`.
+module main
+
+class Foo t
+  fn foo(x: t) -> String
+
+instance Foo Int
+  fn foo(x: Int) -> String = "int"
+
+fn g(x: f a) -> Int where Foo f = 1
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(to_string(g(Just(1))))

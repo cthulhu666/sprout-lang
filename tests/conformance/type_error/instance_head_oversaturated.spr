@@ -1,4 +1,4 @@
-# The class variable is used APPLIED (`t Int`), so it has kind `* -> *` and the
+# The class variable is used APPLIED (`t Int`), so it has kind `Type -> Type` and the
 # instance head must leave one argument off. This head saturates `Tagged`, so the
 # head match binds no `k` and the `where` clause constrains a variable that is not
 # there. Lowering would fill the slot with a thunk that only fires at run time.

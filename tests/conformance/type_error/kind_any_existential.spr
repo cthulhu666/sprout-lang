@@ -1,0 +1,14 @@
+# `any Container` packs a value of an unknown type, so that type has kind `Type`.
+# `Container` is over a type constructor, so no type can satisfy it here.
+module main
+
+class Container t
+  fn size(x: t Int) -> Int
+
+instance Container Maybe
+  fn size(x: Maybe Int) -> Int = 1
+
+type Holder = | Holder (any Container)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

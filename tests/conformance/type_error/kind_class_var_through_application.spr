@@ -1,0 +1,18 @@
+# `foo` fixes the class variable at `Type -> Type` (`t Int`). `foo2` then passes `t Int`
+# to `Wrapper`, which takes a type constructor, so that signature is ill-kinded.
+module main
+
+type Box a = Box(a)
+
+type Wrapper g = Wrapper(g Int)
+
+class Foo t
+  fn foo(x: t Int) -> Int
+  fn foo2(x: Wrapper (t Int)) -> Int
+#~^^^ ERROR
+
+instance Foo Box
+  fn foo(x: Box Int) -> Int = 1
+  fn foo2(x: Wrapper (Box Int)) -> Int = 2
+
+fn main() -> Unit !{IO} = print("unreachable")

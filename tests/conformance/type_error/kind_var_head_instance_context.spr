@@ -1,0 +1,18 @@
+# An instance context is kind-checked too. `Wrap`'s first parameter is applied to the
+# second, so in `Wrap f a` the variable `f` is a type constructor. `Foo f` asks for an
+# instance at a type, which no `f` can supply.
+module main
+
+type Wrap f a = Wrap(f a)
+
+class Foo t
+  fn foo(x: t) -> String
+
+instance Foo Int
+  fn foo(x: Int) -> String = "int"
+
+instance Foo (Wrap f a) where Foo f, Foo a
+  fn foo(x: Wrap f a) -> String = "wrap"
+#~^^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

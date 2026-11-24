@@ -1,0 +1,1 @@
+in method `two` of class `B`: class `A` takes a type of kind `Type -> Type` (a type constructor that takes one type), but in the constraint `A u` the variable `u` has kind `Type`

@@ -1,0 +1,7 @@
+# A record field must have kind `Type`. `Maybe` takes a type.
+module main
+
+type R = (name: String, items: Maybe)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

@@ -1,0 +1,1 @@
+in the constraint `Pretty (Box, Int)` the type `Box` has kind `Type -> Type` (a type constructor that takes one type), but it is used where a type of kind `Type` is needed

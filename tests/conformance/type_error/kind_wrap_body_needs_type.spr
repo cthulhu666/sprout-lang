@@ -1,0 +1,7 @@
+# A wrap body must have kind `Type`. `Maybe` takes a type.
+module main
+
+wrap W = Maybe
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

@@ -1,0 +1,1 @@
+in constructor `W` the type `f` has kind `Type -> Type` (a type constructor that takes one type), but it is used where a type of kind `Type` is needed

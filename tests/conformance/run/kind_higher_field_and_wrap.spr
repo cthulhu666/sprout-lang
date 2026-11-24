@@ -1,0 +1,28 @@
+# A higher-kinded parameter `f` applied to a type (`f a`) in a record field and in a wrap
+# body has kind `Type`, so the kind check accepts both. Each is used through a class over
+# type constructors.
+module main
+
+type Pack f a = (items: f a, label: String)
+
+wrap Holder f a = f a
+
+class Container t
+  fn count(x: t Int) -> Int
+
+instance Container Maybe
+  fn count(x: Maybe Int) -> Int = maybe_with_default(0, x)
+
+instance Container (Pack f) where Container f
+  fn count(x: Pack f Int) -> Int = count(x.items)
+
+instance Container (Holder f) where Container f
+  fn count(x: Holder f Int) -> Int =
+    match x with
+    | Holder inner -> count(inner)
+
+fn main() -> Unit !{IO} =
+  do
+    print(to_string(count(Pack(items = Just(3), label = "a"))))
+    print(to_string(count(Holder (Just(4)))))
+    print(to_string(count(Holder (Nothing))))

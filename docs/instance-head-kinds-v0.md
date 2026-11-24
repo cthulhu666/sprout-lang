@@ -1,5 +1,12 @@
 # Instance head kinds v0
 
+> **Superseded by [kind-inference-v0.md](kind-inference-v0.md).** This document models a kind as
+> one count, the arguments a class variable is applied to. The count is not the kind once a type
+> takes a higher-kinded parameter (`type Wrap f a = Wrap(f a)`): it accepted `Foo f` where `f` is
+> a type constructor, rejected `instance C Maybe` under `Wrap t Int`, and admitted any head for a
+> class whose variable no method mentions. What follows is the historical record. The recorder
+> analysis in §5 still describes how dispatch depth works.
+
 Status: implemented, revision 4.
 
 Revision 1 proposed a declaration-site arity check plus a per-class constant peel

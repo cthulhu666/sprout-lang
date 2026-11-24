@@ -674,21 +674,22 @@ the depth because the constraint token tells it (below). Both copies of
 `unify_type_expr` pair the spines as they stand.
 
 A head whose depth cannot be reconciled with the recorded type is now rejected at
-the DECLARATION, by `infer.check_instance_head_kinds` — the class variable's use
-fixes an arity, and every instance head and constructor-headed constraint must
-leave exactly that many arguments unapplied (spec §"An instance head must leave
-exactly as many arguments unapplied"). Deriving the arity takes two sources, per
-§Whole-program passes above: a module's own classes from their `ClassMethodSig`
-TypeExprs, imported ones from the `@class:` marker, whose scheme already carries
-the class parameters in its `scheme_vars`.
+the DECLARATION, by `infer.check_instance_head_kinds` — every class and type has an
+inferred kind, and every instance head and constraint must have the kind of its class
+(spec §8.5, "A class variable and every type it is applied to have a kind"). Equal
+kinds leave equal numbers of arguments unapplied, so the recorder's depth and the
+head's agree. Kinds are inferred from the bundled `decls`, per §Whole-program passes
+above; no env marker carries them.
 
 That replaced the unbound-variable test inside `resolve.check_context_subs`, which
 asked whether each context variable appeared in the head match's SUBSTITUTION —
 wrong in three ways: a variable bound to `_` counted as bound, a head DEEPER than the recorded type
 bound the wrong argument silently, and `instance Foo Bar where Baz k` was rejected
 though it compiled before and has no arity story at all, its head taking no
-arguments. Rationale: [docs/instance-head-kinds-v0.md](instance-head-kinds-v0.md).
-An arity check alone was tried first and refuted by execution — the surplus is a
+arguments. Rationale: [docs/kind-inference-v0.md](kind-inference-v0.md); the history
+of the argument-count check it replaced is in
+[docs/instance-head-kinds-v0.md](instance-head-kinds-v0.md).
+A count check alone was tried first and refuted by execution — the surplus is a
 property of the RECORDER, not of the class.
 
 `check_context_subs` asks the substitution one question again, in the other
@@ -882,7 +883,7 @@ schemes. **Every `@`-marker family is keyed on that short name:**
 | `@ctors:<TypeName>` | short type name | `linear_check.type_ctors` |
 | `@inst:<Class>:<head>` | short type head | typeclass dispatch in `infer` |
 | `@class:`, `@type:` | short name (readers apply `after_last_dot`) | `infer` |
-| `@tyarity:<TypeName>` | short type name | `infer.type_arity_of` |
+| `@tyarity:<TypeName>` | short type name | `infer.type_arity_of`, for `leaves_arguments` advice wording only; no check reads it |
 
 The `where linear` markers are the exception, keyed by something other than a type
 name (`docs/linearity-bound-v0.md` §6–§7):

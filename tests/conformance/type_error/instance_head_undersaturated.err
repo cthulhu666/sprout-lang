@@ -1,1 +1,1 @@
-so an instance head must leave 0 unapplied; this head leaves 1
+class `Plain` takes a type of kind `Type`, but the instance head `Tagged k` has kind `Type -> Type` (a type constructor that takes one type)

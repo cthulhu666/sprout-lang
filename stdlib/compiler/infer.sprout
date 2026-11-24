@@ -7602,8 +7602,8 @@ fn typecheck_decls_resolved(
     let declared_types = marker_names(types.type_marker_tag, env, set_from_list(own_type_names ++ builtin_type_names))
     # Export this module's own type names so its importers get the same treatment.
     let named_env = mark_declared_types(own_type_names, scanned_env)
-    # And their declared parameter counts, which the instance-head arity check reads
-    # back on the env path where no decl carries them.
+    # And their declared parameter counts, which `leaves_arguments` reads back to word
+    # constraint advice.
     let arities = type_arities(decls, dict_empty())
     let scanned_env_with_types = mark_declared_type_arities(arities, named_env)
     # Checks run in this order; each is skipped once an earlier one has failed.
@@ -7612,7 +7612,7 @@ fn typecheck_decls_resolved(
     let Nothing = validate_constraints_all(decls, marker_names(types.class_marker_tag, env, set_from_list(collect_declared_class_names(decls, Nil)))) else Just(p, m) -> typed_ast.TypedErr(p, m)
     let Nothing = check_duplicate_module_values(decls, dict_empty()) else Just(p, m) -> typed_ast.TypedErr(p, m)
     let Nothing = check_tyvar_instance_heads(decls) else Just(p, m) -> typed_ast.TypedErr(p, m)
-    let Nothing = check_instance_head_kinds(decls, arities, env, qual_env) else Just(p, m) -> typed_ast.TypedErr(p, m)
+    let Nothing = check_instance_head_kinds(decls, qual_env) else Just(p, m) -> typed_ast.TypedErr(p, m)
     let Nothing = check_instance_context_sizes(decls) else Just(p, m) -> typed_ast.TypedErr(p, m)
     let Nothing = check_indistinct_constraints(decls) else Just(p, m) -> typed_ast.TypedErr(p, m)
     let Nothing = check_overlapping_instances(decls, dict_empty()) else Just(p, m) -> typed_ast.TypedErr(p, m)
@@ -8597,193 +8597,854 @@ fn check_tyvar_instance_heads(decls: List ast.Decl) -> Maybe(source.SourcePos, S
       | _ -> check_tyvar_instance_heads(rest)
 
 # ---------------------------------------------------------------------------
-# Instance-head arity — docs/instance-head-kinds-v0.md
+# Kind inference — spec-v0.md §8.5
 # ---------------------------------------------------------------------------
 #
-# With exactly one class parameter every kind is `*^n -> *`, which one integer
-# describes, so an arity check IS the kind check here. A class variable used as
-# `t Int` demands an instance head one argument short of saturation; used bare it
-# demands a saturated one.
+# A kind is `Type` or `k1 -> k2`; kind variables exist only while inferring. Type, record,
+# wrap and class declarations are inferred in dependency groups, and a group's leftover
+# variables become `Type` before the next group reads it (Haskell 2010 §4.6). Each fn and
+# instance is then checked alone against those kinds.
 
-# Every application depth at which `v` occurs. `t` alone is 0 and `t Int` is 1:
-# the count is of arguments applied to the VARIABLE, not of the spine holding it,
-# so a TApp's argument restarts at 0 while its base sits one deeper.
-fn var_app_depths(t: types.Type, v: String, depth: Int, acc: List Int) -> List Int =
+type Kind =
+  | KType
+  | KArrow Kind Kind
+  | KVar Int
+
+# Where a clash arose. `KindAtArg`: the argument's kind is not what the head takes.
+# `KindAtHead`: the head takes no argument, or a different kind of one. `KindAtType`: a type
+# of kind other than `Type` where one is needed. `KindAtSelf`: a variable applied to a type
+# that mentions it.
+type KindSite =
+  | KindAtArg
+  | KindAtHead
+  | KindAtType
+  | KindAtSelf
+
+# What a position needed (`need`) against what it had (`have`), and the application it
+# arose in. `on_watch`: the clash is about the class variable under inference.
+type KindClash = (have: Kind, need: Kind, fun: types.Type, arg: types.Type, on_watch: Bool, site: KindSite)
+
+# `vars`: kinds of the type variables of the declaration being read. `watch`: the class
+# variable, or "". `clash`: the first disagreement met since it was cleared. A failed
+# unification leaves `subst` as it was, so a signature can be read without being judged.
+type KindSt = (next: Int, subst: Dict Kind, vars: Dict Kind, watch: String, clash: Maybe KindClash)
+
+# Declared type constructors, and classes (a class maps to the kind of its variable).
+type KindEnv = (tycons: Dict Kind, classes: Dict Kind)
+
+type KindCheck =
+  | KindOk KindSt
+  | KindErr String
+
+type KindMembers =
+  | KindMembersOk KindSt
+  | KindMembersErr source.SourcePos String
+
+# One member read: its fields and signatures are judged, and its constraints come back as
+# checks to run once every member of the group has been read.
+type KindRead =
+  | KindReadOk KindSt (List (KindSt -> KindCheck))
+  | KindReadErr String
+
+# A deferred check, with the position of the member it belongs to.
+type KindLater =
+  | KindLater source.SourcePos (KindSt -> KindCheck)
+
+type KindReadAll =
+  | KindReadAllOk KindSt (List KindLater)
+  | KindReadAllErr source.SourcePos String
+
+type KindGroupResult =
+  | KindGroupOk KindEnv
+  | KindGroupErr source.SourcePos String
+
+fn kind_new_state() -> KindSt =
+  KindSt(next = 0, subst = dict_empty(), vars = dict_empty(), watch = "", clash = Nothing)
+
+fn kind_fresh(st: KindSt) -> (Kind, KindSt) =
+  let st1 = st with (next = st.next + 1)
+  in (KVar(st.next), st1)
+
+fn kind_resolve(k: Kind, st: KindSt) -> Kind =
+  match k with
+  | KType -> k
+  | KArrow _ _ -> k
+  | KVar n ->
+      match dict_get(int_to_string(n), st.subst) with
+      | Just bound -> kind_resolve(bound, st)
+      | Nothing -> k
+
+fn kind_occurs(n: Int, k: Kind, st: KindSt) -> Bool =
+  match kind_resolve(k, st) with
+  | KType -> false
+  | KVar m -> m == n
+  | KArrow a r -> kind_occurs(n, a, st) || kind_occurs(n, r, st)
+
+fn kind_bind(n: Int, k: Kind, st: KindSt) -> Maybe KindSt =
+  if kind_occurs(n, k, st) then Nothing
+  else
+    let st1 = st with (subst = dict_set(int_to_string(n), k, st.subst))
+    in Just(st1)
+
+fn kind_unify(a: Kind, b: Kind, st: KindSt) -> Maybe KindSt =
+  kind_unify_resolved(kind_resolve(a, st), kind_resolve(b, st), st)
+
+fn kind_unify_resolved(a: Kind, b: Kind, st: KindSt) -> Maybe KindSt =
+  match (a, b) with
+  | (KVar m, KVar n) -> if m == n then Just(st) else kind_bind(m, b, st)
+  | (KVar m, _) -> kind_bind(m, b, st)
+  | (_, KVar n) -> kind_bind(n, a, st)
+  | (KType, KType) -> Just(st)
+  | (KArrow a1 r1, KArrow a2 r2) ->
+      let Just st1 = kind_unify(a1, a2, st) else Nothing
+      in kind_unify(r1, r2, st1)
+  | (KType, KArrow _ _) -> Nothing
+  | (KArrow _ _, KType) -> Nothing
+
+# The kind with every variable still open read as `Type`.
+fn kind_default(k: Kind, st: KindSt) -> Kind =
+  match kind_resolve(k, st) with
+  | KType -> KType
+  | KVar _ -> KType
+  | KArrow a r -> KArrow(kind_default(a, st), kind_default(r, st))
+
+fn kind_is_type(k: Kind) -> Bool =
+  match k with
+  | KType -> true
+  | KVar _ -> true
+  | KArrow _ _ -> false
+
+fn kind_text(k: Kind) -> String =
+  match k with
+  | KType -> "Type"
+  | KVar _ -> "Type"
+  | KArrow a r -> kind_arg_text(a) ++ " -> " ++ kind_text(r)
+
+fn kind_arg_text(k: Kind) -> String =
+  match k with
+  | KArrow _ _ -> "(" ++ kind_text(k) ++ ")"
+  | KType -> "Type"
+  | KVar _ -> "Type"
+
+# The kind in backticks, with what a non-`Type` kind means: a message is read by someone
+# who may not know the word.
+fn kind_phrase(k: Kind) -> String =
+  "`" ++ kind_text(k) ++ "`" ++ kind_gloss(k)
+
+fn kind_gloss(k: Kind) -> String =
+  match k with
+  | KType -> ""
+  | KVar _ -> ""
+  | KArrow _ _ -> " (a type constructor that takes " ++ kind_takes(kind_arg_kinds(k)) ++ ")"
+
+fn kind_arg_kinds(k: Kind) -> List Kind =
+  match k with
+  | KType -> []
+  | KVar _ -> []
+  | KArrow a r -> Cons(a, kind_arg_kinds(r))
+
+fn kind_takes(args: List Kind) -> String =
+  if all(kind_is_type, args) then kind_count_word(list_length(args)) ++ (if list_length(args) == 1 then " type" else " types")
+  else string.join(" and ", list_map(kind_arg_word, args))
+
+fn kind_arg_word(k: Kind) -> String =
+  if kind_is_type(k) then "a type" else "a type constructor"
+
+fn kind_count_word(n: Int) -> String =
+  if n == 1 then "one" else if n == 2 then "two" else if n == 3 then "three" else int_to_string(n)
+
+# Built-ins have no declaration to read a kind from.
+fn kind_builtin(name: String) -> Maybe Kind =
+  if list_member(name, c_runtime_type_names) then Just(KArrow (KType, KType))
+  else if name == "Builder" || list_member(name, primitive_type_names) then Just(KType)
+  else Nothing
+
+fn kind_note(clash: KindClash, st: KindSt) -> KindSt =
+  match st.clash with
+  | Nothing -> st with (clash = Just(clash))
+  | Just prior ->
+      if clash.on_watch && !prior.on_watch then st with (clash = Just(clash)) else st
+
+fn kind_is_watch(t: types.Type, st: KindSt) -> Bool =
+  match types.type_var_name(t) with
+  | Just v -> st.watch != "" && v == st.watch
+  | Nothing -> false
+
+fn kind_show_type(t: types.Type) -> String =
+  types.type_to_string(types.display_consts(t))
+
+# The kind of `t`. Total: a disagreement is recorded in `clash`, never raised, and a type
+# the program does not declare (an alias used bare) gets a fresh kind, so nothing is
+# rejected for what this pass cannot see.
+fn kind_of(t: types.Type, env: KindEnv, st: KindSt) -> (Kind, KindSt) =
   match t with
-  | types.TVar n -> if types.tyvar_identity(n) == v then Cons(depth, acc) else acc
-  | types.TConst _ -> acc
-  | types.TApp base arg -> var_app_depths(base, v, depth + 1, var_app_depths(arg, v, 0, acc))
-  | types.TFunc p r _ _ -> var_app_depths(r, v, 0, var_app_depths(p, v, 0, acc))
-  | types.TThunk r _ -> var_app_depths(r, v, 0, acc)
-  | types.TTuple items -> var_app_depths_list(items, v, acc)
+  | types.TVar v -> kind_of_var(types.tyvar_identity(v), st)
+  | types.TConst id -> kind_of_const(types.type_id_name(id), env, st)
+  | types.TApp base arg -> kind_of_app(base, arg, env, st)
+  | types.TFunc p r _ _ -> (KType, kind_expect_all([p, r], env, st))
+  | types.TThunk r _ -> (KType, kind_expect_all([r], env, st))
+  | types.TTuple items -> (KType, kind_expect_all(items, env, st))
 
-fn var_app_depths_list(items: List types.Type, v: String, acc: List Int) -> List Int =
-  match items with
-  | [] -> acc
-  | [h | t] -> var_app_depths_list(t, v, var_app_depths(h, v, 0, acc))
+fn kind_of_var(name: String, st: KindSt) -> (Kind, KindSt) =
+  match dict_get(name, st.vars) with
+  | Just k -> (k, st)
+  | Nothing ->
+      let (k, st1) = kind_fresh(st)
+          st2 = st1 with (vars = dict_set(name, k, st1.vars))
+      in (k, st2)
 
-fn param_app_depths(params: List ast.Param, v: String, local_vars: Dict types.Type,
-                    acc: List Int) -> List Int =
+fn kind_of_const(name: String, env: KindEnv, st: KindSt) -> (Kind, KindSt) =
+  match dict_get(name, env.tycons) with
+  | Just k -> (k, st)
+  | Nothing ->
+      match kind_builtin(name) with
+      | Just k -> (k, st)
+      | Nothing -> kind_fresh(st)
+
+fn kind_of_app(base: types.Type, arg: types.Type, env: KindEnv, st: KindSt) -> (Kind, KindSt) =
+  let (kf, st1) = kind_of(base, env, st)
+      (kx, st2) = kind_of(arg, env, st1)
+  in kind_apply(kind_resolve(kf, st2), kx, base, arg, st2)
+
+fn kind_apply(kf: Kind, kx: Kind, base: types.Type, arg: types.Type, st: KindSt) -> (Kind, KindSt) =
+  match kf with
+  | KArrow p r -> kind_apply_arrow(p, r, kx, base, arg, st)
+  | KVar _ -> kind_apply_var(kf, kx, base, arg, st)
+  | KType -> kind_apply_type(kx, base, arg, st)
+
+# Applying an unsolved variable fails only on the occurs check: `f f`. Not a watch clash,
+# since no kind the class variable is used at is wrong.
+fn kind_apply_var(kf: Kind, kx: Kind, base: types.Type, arg: types.Type,
+                  st: KindSt) -> (Kind, KindSt) =
+  let (r, st1) = kind_fresh(st)
+  in match kind_unify(kf, KArrow(kx, r), st1) with
+     | Just st2 -> (r, st2)
+     | Nothing ->
+         (r, kind_note(KindClash(have = kf, need = KArrow(kx, r), fun = base, arg = arg,
+                                 on_watch = false, site = KindAtSelf), st1))
+
+fn kind_apply_arrow(p: Kind, r: Kind, kx: Kind, base: types.Type, arg: types.Type,
+                    st: KindSt) -> (Kind, KindSt) =
+  match kind_unify(p, kx, st) with
+  | Just st1 -> (r, st1)
+  | Nothing ->
+      if kind_is_watch(base, st)
+      then (r, kind_note(KindClash(have = KArrow(p, r), need = KArrow(kx, r), fun = base, arg = arg,
+                                   on_watch = true, site = KindAtHead), st))
+      else (r, kind_note(KindClash(have = kx, need = p, fun = base, arg = arg,
+                                   on_watch = kind_is_watch(arg, st), site = KindAtArg), st))
+
+# A type of kind `Type` applied to an argument.
+fn kind_apply_type(kx: Kind, base: types.Type, arg: types.Type, st: KindSt) -> (Kind, KindSt) =
+  let (r, st1) = kind_fresh(st)
+  in (r, kind_note(KindClash(have = KType, need = KArrow(kx, r), fun = base, arg = arg,
+                             on_watch = kind_is_watch(base, st1), site = KindAtHead), st1))
+
+fn kind_expect_all(ts: List types.Type, env: KindEnv, st: KindSt) -> KindSt =
+  match ts with
+  | [] -> st
+  | [t | rest] -> kind_expect_all(rest, env, kind_expect(t, env, st))
+
+# `t` must have kind `Type`. A bare class variable that does not is the class using its
+# variable at two kinds.
+fn kind_expect(t: types.Type, env: KindEnv, st: KindSt) -> KindSt =
+  let (k, st1) = kind_of(t, env, st)
+  in kind_expected(t, k, kind_unify(k, KType, st1), st1)
+
+fn kind_expected(t: types.Type, k: Kind, unified: Maybe KindSt, st: KindSt) -> KindSt =
+  match unified with
+  | Just st1 -> st1
+  | Nothing ->
+      kind_note(KindClash(have = k, need = KType, fun = t, arg = t, on_watch = kind_is_watch(t, st),
+                          site = KindAtType), st)
+
+fn kind_read_te(te: ast.TypeExpr, env: KindEnv, alias_env: Dict types.Type, st: KindSt) -> KindSt =
+  kind_expect(let_annotation_type(te, alias_env), env, st)
+
+fn kind_read_params(params: List ast.Param, env: KindEnv, alias_env: Dict types.Type, st: KindSt) -> KindSt =
   match params with
-  | [] -> acc
+  | [] -> st
   | [ast.Param _ maybe_te _ | rest] ->
-      let Just te = maybe_te else param_app_depths(rest, v, local_vars, acc)
-      in param_app_depths(rest, v, local_vars,
-           var_app_depths(type_from_ast(te, local_vars), v, 0, acc))
+      match maybe_te with
+      | Just te -> kind_read_params(rest, env, alias_env, kind_read_te(te, env, alias_env, st))
+      | Nothing -> kind_read_params(rest, env, alias_env, st)
 
-# Read over the same local_vars register_class_method builds, so the class variable
-# is the same TVar here as in the scheme an importer reads back. The two sources
-# below must agree on that or their depths are not comparable.
-fn class_own_depths(methods: List ast.ClassMethodSig, v: String,
-                    local_vars: Dict types.Type, acc: List Int) -> List Int =
-  match methods with
-  | [] -> acc
-  | [ast.ClassMethodSig _ params ret _ _ _ | rest] ->
-      class_own_depths(rest, v, local_vars,
-        var_app_depths(type_from_ast(ret, local_vars), v, 0,
-          param_app_depths(params, v, local_vars, acc)))
+fn kind_read_ret(ret: Maybe ast.TypeExpr, env: KindEnv, alias_env: Dict types.Type, st: KindSt) -> KindSt =
+  match ret with
+  | Just te -> kind_read_te(te, env, alias_env, st)
+  | Nothing -> st
 
-# class (name exactly as declared) -> (its variable, the depths its methods apply it
-# at). Keyed verbatim for the reason type_arities is: on the bundled path two modules
-# can each declare a class named `Held`, and one short key let the later declaration
-# decide both — rejecting one module's well-kinded instances, and silently admitting
-# the other's ill-kinded ones. Lookups fall back to the short name for the env path,
-# which has only that (compiler-internals.md §Env-path type names are SHORT).
-fn own_class_depths(decls: List ast.Decl, alias_env: Dict types.Type,
-                    acc: Dict (String, List Int)) -> Dict (String, List Int) =
+fn kind_then(r: KindCheck, next: KindSt -> KindCheck) -> KindCheck =
+  match r with
+  | KindErr msg -> KindErr(msg)
+  | KindOk st -> next(st)
+
+fn kind_prefix(prefix: String, r: KindCheck) -> KindCheck =
+  match r with
+  | KindErr msg -> KindErr(prefix ++ msg)
+  | KindOk st -> KindOk(st)
+
+# ---- Constraints and instance heads ----
+
+fn kind_check_all(cs: List ast.TypeConstraint, env: KindEnv, alias_env: Dict types.Type,
+                  st: KindSt) -> KindCheck =
+  match cs with
+  | [] -> KindOk(st)
+  | [c | rest] ->
+      kind_then(kind_check_constraint(c, false, env, alias_env, st),
+                kind_check_all(rest, env, alias_env, _))
+
+# `C t`, or an instance head `C T` when `in_head`: the kind of `t` must be the kind of
+# `C`'s variable. It solves the variables it meets, so a constraint can fix the kind of one
+# the signature leaves open. A class the program does not declare is not judged.
+fn kind_check_constraint(c: ast.TypeConstraint, in_head: Bool, env: KindEnv,
+                         alias_env: Dict types.Type, st: KindSt) -> KindCheck =
+  let ast.TypeConstraint cls type_args = c
+      [te | _] = type_args else KindOk(st)
+      Just want = dict_get(cls, env.classes) else KindOk(st)
+      st0 = st with (clash = Nothing)
+      (got, st1) = kind_of(let_annotation_type(te, alias_env), env, st0)
+  in kind_check_use(c, te, in_head, want, got, st1)
+
+fn kind_check_use(c: ast.TypeConstraint, te: ast.TypeExpr, in_head: Bool, want: Kind, got: Kind,
+                  st: KindSt) -> KindCheck =
+  match st.clash with
+  | Just clash -> KindErr(kind_clash_message(kind_scope_text(c, te, in_head), clash, st))
+  | Nothing -> kind_unify_use(c, te, in_head, want, got, st)
+
+fn kind_unify_use(c: ast.TypeConstraint, te: ast.TypeExpr, in_head: Bool, want: Kind, got: Kind,
+                  st: KindSt) -> KindCheck =
+  match kind_unify(got, want, st) with
+  | Just st1 -> KindOk(st1 with (clash = Nothing))
+  | Nothing ->
+      KindErr(kind_mismatch_message(c, te, in_head, kind_default(want, st), kind_default(got, st)))
+
+fn kind_scope_text(c: ast.TypeConstraint, te: ast.TypeExpr, in_head: Bool) -> String =
+  if in_head then "in the instance head `" ++ typed_ast.te_display(te) ++ "`"
+  else "in the constraint `" ++ instance_owner(c) ++ "`"
+
+# A type used wrongly: applied to an argument of a kind its head does not take
+# (`Tagged Maybe`), applied to an argument at all when it takes none (`Int Bool`), used
+# where a type is needed (`(Box, Int)`), or applied to itself (`f f`).
+fn kind_clash_message(scope: String, clash: KindClash, st: KindSt) -> String =
+  match clash.site with
+  | KindAtArg ->
+      scope ++ " the type `" ++ kind_show_type(clash.arg) ++ "` has kind "
+        ++ kind_phrase(kind_default(clash.have, st)) ++ ", but `" ++ kind_show_type(clash.fun)
+        ++ "` takes a type of kind " ++ kind_phrase(kind_default(clash.need, st))
+  | KindAtHead ->
+      scope ++ " the type `" ++ kind_show_type(clash.fun) ++ "` has kind "
+        ++ kind_phrase(kind_default(clash.have, st)) ++ " and takes no argument, but it is applied to `"
+        ++ kind_show_type(clash.arg) ++ "`"
+  | KindAtType ->
+      scope ++ " the type `" ++ kind_show_type(clash.fun) ++ "` has kind "
+        ++ kind_phrase(kind_default(clash.have, st))
+        ++ ", but it is used where a type of kind `Type` is needed"
+  | KindAtSelf ->
+      scope ++ " the type `" ++ kind_show_type(clash.fun) ++ "` is applied to `"
+        ++ kind_show_type(clash.arg) ++ "`, so its kind would have to contain itself"
+
+fn kind_mismatch_message(c: ast.TypeConstraint, te: ast.TypeExpr, in_head: Bool, want: Kind,
+                         got: Kind) -> String =
+  let ast.TypeConstraint cls _ = c
+      short = string.after_last_dot(cls)
+  in "class `" ++ short ++ "` takes a type of kind " ++ kind_phrase(want) ++ ", but "
+       ++ kind_subject_text(c, short, te, in_head, kind_phrase(got))
+
+fn kind_subject_text(c: ast.TypeConstraint, short: String, te: ast.TypeExpr, in_head: Bool,
+                     got: String) -> String =
+  if in_head then "the instance head `" ++ typed_ast.te_display(te) ++ "` has kind " ++ got
+  else
+    match te with
+    | ast.TypeName v -> kind_var_subject_text(c, short, v, te, got)
+    | _ -> kind_type_subject_text(c, te, got)
+
+# `any C` writes no variable of its own, so naming the one the parser made up would
+# print `existv0`.
+fn kind_var_subject_text(c: ast.TypeConstraint, short: String, v: String, te: ast.TypeExpr,
+                         got: String) -> String =
+  if types.is_exist_var(v) then "`any " ++ short ++ "` stands for a type of kind " ++ got
+  else if source.is_lowercase_name(v)
+  then "in the constraint `" ++ instance_owner(c) ++ "` the variable `" ++ v ++ "` has kind " ++ got
+  else kind_type_subject_text(c, te, got)
+
+fn kind_type_subject_text(c: ast.TypeConstraint, te: ast.TypeExpr, got: String) -> String =
+  "in the constraint `" ++ instance_owner(c) ++ "` the type `" ++ typed_ast.te_display(te)
+    ++ "` has kind " ++ got
+
+# ---- Declaration groups ----
+
+fn kind_node_key(d: ast.Decl) -> Maybe String =
+  match d with
+  | ast.TypeDecl name _ _ _ _ _ _ -> Just("t:" ++ name)
+  | ast.RecordDecl name _ _ _ _ _ _ -> Just("t:" ++ name)
+  | ast.WrapDecl name _ _ _ _ _ _ -> Just("t:" ++ name)
+  | ast.ClassDecl name _ _ _ _ -> Just("c:" ++ name)
+  | ast.FnDecl _ _ _ _ _ _ _ _ -> Nothing
+  | ast.ExternFnDecl _ _ _ _ _ _ _ -> Nothing
+  | ast.LetDecl _ _ _ _ -> Nothing
+  | ast.AliasDecl _ _ _ _ -> Nothing
+  | ast.InstanceDecl _ _ _ _ _ -> Nothing
+
+# The first declaration of a name wins; a repeat is reported by its own check.
+fn kind_collect(decls: List ast.Decl, by_key: Dict ast.Decl, keys: List String) -> (Dict ast.Decl, List String) =
   match decls with
-  | [] -> acc
-  | [decl | rest] ->
-      own_class_depths(rest, alias_env, own_class_depth_add(decl, alias_env, acc))
+  | [] -> (by_key, list_reverse(keys))
+  | [d | rest] ->
+      match kind_node_key(d) with
+      | Nothing -> kind_collect(rest, by_key, keys)
+      | Just k ->
+          if dict_member(k, by_key) then kind_collect(rest, by_key, keys)
+          else kind_collect(rest, dict_set(k, d, by_key), Cons(k, keys))
 
-fn own_class_depth_add(decl: ast.Decl, alias_env: Dict types.Type,
-                       acc: Dict (String, List Int)) -> Dict (String, List Int) =
-  let ast.ClassDecl name type_params methods _ _ = decl else acc
-      [v | _] = type_params else acc
-  in dict_set(name,
-       (v, class_own_depths(methods, v, build_type_var_dict(type_params, alias_env), Nil)), acc)
+# Node keys a type mentions, read after alias expansion so an alias is as good as its body.
+fn kind_type_deps(t: types.Type, acc: List String) -> List String =
+  match t with
+  | types.TVar _ -> acc
+  | types.TConst id -> Cons("t:" ++ types.type_id_name(id), acc)
+  | types.TApp base arg -> kind_type_deps(arg, kind_type_deps(base, acc))
+  | types.TFunc p r _ _ -> kind_type_deps(r, kind_type_deps(p, acc))
+  | types.TThunk r _ -> kind_type_deps(r, acc)
+  | types.TTuple items -> list_fold(\ (a, x) -> kind_type_deps(x, a), acc, items)
 
-# The same table for classes that arrive as env schemes rather than decls — every
-# imported class on the REPL / LSP / analysis path (compiler-internals.md §Whole-
-# program passes). `@class:<method>` already names the class in its body and the
-# class parameters in its scheme_vars, so no marker of its own is needed.
-fn env_class_depths(entries: List (String, types.Scheme), env: Dict types.Scheme,
-                    acc: Dict (String, List Int)) -> Dict (String, List Int) =
-  match entries with
-  | [] -> acc
-  | [(key, marker) | rest] ->
-      if str_starts_with(key, types.class_marker_tag) then
-        env_class_depths(rest, env, env_class_depth_add(key, marker, env, acc))
-      else env_class_depths(rest, env, acc)
+fn kind_te_deps(te: ast.TypeExpr, alias_env: Dict types.Type, acc: List String) -> List String =
+  kind_type_deps(let_annotation_type(te, alias_env), acc)
 
+fn kind_tes_deps(tes: List ast.TypeExpr, alias_env: Dict types.Type, acc: List String) -> List String =
+  list_fold(\ (a, te) -> kind_te_deps(te, alias_env, a), acc, tes)
 
-fn env_class_depth_add(key: String, marker: types.Scheme, env: Dict types.Scheme,
-                       acc: Dict (String, List Int)) -> Dict (String, List Int) =
-  let types.TConst id = types.scheme_type(marker) else acc
-      [v | _] = types.scheme_vars(marker) else acc
-  in merge_class_depths(string.after_last_dot(types.type_id_name(id)), v,
-       method_scheme_depths(string.drop(key, string.length(types.class_marker_tag)), v, env),
-       acc)
+fn kind_params_deps(params: List ast.Param, alias_env: Dict types.Type, acc: List String) -> List String =
+  list_fold(\ (a, p) -> kind_param_deps(p, alias_env, a), acc, params)
 
-fn method_scheme_depths(method: String, v: String, env: Dict types.Scheme) -> List Int =
-  let Just scheme = dict_get(method, env) else Nil
-  in var_app_depths(types.scheme_type(scheme), v, 0, Nil)
+fn kind_param_deps(p: ast.Param, alias_env: Dict types.Type, acc: List String) -> List String =
+  let ast.Param _ maybe_te _ = p
+      Just te = maybe_te else acc
+  in kind_te_deps(te, alias_env, acc)
 
-# One class has many methods and each contributes its own depths, so the entry
-# accumulates rather than being overwritten.
-fn merge_class_depths(cls: String, v: String, depths: List Int,
-                      acc: Dict (String, List Int)) -> Dict (String, List Int) =
-  let Just(v0, prior) = dict_get(cls, acc) else dict_set(cls, (v, depths), acc)
-  in dict_set(cls, (v0, append(depths, prior)), acc)
+fn kind_constraints_deps(cs: List ast.TypeConstraint, alias_env: Dict types.Type,
+                         acc: List String) -> List String =
+  list_fold(\ (a, c) -> kind_constraint_deps(c, alias_env, a), acc, cs)
 
-# A superclass constrains the variable too: `class Wrapper t where Functor t` ties
-# `t` to whatever arity `Functor` uses. `@super:` records the pair and nothing about
-# the argument, because a superclass is always over the class variable, bare
-# (class_decl_error) — register_superclass_markers discards the argument for that
-# reason. Own classes come from build_class_super_map; this is its env-path counterpart.
-fn env_class_supers(entries: List (String, types.Scheme),
-                    acc: Dict (List String)) -> Dict (List String) =
-  match entries with
-  | [] -> acc
-  | [(key, _) | rest] ->
-      if str_starts_with(key, types.super_marker_tag) then
-        env_class_supers(rest, add_env_super(string.drop(key, string.length(types.super_marker_tag)), acc))
-      else env_class_supers(rest, acc)
+fn kind_constraint_deps(c: ast.TypeConstraint, alias_env: Dict types.Type, acc: List String) -> List String =
+  let ast.TypeConstraint cls args = c
+  in kind_tes_deps(args, alias_env, Cons("c:" ++ cls, acc))
 
-fn add_env_super(rest_of_key: String, acc: Dict (List String)) -> Dict (List String) =
-  let Just(cls, super_name) = string.split_once(rest_of_key, ":") else acc
-  in dict_set(string.after_last_dot(cls),
-       Cons(string.after_last_dot(super_name), super_list_of(string.after_last_dot(cls), acc)),
-       acc)
+fn kind_ctors_deps(ctors: List ast.TypeConstructor, alias_env: Dict types.Type,
+                   acc: List String) -> List String =
+  list_fold(\ (a, c) -> kind_ctor_deps(c, alias_env, a), acc, ctors)
 
-# The arity every use of a class's variable must agree on. Nothing when nothing
-# constrains it: a class whose methods never mention its parameter and that has no
-# superclass admits a head at any arity, and inventing a rule for it would reject
-# working code. `visited` guards a superclass cycle, rejected elsewhere but not yet.
-fn class_var_arity(cls: String, depths: Dict (String, List Int),
-                   supers: Dict (List String), visited: List String) -> Maybe Int =
-  if list_member(cls, visited) then Nothing
-  else single_depth(class_all_depths(cls, depths, supers, Cons(cls, visited)))
+fn kind_ctor_deps(c: ast.TypeConstructor, alias_env: Dict types.Type, acc: List String) -> List String =
+  let ast.TypeConstructor _ fields _ cs _ = c
+  in kind_constraints_deps(cs, alias_env, kind_tes_deps(fields, alias_env, acc))
 
-fn class_all_depths(cls: String, depths: Dict (String, List Int),
-                    supers: Dict (List String), visited: List String) -> List Int =
-  append(class_own_part(cls, depths),
-    super_depths(super_list_of(cls, supers), depths, supers, visited))
+fn kind_methods_deps(methods: List ast.ClassMethodSig, alias_env: Dict types.Type,
+                     acc: List String) -> List String =
+  list_fold(\ (a, m) -> kind_method_deps(m, alias_env, a), acc, methods)
 
-# Verbatim first, then the short name: own classes are keyed as declared and imported
-# ones arrive short. Two classes sharing a short name have no short entry at all, so a
-# lookup that only has the short name finds nothing and the check is skipped — the
-# same answer as "nothing constrains this variable", and the safe direction.
-fn class_own_part(cls: String, depths: Dict (String, List Int)) -> List Int =
-  let Just(_, ds) = class_depths_entry(cls, depths) else Nil
-  in ds
+fn kind_method_deps(m: ast.ClassMethodSig, alias_env: Dict types.Type, acc: List String) -> List String =
+  let ast.ClassMethodSig _ params ret _ cs _ = m
+  in kind_constraints_deps(cs, alias_env,
+       kind_te_deps(ret, alias_env, kind_params_deps(params, alias_env, acc)))
 
-fn class_depths_entry(cls: String,
-                      depths: Dict (String, List Int)) -> Maybe (String, List Int) =
-  match dict_get(cls, depths) with
-  | Just entry -> Just(entry)
-  | Nothing -> dict_get(string.after_last_dot(cls), depths)
+fn kind_decl_deps(d: ast.Decl, alias_env: Dict types.Type) -> List String =
+  match d with
+  | ast.TypeDecl _ _ ctors _ _ _ _ -> kind_ctors_deps(ctors, alias_env, Nil)
+  | ast.RecordDecl _ _ fields _ _ _ _ -> kind_tes_deps(ast.record_field_type_exprs(fields), alias_env, Nil)
+  | ast.WrapDecl _ _ inner _ _ _ _ -> kind_te_deps(inner, alias_env, Nil)
+  | ast.ClassDecl _ _ methods supers _ ->
+      kind_constraints_deps(supers, alias_env, kind_methods_deps(methods, alias_env, Nil))
+  | ast.FnDecl _ _ _ _ _ _ _ _ -> Nil
+  | ast.ExternFnDecl _ _ _ _ _ _ _ -> Nil
+  | ast.LetDecl _ _ _ _ -> Nil
+  | ast.AliasDecl _ _ _ _ -> Nil
+  | ast.InstanceDecl _ _ _ _ _ -> Nil
 
-fn super_depths(names: List String, depths: Dict (String, List Int),
-                supers: Dict (List String), visited: List String) -> List Int =
-  match names with
-  | [] -> Nil
-  | [s | rest] ->
-      match class_var_arity(s, depths, supers, visited) with
-      | Nothing -> super_depths(rest, depths, supers, visited)
-      | Just n -> Cons(n, super_depths(rest, depths, supers, visited))
+# Edges only to declared nodes, which is what scc requires of a graph.
+fn kind_graph(keys: List String, by_key: Dict ast.Decl, alias_env: Dict types.Type) -> Dict Set =
+  list_fold(\ (g, k) -> kind_add_node(k, by_key, alias_env, g), dict_empty(), keys)
 
-# The one depth every occurrence agrees on. Nothing covers both "no occurrence" and
-# "they disagree", which is why disagreement is found separately: its message has to
-# name the two values, and a caller cannot recover them from here.
-fn single_depth(depths: List Int) -> Maybe Int =
-  match depths with
-  | [] -> Nothing
-  | [h | t] -> if all_eq_int(t, h) then Just(h) else Nothing
+fn kind_add_node(k: String, by_key: Dict ast.Decl, alias_env: Dict types.Type,
+                 g: Dict Set) -> Dict Set =
+  match dict_get(k, by_key) with
+  | Nothing -> g
+  | Just d ->
+      dict_set(k, set_from_list(list_filter(dict_member(_, by_key), kind_decl_deps(d, alias_env))), g)
 
-fn all_eq_int(xs: List Int, n: Int) -> Bool =
-  all(\x -> x == n, xs)
+fn kind_groups(decls: List ast.Decl, alias_env: Dict types.Type) -> KindGroupResult =
+  let (by_key, keys) = kind_collect(decls, dict_empty(), Nil)
+  in kind_run_groups(scc.sccs_in_source_order(keys, kind_graph(keys, by_key, alias_env)),
+                     by_key, alias_env, KindEnv(tycons = dict_empty(), classes = dict_empty()))
 
-fn depth_conflict(depths: List Int) -> Maybe (Int, Int) =
-  match depths with
-  | [] -> Nothing
-  | [h | t] -> first_differing(t, h)
+fn kind_run_groups(comps: List (List String), by_key: Dict ast.Decl, alias_env: Dict types.Type,
+                   env: KindEnv) -> KindGroupResult =
+  match comps with
+  | [] -> KindGroupOk(env)
+  | [comp | rest] ->
+      match kind_infer_group(list_filter_map(dict_get(_, by_key), comp), env, alias_env) with
+      | KindGroupErr pos msg -> KindGroupErr(pos, msg)
+      | KindGroupOk env1 -> kind_run_groups(rest, by_key, alias_env, env1)
 
-fn first_differing(xs: List Int, n: Int) -> Maybe (Int, Int) =
-  match xs with
-  | [] -> Nothing
-  | [h | t] -> if h == n then first_differing(t, n) else Just((n, h))
+# One group: seed fresh kinds, read every member, judge every constraint, default what is
+# left to `Type`, and only then judge the deriving clauses, which need the settled kinds.
+fn kind_infer_group(members: List ast.Decl, env: KindEnv, alias_env: Dict types.Type) -> KindGroupResult =
+  let (env_g, st1) = kind_seed(members, env, kind_new_state())
+  in match kind_members(members, env_g, alias_env, st1) with
+     | KindMembersErr pos msg -> KindGroupErr(pos, msg)
+     | KindMembersOk st2 -> kind_finish_group(members, kind_close(members, env_g, st2))
 
-# Keyed on the name exactly as written, for the reason alias_arity_of gives: on the
-# bundled path both sides are qualified, and matching `main.Tagged` against a short
-# `Tagged` would report an arity the writer never declared. A wrap records its own
-# parameter count here, the same as an ADT.
-#
-# An ALIAS records nothing. Its parameter count is not its residual arity — `type
-# alias Half a = Tagged a` takes one parameter and leaves one more unapplied — and
-# an alias instance head is a non-goal (docs/instance-head-kinds-v0.md §2), so the
-# honest answer is no arity and a skipped check rather than a number the writer
-# never declared.
+fn kind_finish_group(members: List ast.Decl, closed: KindEnv) -> KindGroupResult =
+  match ast.first_decl_error(kind_derive_error(_, closed), members) with
+  | Just (pos, msg) -> KindGroupErr(pos, msg)
+  | Nothing -> KindGroupOk(closed)
+
+fn kind_seed(members: List ast.Decl, env: KindEnv, st: KindSt) -> (KindEnv, KindSt) =
+  match members with
+  | [] -> (env, st)
+  | [d | rest] ->
+      let (env1, st1) = kind_seed_one(d, env, st)
+      in kind_seed(rest, env1, st1)
+
+fn kind_seed_one(d: ast.Decl, env: KindEnv, st: KindSt) -> (KindEnv, KindSt) =
+  match d with
+  | ast.TypeDecl name params _ _ _ _ _ -> kind_seed_tycon(name, params, env, st)
+  | ast.RecordDecl name params _ _ _ _ _ -> kind_seed_tycon(name, params, env, st)
+  | ast.WrapDecl name params _ _ _ _ _ -> kind_seed_tycon(name, params, env, st)
+  | ast.ClassDecl name vars _ _ _ -> kind_seed_class(name, vars, env, st)
+  | ast.FnDecl _ _ _ _ _ _ _ _ -> (env, st)
+  | ast.ExternFnDecl _ _ _ _ _ _ _ -> (env, st)
+  | ast.LetDecl _ _ _ _ -> (env, st)
+  | ast.AliasDecl _ _ _ _ -> (env, st)
+  | ast.InstanceDecl _ _ _ _ _ -> (env, st)
+
+fn kind_seed_tycon(name: String, params: List String, env: KindEnv, st: KindSt) -> (KindEnv, KindSt) =
+  let (k, st1) = kind_param_chain(params, st)
+  in (env with (tycons = dict_set(name, k, env.tycons)), st1)
+
+# `k1 -> ... -> kn -> Type`, one fresh variable per parameter.
+fn kind_param_chain(params: List String, st: KindSt) -> (Kind, KindSt) =
+  match params with
+  | [] -> (KType, st)
+  | [_ | rest] ->
+      let (a, st1) = kind_fresh(st)
+          (r, st2) = kind_param_chain(rest, st1)
+      in (KArrow(a, r), st2)
+
+fn kind_seed_class(name: String, vars: List String, env: KindEnv, st: KindSt) -> (KindEnv, KindSt) =
+  if list_length(vars) == 1
+  then
+    let (k, st1) = kind_fresh(st)
+    in (env with (classes = dict_set(name, k, env.classes)), st1)
+  else (env, st)
+
+# Two passes. The first reads every member's fields and method signatures, which settles
+# what each declaration says of its own variables. The second judges the constraints (a
+# constructor's, a method's `where`, a superclass), so a constraint is never blamed for a
+# kind a later member's signature would have fixed, nor a signature for one a constraint did.
+fn kind_members(members: List ast.Decl, env: KindEnv, alias_env: Dict types.Type,
+                st: KindSt) -> KindMembers =
+  match kind_read_members(members, env, alias_env, st, Nil) with
+  | KindReadAllErr pos msg -> KindMembersErr(pos, msg)
+  | KindReadAllOk st1 later -> kind_judge_later(later, st1)
+
+# `later` is newest first, so a large group adds each check in constant time.
+fn kind_read_members(members: List ast.Decl, env: KindEnv, alias_env: Dict types.Type, st: KindSt,
+                     later: List KindLater) -> KindReadAll =
+  match members with
+  | [] -> KindReadAllOk(st, list_reverse(later))
+  | [d | rest] ->
+      match kind_member(d, env, alias_env, st) with
+      | KindReadErr msg -> KindReadAllErr(ast.decl_pos(d), msg)
+      | KindReadOk st1 checks ->
+          kind_read_members(rest, env, alias_env, st1,
+                            list_fold(\ (acc, c) -> Cons(KindLater(ast.decl_pos(d), c), acc), later, checks))
+
+fn kind_judge_later(later: List KindLater, st: KindSt) -> KindMembers =
+  match later with
+  | [] -> KindMembersOk(st)
+  | [KindLater pos check | rest] ->
+      match check(st) with
+      | KindErr msg -> KindMembersErr(pos, msg)
+      | KindOk st1 -> kind_judge_later(rest, st1)
+
+fn kind_member(d: ast.Decl, env: KindEnv, alias_env: Dict types.Type, st: KindSt) -> KindRead =
+  match d with
+  | ast.TypeDecl name params ctors _ _ _ _ -> kind_ctors_member(name, params, ctors, env, alias_env, st)
+  | ast.RecordDecl name params fields _ _ _ _ ->
+      kind_read_pure(kind_record_member(name, params, fields, env, alias_env, st))
+  | ast.WrapDecl name params inner _ _ _ _ ->
+      kind_read_pure(kind_wrap_member(name, params, inner, env, alias_env, st))
+  | ast.ClassDecl name vars methods supers _ ->
+      kind_class_member(name, vars, methods, supers, env, alias_env, st)
+  | ast.FnDecl _ _ _ _ _ _ _ _ -> KindReadOk(st, Nil)
+  | ast.ExternFnDecl _ _ _ _ _ _ _ -> KindReadOk(st, Nil)
+  | ast.LetDecl _ _ _ _ -> KindReadOk(st, Nil)
+  | ast.AliasDecl _ _ _ _ -> KindReadOk(st, Nil)
+  | ast.InstanceDecl _ _ _ _ _ -> KindReadOk(st, Nil)
+
+fn kind_read_pure(r: KindCheck) -> KindRead =
+  match r with
+  | KindErr msg -> KindReadErr(msg)
+  | KindOk st -> KindReadOk(st, Nil)
+
+fn kind_read_then(r: KindRead, next: KindSt -> KindRead) -> KindRead =
+  match r with
+  | KindReadErr msg -> KindReadErr(msg)
+  | KindReadOk st checks ->
+      match next(st) with
+      | KindReadErr msg -> KindReadErr(msg)
+      | KindReadOk st1 more -> KindReadOk(st1, checks ++ more)
+
+# The kinds the type's own declaration gave its parameters, by name.
+fn kind_param_dict(params: List String, k: Kind) -> Dict Kind =
+  dict_from_list(kind_param_list(params, k))
+
+fn kind_record_member(name: String, params: List String, fields: List ast.RecordFieldDecl,
+                      env: KindEnv, alias_env: Dict types.Type, st: KindSt) -> KindCheck =
+  let Just k = dict_get(name, env.tycons) else KindOk(st)
+      st0 = st with (vars = kind_param_dict(params, k), watch = "", clash = Nothing)
+  in kind_check_fields(list_map(kind_record_item(string.after_last_dot(name), _), fields), env,
+                       alias_env, st0)
+
+fn kind_wrap_member(name: String, params: List String, inner: ast.TypeExpr, env: KindEnv,
+                    alias_env: Dict types.Type, st: KindSt) -> KindCheck =
+  let Just k = dict_get(name, env.tycons) else KindOk(st)
+      st0 = st with (vars = kind_param_dict(params, k), watch = "", clash = Nothing)
+  in kind_check_field("in the body of `" ++ string.after_last_dot(name) ++ "`", inner, env, alias_env, st0)
+
+fn kind_record_item(rname: String, f: ast.RecordFieldDecl) -> (String, ast.TypeExpr) =
+  let ast.RecordFieldDecl fname te = f
+  in ("in the field `" ++ fname ++ "` of `" ++ rname ++ "`", te)
+
+# Each field is judged alone, under the scope text that names it.
+fn kind_check_fields(items: List (String, ast.TypeExpr), env: KindEnv, alias_env: Dict types.Type,
+                     st: KindSt) -> KindCheck =
+  match items with
+  | [] -> KindOk(st)
+  | [(scope, te) | rest] ->
+      kind_then(kind_check_field(scope, te, env, alias_env, st),
+                kind_check_fields(rest, env, alias_env, _))
+
+# A field or wrap body must have kind `Type`. It is read with `clash` cleared and judged alone.
+fn kind_check_field(scope: String, te: ast.TypeExpr, env: KindEnv, alias_env: Dict types.Type,
+                    st: KindSt) -> KindCheck =
+  let st1 = kind_read_te(te, env, alias_env, st with (clash = Nothing))
+  in match st1.clash with
+     | Just clash -> KindErr(kind_clash_message(scope, clash, st1))
+     | Nothing -> KindOk(st1)
+
+fn kind_ctors_member(name: String, params: List String, ctors: List ast.TypeConstructor, env: KindEnv,
+                     alias_env: Dict types.Type, st: KindSt) -> KindRead =
+  let Just k = dict_get(name, env.tycons) else KindReadOk(st, Nil)
+  in kind_ctors(kind_param_dict(params, k), ctors, env, alias_env, st)
+
+fn kind_ctors(base: Dict Kind, ctors: List ast.TypeConstructor, env: KindEnv,
+              alias_env: Dict types.Type, st: KindSt) -> KindRead =
+  match ctors with
+  | [] -> KindReadOk(st, Nil)
+  | [c | rest] ->
+      kind_read_then(kind_ctor(base, c, env, alias_env, st), kind_ctors(base, rest, env, alias_env, _))
+
+# Existential variables are not in `base`, so each constructor gets fresh ones. Its
+# constraints wait for the second pass, over the variables its fields settled.
+fn kind_ctor(base: Dict Kind, c: ast.TypeConstructor, env: KindEnv, alias_env: Dict types.Type,
+             st: KindSt) -> KindRead =
+  let ast.TypeConstructor cname fields _ cs _ = c
+      scope = "in constructor `" ++ string.after_last_dot(cname) ++ "`"
+      st0 = st with (vars = base, watch = "", clash = Nothing)
+  in match kind_check_fields(list_map(\te -> (scope, te), fields), env, alias_env, st0) with
+     | KindErr msg -> KindReadErr(msg)
+     | KindOk st1 ->
+         KindReadOk(st1, [kind_later_constraints(scope ++ ": ", cs, st1.vars, env, alias_env, _)])
+
+# Constraints are not about the class variable under inference, so `watch` is cleared.
+fn kind_later_constraints(prefix: String, cs: List ast.TypeConstraint, vars: Dict Kind, env: KindEnv,
+                          alias_env: Dict types.Type, st: KindSt) -> KindCheck =
+  kind_prefix(prefix, kind_check_all(cs, env, alias_env, st with (vars = vars, watch = "", clash = Nothing)))
+
+fn kind_class_member(name: String, vars: List String, methods: List ast.ClassMethodSig,
+                     supers: List ast.TypeConstraint, env: KindEnv, alias_env: Dict types.Type,
+                     st: KindSt) -> KindRead =
+  let [v] = vars else KindReadOk(st, Nil)
+      Just kc = dict_get(name, env.classes) else KindReadOk(st, Nil)
+      st0 = st with (watch = v)
+  in kind_read_then(kind_class_methods(name, methods, dict_set(v, kc, dict_empty()), env, alias_env, st0),
+                    \st1 -> KindReadOk(st1, [kind_class_supers(name, supers, kc, env, _)]))
+
+fn kind_class_methods(cname: String, methods: List ast.ClassMethodSig, base: Dict Kind, env: KindEnv,
+                      alias_env: Dict types.Type, st: KindSt) -> KindRead =
+  match methods with
+  | [] -> KindReadOk(st, Nil)
+  | [m | rest] ->
+      kind_read_then(kind_class_method(cname, m, base, env, alias_env, st),
+                     kind_class_methods(cname, rest, base, env, alias_env, _))
+
+# A method's own variables are its own, so only the class variable carries over. Its
+# `where` waits for the second pass, over the variables its signature settled.
+fn kind_class_method(cname: String, m: ast.ClassMethodSig, base: Dict Kind, env: KindEnv,
+                     alias_env: Dict types.Type, st: KindSt) -> KindRead =
+  let ast.ClassMethodSig mname params ret _ cs _ = m
+      st0 = st with (vars = base, clash = Nothing)
+      st1 = kind_read_te(ret, env, alias_env, kind_read_params(params, env, alias_env, st0))
+      scope = "method `" ++ string.after_last_dot(mname) ++ "` of class `" ++ string.after_last_dot(cname) ++ "`"
+  in match st1.clash with
+     | Just clash -> KindReadErr(kind_method_clash_message(cname, scope, clash, st1))
+     | Nothing ->
+         KindReadOk(st1, [kind_later_constraints("in " ++ scope ++ ": ", cs, st1.vars, env, alias_env, _)])
+
+# A clash about the class variable is the class using it at two kinds; any other is the
+# signature's own.
+fn kind_method_clash_message(cname: String, scope: String, clash: KindClash, st: KindSt) -> String =
+  if clash.on_watch
+  then "class `" ++ string.after_last_dot(cname) ++ "` uses its variable at kind "
+         ++ kind_phrase(kind_default(clash.have, st)) ++ " in one place and "
+         ++ kind_phrase(kind_default(clash.need, st)) ++ " in another; one class variable cannot be both"
+  else kind_clash_message("in the signature of " ++ scope, clash, st)
+
+# Superclasses are judged after every member's signatures, so a disagreement is the
+# superclass's.
+fn kind_class_supers(cname: String, supers: List ast.TypeConstraint, kc: Kind, env: KindEnv,
+                     st: KindSt) -> KindCheck =
+  match supers with
+  | [] -> KindOk(st)
+  | [ast.TypeConstraint scls _ | rest] ->
+      match dict_get(scls, env.classes) with
+      | Nothing -> kind_class_supers(cname, rest, kc, env, st)
+      | Just ks ->
+          match kind_unify(kc, ks, st) with
+          | Just st1 -> kind_class_supers(cname, rest, kc, env, st1)
+          | Nothing ->
+              KindErr("class `" ++ string.after_last_dot(cname) ++ "` uses its variable at kind "
+                        ++ kind_phrase(kind_default(kc, st)) ++ ", but its superclass `"
+                        ++ string.after_last_dot(scls) ++ "` takes " ++ kind_phrase(kind_default(ks, st)))
+
+# Replaces each member's working kind with its settled one.
+fn kind_close(members: List ast.Decl, env_g: KindEnv, st: KindSt) -> KindEnv =
+  list_fold(\ (acc, d) -> kind_close_one(d, env_g, st, acc), env_g, members)
+
+fn kind_close_one(d: ast.Decl, env_g: KindEnv, st: KindSt, acc: KindEnv) -> KindEnv =
+  match d with
+  | ast.TypeDecl name _ _ _ _ _ _ -> kind_close_tycon(name, env_g, st, acc)
+  | ast.RecordDecl name _ _ _ _ _ _ -> kind_close_tycon(name, env_g, st, acc)
+  | ast.WrapDecl name _ _ _ _ _ _ -> kind_close_tycon(name, env_g, st, acc)
+  | ast.ClassDecl name _ _ _ _ -> kind_close_class(name, env_g, st, acc)
+  | ast.FnDecl _ _ _ _ _ _ _ _ -> acc
+  | ast.ExternFnDecl _ _ _ _ _ _ _ -> acc
+  | ast.LetDecl _ _ _ _ -> acc
+  | ast.AliasDecl _ _ _ _ -> acc
+  | ast.InstanceDecl _ _ _ _ _ -> acc
+
+fn kind_close_tycon(name: String, env_g: KindEnv, st: KindSt, acc: KindEnv) -> KindEnv =
+  match dict_get(name, env_g.tycons) with
+  | Nothing -> acc
+  | Just k -> acc with (tycons = dict_set(name, kind_default(k, st), acc.tycons))
+
+fn kind_close_class(name: String, env_g: KindEnv, st: KindSt, acc: KindEnv) -> KindEnv =
+  match dict_get(name, env_g.classes) with
+  | Nothing -> acc
+  | Just k -> acc with (classes = dict_set(name, kind_default(k, st), acc.classes))
+
+# A derived instance constrains every parameter a field stores with the derived class, which
+# takes a type, so a stored parameter of any other kind cannot be derived over. Reported at
+# the type: the instance it writes would fail with a message about code nobody wrote.
+fn kind_derive_error(d: ast.Decl, env: KindEnv) -> Maybe String =
+  match d with
+  | ast.TypeDecl name params ctors derives _ _ _ ->
+      kind_derive_params(name, params, ast.ctor_field_type_exprs(ctors), derives, env)
+  | ast.RecordDecl name params fields derives _ _ _ ->
+      kind_derive_params(name, params, ast.record_field_type_exprs(fields), derives, env)
+  | ast.WrapDecl name params inner derives _ _ _ -> kind_derive_params(name, params, [inner], derives, env)
+  | ast.ClassDecl _ _ _ _ _ -> Nothing
+  | ast.FnDecl _ _ _ _ _ _ _ _ -> Nothing
+  | ast.ExternFnDecl _ _ _ _ _ _ _ -> Nothing
+  | ast.LetDecl _ _ _ _ -> Nothing
+  | ast.AliasDecl _ _ _ _ -> Nothing
+  | ast.InstanceDecl _ _ _ _ _ -> Nothing
+
+fn kind_derive_params(name: String, params: List String, fields: List ast.TypeExpr, derives: List String,
+                      env: KindEnv) -> Maybe String =
+  let [cls | _] = derives else Nothing
+      Just k = dict_get(name, env.tycons) else Nothing
+  in find_map(kind_derive_param(name, cls, fields, _), kind_param_list(params, k))
+
+fn kind_param_list(params: List String, k: Kind) -> List (String, Kind) =
+  match params with
+  | [] -> []
+  | [p | rest] ->
+      match k with
+      | KArrow a r -> Cons((p, a), kind_param_list(rest, r))
+      | KType -> []
+      | KVar _ -> []
+
+fn kind_derive_param(name: String, cls: String, fields: List ast.TypeExpr, pk: (String, Kind)) -> Maybe String =
+  let (p, k) = pk
+  in if kind_is_type(k) || !ast.type_exprs_store(p, fields) then Nothing
+     else Just("cannot derive `" ++ string.after_last_dot(cls) ++ "` for `" ++ string.after_last_dot(name)
+                 ++ "`: its parameter `" ++ p ++ "` has kind " ++ kind_phrase(k)
+                 ++ ", and a derived instance can constrain only parameters of kind `Type`")
+
+# ---- Fns and instances ----
+
+fn kind_error_of(r: KindCheck) -> Maybe String =
+  match r with
+  | KindErr msg -> Just(msg)
+  | KindOk _ -> Nothing
+
+fn kind_decl_error(d: ast.Decl, env: KindEnv, alias_env: Dict types.Type) -> Maybe String =
+  match d with
+  | ast.FnDecl _ params ret _ cs _ _ _ -> kind_error_of(kind_check_fn(params, ret, cs, env, alias_env))
+  | ast.InstanceDecl head ctx _ methods _ -> kind_error_of(kind_check_instance(head, ctx, methods, env, alias_env))
+  | ast.ExternFnDecl _ _ _ _ _ _ _ -> Nothing
+  | ast.TypeDecl _ _ _ _ _ _ _ -> Nothing
+  | ast.RecordDecl _ _ _ _ _ _ _ -> Nothing
+  | ast.LetDecl _ _ _ _ -> Nothing
+  | ast.ClassDecl _ _ _ _ _ -> Nothing
+  | ast.AliasDecl _ _ _ _ -> Nothing
+  | ast.WrapDecl _ _ _ _ _ _ _ -> Nothing
+
+# A fn without a `where` has no constraint to judge, and its signature alone is not judged.
+fn kind_check_fn(params: List ast.Param, ret: Maybe ast.TypeExpr, cs: List ast.TypeConstraint,
+                 env: KindEnv, alias_env: Dict types.Type) -> KindCheck =
+  match cs with
+  | [] -> KindOk(kind_new_state())
+  | [_ | _] ->
+      kind_check_all(cs, env, alias_env,
+        kind_read_ret(ret, env, alias_env, kind_read_params(params, env, alias_env, kind_new_state())))
+
+fn kind_check_instance(head: ast.TypeConstraint, ctx: List ast.TypeConstraint,
+                       methods: List ast.InstanceMethodImpl, env: KindEnv,
+                       alias_env: Dict types.Type) -> KindCheck =
+  kind_then(kind_check_constraint(head, true, env, alias_env, kind_new_state()),
+            kind_instance_rest(ctx, methods, env, alias_env, _))
+
+fn kind_instance_rest(ctx: List ast.TypeConstraint, methods: List ast.InstanceMethodImpl, env: KindEnv,
+                      alias_env: Dict types.Type, st: KindSt) -> KindCheck =
+  kind_then(kind_check_all(ctx, env, alias_env, st),
+            kind_check_impls(methods, st.vars, env, alias_env, _))
+
+fn kind_check_impls(methods: List ast.InstanceMethodImpl, head_vars: Dict Kind, env: KindEnv,
+                    alias_env: Dict types.Type, st: KindSt) -> KindCheck =
+  match methods with
+  | [] -> KindOk(st)
+  | [m | rest] ->
+      kind_then(kind_check_impl(m, head_vars, env, alias_env, st),
+                kind_check_impls(rest, head_vars, env, alias_env, _))
+
+# An implementation restates the method's `where` over variables it may name differently;
+# the head's variables carry over and the rest are the method's own.
+fn kind_check_impl(m: ast.InstanceMethodImpl, head_vars: Dict Kind, env: KindEnv,
+                   alias_env: Dict types.Type, st: KindSt) -> KindCheck =
+  let ast.InstanceMethodImpl mname params ret _ cs _ _ = m
+  in match cs with
+     | [] -> KindOk(st)
+     | [_ | _] ->
+         let st0 = st with (vars = head_vars, clash = Nothing)
+             st1 = kind_read_ret(ret, env, alias_env, kind_read_params(params, env, alias_env, st0))
+         in kind_prefix("in method `" ++ string.after_last_dot(mname) ++ "`: ",
+                        kind_check_all(cs, env, alias_env, st1))
+
+# Declared type parameter counts. They feed the short-keyed `@tyarity:` markers that
+# `leaves_arguments` reads to word constraint advice. An alias records nothing, since its
+# parameter count is not the number of arguments its expansion still takes.
 fn type_arities(decls: List ast.Decl, acc: Dict Int) -> Dict Int =
   match decls with
   | [] -> acc
@@ -8809,183 +9470,28 @@ fn mark_tyarity_pairs(pairs: List (String, Int), env: Dict types.Scheme) -> Dict
       mark_tyarity_pairs(rest,
         dict_set("@tyarity:" ++ string.after_last_dot(name), arity_marker(n), env))
 
-# Vector, Map and Ref each back a one-parameter type. None of the three is declared
-# anywhere, so without this table a head over one reaches neither a decl nor a
-# marker and the check goes blind to exactly those.
+# The built-in types are declared nowhere, so without this a use of one reaches neither a
+# decl nor a marker. Their arity is that of their kind (`kind_builtin`).
 fn builtin_type_arity(name: String) -> Maybe Int =
-  if name == "Vector" then Just(1)
-  else if name == "Map" then Just(1)
-  else if name == "Ref" then Just(1)
-  else if list_member(name, primitive_type_names) then Just(0)
-  else Nothing
+  fmap(\k -> list_length(kind_arg_kinds(k)), kind_builtin(name))
 
-fn type_arity_of(name: String, arities: Dict Int, env: Dict types.Scheme) -> Maybe Int =
-  match dict_get(name, arities) with
+fn type_arity_of(name: String, env: Dict types.Scheme) -> Maybe Int =
+  match builtin_type_arity(string.after_last_dot(name)) with
   | Just n -> Just(n)
-  | Nothing ->
-      match builtin_type_arity(string.after_last_dot(name)) with
-      | Just n -> Just(n)
-      | Nothing -> tyarity_marker_int(string.after_last_dot(name), env)
+  | Nothing -> tyarity_marker_int(string.after_last_dot(name), env)
 
 fn tyarity_marker_int(short: String, env: Dict types.Scheme) -> Maybe Int =
   let Just scheme = dict_get("@tyarity:" ++ short, env) else Nothing
       types.TConst id = types.scheme_type(scheme) else Nothing
   in parse_int(types.type_id_name(id))
 
-# The name at the left end of a head and how many arguments it is applied to. Every
-# variant is spelled out (guidelines.md §2a): an arrow, thunk, effect or tuple head
-# applies no type arguments, and a future variant that DID would need its own arm
-# rather than this one's answer.
-fn head_spine(te: ast.TypeExpr, depth: Int) -> (String, Int) =
-  match te with
-  | ast.TypeName name -> (name, depth)
-  | ast.TypeApply base _ -> head_spine(base, depth + 1)
-  | ast.TypeArrow _ _ _ _ -> ("", depth)
-  | ast.TypeThunk _ _ -> ("", depth)
-  | ast.TypeEffect _ _ -> ("", depth)
-  | ast.TupleType _ -> ("", depth)
-
-# Arguments the head leaves unapplied. A tuple or arrow head has none to leave, so
-# `instance Eq (a, b)` and `instance Semigroup String` are both 0. Nothing means the
-# head says nothing about arity: a type-variable head, or a constructor whose count
-# is unavailable because an interface predates the marker.
-fn head_residual(te: ast.TypeExpr, arities: Dict Int, env: Dict types.Scheme) -> Maybe Int =
-  match head_spine(te, 0) with
-  | (name, applied) ->
-      if name == "" then Just(0)
-      else if source.is_lowercase_name(name) then Nothing
-      else
-        let Just declared = type_arity_of(name, arities, env) else Nothing
-        in Just(declared - applied)
-
-fn head_arity_error(kind: String, cls: String, head_te: ast.TypeExpr, want: Int,
-                    arities: Dict Int, env: Dict types.Scheme) -> Maybe String =
-  let Just residual = head_residual(head_te, arities, env) else Nothing
-  in if residual == want then Nothing
-     else Just("class `" ++ cls ++ "` applies its variable to " ++ count_text(want, "argument")
-               ++ ", so " ++ kind ++ " must leave " ++ int_to_string(want)
-               ++ " unapplied; this head leaves " ++ int_to_string(residual))
-
-# One constraint list — a fn's `where`, a method's, or an instance context.
-fn constraints_arity_error(kind: String, cs: List ast.TypeConstraint,
-                           depths: Dict (String, List Int), supers: Dict (List String),
-                           arities: Dict Int, env: Dict types.Scheme) -> Maybe String =
-  match cs with
-  | [] -> Nothing
-  | [c | rest] ->
-      match constraint_arity_error(kind, c, depths, supers, arities, env) with
-      | Just msg -> Just(msg)
-      | Nothing -> constraints_arity_error(kind, rest, depths, supers, arities, env)
-
-fn constraint_arity_error(kind: String, c: ast.TypeConstraint,
-                          depths: Dict (String, List Int), supers: Dict (List String),
-                          arities: Dict Int, env: Dict types.Scheme) -> Maybe String =
-  let ast.TypeConstraint class_name type_args = c
-      [head_te | _] = type_args else Nothing
-      Just want = class_var_arity(class_name, depths, supers, Nil) else Nothing
-  in head_arity_error(kind, string.after_last_dot(class_name), head_te, want, arities, env)
-
-# A class contradicting itself, reported at the class rather than at every instance
-# that cannot satisfy it. Two shapes: its own methods disagreeing, and its methods
-# disagreeing with a superclass.
-fn class_decl_arity_error(name: String, superclasses: List ast.TypeConstraint,
-                          methods: List ast.ClassMethodSig,
-                          depths: Dict (String, List Int), supers: Dict (List String),
-                          arities: Dict Int, env: Dict types.Scheme) -> Maybe String =
-  match depth_conflict(class_own_part(name, depths)) with
-  | Just (a, b) ->
-      Just("class `" ++ string.after_last_dot(name) ++ "` applies its variable to "
-           ++ count_text(a, "argument") ++ " in one method and " ++ int_to_string(b)
-           ++ " in another; one class variable cannot be both")
-  | Nothing ->
-      match class_super_arity_error(name, superclasses, depths, supers) with
-      | Just msg -> Just(msg)
-      | Nothing -> method_wheres_arity_error(methods, depths, supers, arities, env)
-
-fn class_super_arity_error(cls: String, superclasses: List ast.TypeConstraint,
-                           depths: Dict (String, List Int),
-                           supers: Dict (List String)) -> Maybe String =
-  let Just own = single_depth(class_own_part(cls, depths)) else Nothing
-  in super_arity_error(cls, own, class_super_names(superclasses), depths, supers)
-
-fn super_arity_error(cls: String, own: Int, names: List String,
-                     depths: Dict (String, List Int),
-                     supers: Dict (List String)) -> Maybe String =
-  match names with
-  | [] -> Nothing
-  | [s | rest] ->
-      match class_var_arity(s, depths, supers, Cons(cls, Nil)) with
-      | Just n ->
-          if n == own then super_arity_error(cls, own, rest, depths, supers)
-          else Just("class `" ++ string.after_last_dot(cls) ++ "` applies its variable to "
-                    ++ count_text(own, "argument") ++ ", but its superclass `"
-                    ++ string.after_last_dot(s) ++ "` applies its own to " ++ int_to_string(n))
-      | Nothing -> super_arity_error(cls, own, rest, depths, supers)
-
-fn method_wheres_arity_error(methods: List ast.ClassMethodSig,
-                             depths: Dict (String, List Int), supers: Dict (List String),
-                             arities: Dict Int, env: Dict types.Scheme) -> Maybe String =
-  match methods with
-  | [] -> Nothing
-  | [ast.ClassMethodSig _ _ _ _ constraints _ | rest] ->
-      match constraints_arity_error("a constraint head", constraints, depths, supers,
-                                    arities, env) with
-      | Just msg -> Just(msg)
-      | Nothing -> method_wheres_arity_error(rest, depths, supers, arities, env)
-
-# An instance method RESTATES the class method's `where` over its own variables, so
-# the restated heads are checked here — the class's copy is checked at the class, and
-# nothing else reaches an implementation's. Mirrors method_wheres_arity_error.
-fn impl_wheres_arity_error(methods: List ast.InstanceMethodImpl,
-                           depths: Dict (String, List Int), supers: Dict (List String),
-                           arities: Dict Int, env: Dict types.Scheme) -> Maybe String =
-  match methods with
-  | [] -> Nothing
-  | [ast.InstanceMethodImpl _ _ _ _ constraints _ _ | rest] ->
-      match constraints_arity_error("a constraint head", constraints, depths, supers,
-                                    arities, env) with
-      | Just msg -> Just(msg)
-      | Nothing -> impl_wheres_arity_error(rest, depths, supers, arities, env)
-
-# The catch-all matches every sibling check in this chain (check_tyvar_instance_heads,
-# check_overlapping_instances): a declaration with no class, instance head or `where`
-# has no head to be wrong about.
-fn decl_arity_error(decl: ast.Decl, depths: Dict (String, List Int),
-                    supers: Dict (List String), arities: Dict Int,
-                    env: Dict types.Scheme) -> Maybe String =
-  match decl with
-  | ast.ClassDecl name _ methods superclasses _ ->
-      class_decl_arity_error(name, superclasses, methods, depths, supers, arities, env)
-  | ast.InstanceDecl constraint inst_constraints _ methods _ ->
-      match constraint_arity_error("an instance head", constraint, depths, supers, arities, env) with
-      | Just msg -> Just(msg)
-      | Nothing ->
-          match constraints_arity_error("a constraint head", inst_constraints, depths, supers,
-                                        arities, env) with
-          | Just msg -> Just(msg)
-          | Nothing -> impl_wheres_arity_error(methods, depths, supers, arities, env)
-  | ast.FnDecl _ _ _ _ constraints _ _ _ ->
-      constraints_arity_error("a constraint head", constraints, depths, supers, arities, env)
-  | _ -> Nothing
-
 # Runs after check_tyvar_instance_heads, which has by then established that every
-# instance head is a constructor applied to distinct variables — so the only thing
-# left to check about a head is how many arguments it leaves.
-fn check_instance_head_kinds(decls: List ast.Decl, arities: Dict Int, env: Dict types.Scheme,
+# instance head is a constructor applied to distinct variables.
+fn check_instance_head_kinds(decls: List ast.Decl,
                              alias_env: Dict types.Type) -> Maybe(source.SourcePos, String) =
-  check_arity_decls(decls,
-    env_class_depths(vec_to_list(dict_entries_with_prefix(types.class_marker_tag, env)), env,
-      own_class_depths(decls, alias_env, dict_empty())),
-    env_class_supers(vec_to_list(dict_entries_with_prefix(types.super_marker_tag, env)),
-      build_class_super_map(decls)),
-    arities, env)
-
-# The position is the declaration's, not the method's: ClassMethodSig carries no
-# SourcePos, so a method-level `where` reports at its enclosing class.
-fn check_arity_decls(decls: List ast.Decl, depths: Dict (String, List Int),
-                     supers: Dict (List String), arities: Dict Int,
-                     env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
-  ast.first_decl_error(decl_arity_error(_, depths, supers, arities, env), decls)
+  match kind_groups(decls, alias_env) with
+  | KindGroupErr pos msg -> Just((pos, msg))
+  | KindGroupOk env -> ast.first_decl_error(kind_decl_error(_, env, alias_env), decls)
 
 # ---------------------------------------------------------------------------
 # Instance context size — spec-v0.md §8.5 rule 4, docs/instance-termination-v0.md
@@ -9251,10 +9757,8 @@ fn check_super_list(supers: List String, cls: String, head: String, inst_set: Di
       | Nothing -> Just("No instance of " ++ string.after_last_dot(super_name) ++ " for " ++ string.after_last_dot(head)
                         ++ ", required as a superclass of " ++ string.after_last_dot(cls))
 
-# Verbatim first, then short, for class_depths_entry's reason: the arity and
-# completeness paths' maps are keyed as declared while the env path's
-# (add_env_super) is short, and a short-keyed lookup of a short-keyed map is
-# unchanged by the first attempt.
+# Verbatim first, then short: a map keyed as declared answers the first attempt, and a
+# short-keyed one the second.
 fn super_list_of(cls: String, super_map: Dict (List String)) -> List String =
   match dict_get(cls, super_map) with
   | Just supers -> supers
@@ -12556,7 +13060,7 @@ fn leaves_arguments(t: types.Type, applied: Int, env: Dict types.Scheme) -> Bool
   match t with
   | types.TApp f _ -> leaves_arguments(f, applied + 1, env)
   | types.TConst id ->
-      let Just declared = type_arity_of(types.type_id_name(id), dict_empty(), env) else false
+      let Just declared = type_arity_of(types.type_id_name(id), env) else false
       in declared > applied
   | types.TVar _ -> false
   | types.TFunc _ _ _ _ -> false
