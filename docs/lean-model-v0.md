@@ -199,10 +199,29 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
 - **Known gaps** go in an allowlist, one id, shape and reason per line, like `run/XFAIL`. Each id
   names a fixed witness program (`formal/SproutCore/Witnesses.lean`) that the run checks on both
   sides every time: a listed gap whose witness stops disagreeing fails the run so the list cannot
-  rot, and a gap the random sample did not reach is not stale. The first entries are
-  the exhaustiveness check's accept-everything fallbacks in `infer.sprout`: a scrutinee whose type
-  is a type variable, a function or a record; a constructor missing from the map; field types that
-  do not resolve. The model's per-column function follows the spec's text and does not have them.
+  rot, and a gap the random sample did not reach is not stale.
+- **The exhaustiveness check's fallbacks.** `infer.sprout` accepts a column it cannot resolve
+  (`coverage_gap_resolved`, `coverage_gap_adt`, `adt_gap`, `ctor_field_types`). Core reaches none
+  of them, so none is allowlisted; the model's `covers` has no such case.
+  - A column typed by a type variable (a written one too: the checker reads it as one) or an
+    arrow: any pattern but `_` or a variable pins the column's type first, so the column holds
+    only catch-alls, which cover it on both sides.
+  - A type with no concrete head, or none in the constructor map (records, `Double`, `Char`,
+    runtime types): Core has none of them, and the program declares every type it uses.
+  - A constructor missing from the environment, or whose result does not unify with the column:
+    each declared constructor is in both, and a pattern of another type is a mismatch first.
+  - An empty constructor list: `type T =` does not parse, so the printer cannot reach it (the
+    model rejects it, `ill-formed`).
+
+  Stage 2a's entries: `unreachable-bool`, `-unit` and `-tuple` (spec gap: the compiler also counts
+  `Bool`, `Unit` and tuples for §5.5's "after all constructors" case), `unreachable-ctor-repeat`
+  and `-after-ctors` (compiler bug: a constructor covered without catch-alls, as by `C ()`, does
+  not count), `free-tyvar` (compiler bug: `type T = | C a`), `field-type-arity` (spec gap:
+  `C (P Int Int)`) and `join-order-match` (stage 1's `join-order` bug through `match` arms). A
+  pattern binding a name twice and a type applied to the wrong number of arguments in a signature
+  are spec gaps both sides accept; an unknown type name in a signature is refused by the bundler,
+  though §5.6 calls that position unvalidated, so the generator never writes one. Each is a
+  `BACKLOG.md` entry.
 
 ## 7. Drift gate
 
@@ -343,6 +362,11 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
      code; T2 and the well-formedness invariants cover programs without ADTs until 2c.
      One judgment rule lands early: `Flows.adt` (a type argument flows covariantly, spec §7
      rule 8), so the soundness of `flow` and `joinTy` stays a lemma over all types.
+     Landed. Half the programs declare 1-3 types (recursive, mutual, now and then uninhabited);
+     values come from constructor calls, nullary constructors and bare constructors in slots; a
+     `match` on any non-arrow type takes full, partial-plus-catch-all, split and diagonal pattern
+     sets. Mutations: remove, move earlier or repeat an arm, a pattern or call of the wrong arity,
+     an ill-formed field. About 54% of programs are accepted. Findings and fallbacks: §6.
    - **2b: T4.** Typed values. A full usefulness check (Maranget's `U_rec` [11], no or-patterns):
      if it accepts, every value of the column types matches a row. The per-column rule accepts
      whatever the full check accepts; the gap between them is a decidable predicate, written up
