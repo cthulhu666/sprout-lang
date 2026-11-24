@@ -2319,9 +2319,9 @@ builds are `Plan.Inv`, proved by `checkPlan_inv` (PlanInv.lean). The reads that 
 edge list in `checkPlan` and `orderGroups` are not silent: an index out of range there is an
 `internal` rejection, because a default node would be an `fn` that passes the declaration-order
 rules. What stays total is `reachAt`/`reachSet` (indices are `[0:n]` loop bounds or edge targets
-already checked as nodes) and `runPlan`'s reads, which `Plan.Inv` (`order_lt`, `edges_size`)
-keeps in range for a plan `checkPlan` built. On in-range indices these are the `!` they replaced (`getElem!_eq_getD`,
-`head!_eq_headD`); the per-program verdicts of the oracle were diffed before and after.
+already checked as nodes) and `runPlan`'s reads, which have no guard. On in-range indices these
+are the `!` they replaced (`getElem!_eq_getD`, `head!_eq_headD`); the per-program verdicts of the
+oracle were diffed before and after.
 `set!` is `setIfInBounds`: it never panics. -/
 
 theorem getElem!_eq_getD {α : Type} [Inhabited α] (a : Array α) (i : Nat) :
