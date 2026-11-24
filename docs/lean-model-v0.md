@@ -341,6 +341,8 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
      "move an arm earlier" mutations), shrinker. Each compiler fallback the oracle reaches is an
      allowlist entry with a witness or a `BACKLOG.md` entry. `checkProgram_fuel_mono` covers the new
      code; T2 and the well-formedness invariants cover programs without ADTs until 2c.
+     One judgment rule lands early: `Flows.adt` (a type argument flows covariantly, spec §7
+     rule 8), so the soundness of `flow` and `joinTy` stays a lemma over all types.
    - **2b: T4.** Typed values. A full usefulness check (Maranget's `U_rec` [11], no or-patterns):
      if it accepts, every value of the column types matches a row. The per-column rule accepts
      whatever the full check accepts; the gap between them is a decidable predicate, written up
