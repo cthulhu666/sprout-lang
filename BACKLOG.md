@@ -1574,6 +1574,13 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   prints `[, a]` and `to_string([[""]])` prints `[[]]`, so distinct values print alike.
   `ToString String` is the identity and `ToString (List a)` joins its elements' `to_string`; a
   container needs a quoting form for string elements. Found by the LeetCode survey.
+- [ ] `P2` **Kind-check signature types, alias declarations and annotations.** The kind pass
+  reads signatures without judging them, so `fn f(x: Int Bool)` and `x: f Int, y: f` are
+  accepted. Alias declarations, including unused parameters, an alias applied to fewer arguments
+  than it declares, and expression annotations are not kind-checked either. Separate from stage 1
+  because it is the only part that can newly reject code in the four repos. Until then, a fn
+  constraint's verdict can depend on parameter order (first unification wins). Design:
+  `docs/kind-inference-v0.md` §2.
 
 ### 7.6) Editor integration — LSP server and the JetBrains plugin
 

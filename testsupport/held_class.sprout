@@ -2,7 +2,7 @@ module testsupport.held_class
 
 # A class whose variable is APPLIED once, deliberately named so an importer can
 # declare its own unrelated class by the same short name. The two are distinct
-# classes — `testsupport.held_class.Held` and the importer's — and the arity rule
+# classes — `testsupport.held_class.Held` and the importer's — and the kind check
 # has to judge each instance against its own.
 
 type Wrapper a = Wrapper a

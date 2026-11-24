@@ -1,0 +1,19 @@
+# An App-style type takes a type constructor and a type. `App f` has kind
+# `Type -> Type` once `f` has kind `Type -> Type`, so it is a valid head for a class
+# over type constructors, and its context `Container f` is checked at that kind.
+module main
+
+type App f a = App(f a)
+
+class Container t
+  fn count(x: t Int) -> Int
+
+instance Container Maybe
+  fn count(x: Maybe Int) -> Int = maybe_with_default(0, x)
+
+instance Container (App f) where Container f
+  fn count(x: App f Int) -> Int =
+    match x with
+    | App inner -> count(inner)
+
+fn main() -> Unit !{IO} = print(to_string(count(App (Just(7)))))

@@ -1,0 +1,17 @@
+# `Tagged`'s parameter is never used, so its own declaration does not constrain its
+# kind and it defaults to `Type`, as Haskell 2010 §4.6 does per declaration group.
+# A later use at `Type -> Type` does not change that: `Tagged Maybe` is ill-kinded.
+module main
+
+wrap Tagged u = Int
+
+class Foo t
+  fn foo(x: t) -> String
+
+instance Foo Int
+  fn foo(x: Int) -> String = "int"
+
+fn g(x: Int) -> Int where Foo (Tagged Maybe) = x
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(to_string(g(1)))

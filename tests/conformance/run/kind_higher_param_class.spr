@@ -1,0 +1,14 @@
+# `Wrap`'s first parameter is applied to the second, so `Wrap t Int` makes the class
+# variable `t` a type constructor even though `t` is applied to nothing here. The
+# class has kind `Type -> Type`, and `Maybe` fits it.
+module main
+
+type Wrap f a = Wrap(f a)
+
+class C t
+  fn m(x: Wrap t Int) -> Int
+
+instance C Maybe
+  fn m(x: Wrap Maybe Int) -> Int = 1
+
+fn main() -> Unit !{IO} = print(to_string(m(Wrap (Just(3)))))

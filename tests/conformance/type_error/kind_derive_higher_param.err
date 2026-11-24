@@ -1,0 +1,1 @@
+cannot derive `Eq` for `Wrap`: its parameter `f` has kind `Type -> Type` (a type constructor that takes one type), and a derived instance can constrain only parameters of kind `Type`

@@ -2,7 +2,7 @@ import stdlib.test (check_eq, run_suite)
 import testsupport.held_class (held_wrapped)
 
 # Two modules in one bundle each declaring a class named `Held`, at DIFFERENT
-# arities: the imported one applies its variable once, this one not at all. A table
+# kinds: the imported one's variable has kind `Type -> Type`, this one's `Type`. A table
 # keyed on the short name let the later declaration decide both, so one module's
 # instances were judged against the other module's class — rejecting this program
 # one way round, and silently admitting an ill-kinded head the other.

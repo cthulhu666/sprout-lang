@@ -1,0 +1,1 @@
+in method `run` of class `Mapper`: class `Container` takes a type of kind `Type -> Type` (a type constructor that takes one type), but in the constraint `Container j` the variable `j` has kind `Type`

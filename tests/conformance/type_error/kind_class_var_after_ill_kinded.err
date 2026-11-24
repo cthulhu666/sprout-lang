@@ -1,0 +1,1 @@
+class `Mixed` uses its variable at kind `Type` in one place and `Type -> Type` (a type constructor that takes one type) in another; one class variable cannot be both

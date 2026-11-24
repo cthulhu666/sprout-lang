@@ -1,0 +1,1 @@
+in method `m` of class `C`: in the constraint `D (t Maybe)` the type `Maybe` has kind `Type -> Type` (a type constructor that takes one type), but `t` takes a type of kind `Type`

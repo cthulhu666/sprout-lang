@@ -1,0 +1,9 @@
+# A class variable's conflict is reported even when an earlier, unrelated ill-kinded
+# type (`Int Bool`) sits in the same method signature.
+module main
+
+class Mixed t
+  fn m(x: Int Bool, y: t, z: t Int) -> String
+#~^^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

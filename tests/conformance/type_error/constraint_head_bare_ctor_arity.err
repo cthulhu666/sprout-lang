@@ -1,1 +1,1 @@
-so a constraint head must leave 0 unapplied;
+class `Pretty` takes a type of kind `Type`, but in the constraint `Pretty Tagged` the type `Tagged` has kind `Type -> Type -> Type` (a type constructor that takes two types)

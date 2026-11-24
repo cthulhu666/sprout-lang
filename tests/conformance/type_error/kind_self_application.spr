@@ -1,0 +1,10 @@
+# `f f` applies a variable to itself, so its kind would have to contain itself.
+module main
+
+class Pretty t
+  fn pretty(x: t) -> String
+
+fn g(x: f f) -> Int where Pretty (f f) = 1
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

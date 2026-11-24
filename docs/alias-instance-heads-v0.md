@@ -48,7 +48,8 @@ paths above see the expansion and cannot drift. A per-path fix would leave four 
 in step.
 
 Chosen over rejecting alias heads, which `tests/stdlib/test_instance_head_arity.spr` accepts
-deliberately, and which `instance-head-kinds-v0.md` §11 anticipated making work rather than banning.
+deliberately, and which `instance-head-kinds-v0.md` §11 (superseded by `kind-inference-v0.md`)
+anticipated making work rather than banning.
 
 **`wrap` is not expanded.** It declares a distinct nominal type, so merging it with its representation
 would turn two instances into one. Guarded by
@@ -58,14 +59,17 @@ would turn two instances into one. Guarded by
 (`bundler.sprout`), and this pass runs after bundling, so table keys and head references are qualified
 consistently.
 
-**An under-applied alias is left unexpanded** — there is nothing to substitute, and the existing
-instance-head arity diagnostic is the right one to fire.
+**An under-applied alias is left unexpanded** — there is nothing to substitute. The kind check
+gives it a fresh kind and does not judge it; the instance-method signature check rejects
+`type alias Half a = Tagged a` with `instance Boxed Half` (the method's type does not match
+the class's for that head).
 
 ## 4. Consequences
 
-- The instance-head arity check now sees the **expansion**, which resolves
+- The instance-head kind check now sees the **expansion**, which resolves
   `instance-head-kinds-v0.md` §11's deferred "type-alias instance heads, once they dispatch": an
-  alias's own parameter count was never its residual arity, and the expansion's is.
+  alias's own parameter count is not the number of arguments its head leaves, and the expansion's
+  kind is.
 - `check_overlapping_instances` now rejects an alias-headed instance against the aliased type's.
 - Golden IR: inserting the `AliasHead` type into `ast.sprout` shifts every later constructor tag by
   one, so `tests/golden/ir/tests__smoke_shapes__11_compiler_bundle.spr.ll` changes in 554 lines across

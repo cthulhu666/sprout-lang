@@ -1,0 +1,1 @@
+in the constraint `Foo (Tagged Maybe)` the type `Maybe` has kind `Type -> Type` (a type constructor that takes one type), but `Tagged` takes a type of kind `Type`

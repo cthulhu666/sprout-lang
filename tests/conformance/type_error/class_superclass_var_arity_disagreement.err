@@ -1,1 +1,1 @@
-but its superclass
+class `Wrapper` uses its variable at kind `Type`, but its superclass `Functor` takes `Type -> Type` (a type constructor that takes one type)

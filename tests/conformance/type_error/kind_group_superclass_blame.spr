@@ -1,0 +1,13 @@
+# `A` and `B` form one group. `A` uses its variable bare and `B` uses `t Int`, each
+# consistently; the conflict is `A`'s superclass clause `B t`. The error is `A`'s even with
+# `B` declared first, though `B`'s `where A u` mentions `A`.
+module main
+
+class B t
+  fn two(x: t Int, y: u) -> Int where A u
+
+class A t where B t
+  fn one(x: t) -> Int
+#~^^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

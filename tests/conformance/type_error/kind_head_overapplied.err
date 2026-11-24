@@ -1,0 +1,1 @@
+in the instance head `Box a b` the type `Box a` has kind `Type` and takes no argument, but it is applied to `b`

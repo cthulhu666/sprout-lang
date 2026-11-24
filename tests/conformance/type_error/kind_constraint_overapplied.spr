@@ -1,0 +1,11 @@
+# A constraint argument applies a type to an argument it does not take: `Int` has kind
+# `Type`, so `Int Bool` is ill-kinded.
+module main
+
+class Pretty t
+  fn pretty(x: t) -> String
+
+fn g(x: Int) -> Int where Pretty (Int Bool) = x
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(to_string(g(1)))

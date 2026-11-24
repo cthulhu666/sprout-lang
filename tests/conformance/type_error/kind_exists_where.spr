@@ -1,0 +1,9 @@
+# The `where` of an existential constructor is kind-checked against how the hidden
+# variable is used. `f` is the type of a field, so it has kind `Type`; `Functor`
+# is over a type constructor.
+module main
+
+type Holder = | exists f. Holder f where Functor f
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

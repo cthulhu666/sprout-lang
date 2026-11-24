@@ -1,6 +1,6 @@
 import stdlib.test (check_eq, run_suite)
 
-# The shapes the instance-head arity rule must ACCEPT. Each puts the class variable
+# The shapes the instance-head kind rule must ACCEPT. Each puts the class variable
 # somewhere a naive read of the method signatures does not look: only in a return
 # type, only under a superclass, or nowhere at all.
 
@@ -37,13 +37,14 @@ instance Functor Box
 instance Marked Box
 
 # --- A class that constrains its variable nowhere ---------------------------
-# No method mentions `t` and there is no superclass, so nothing fixes its arity
-# and heads at either arity must be accepted.
+# No method mentions `t` and there is no superclass, so its kind defaults to `Type`
+# and every head must have kind `Type`: `Box a` does, bare `Box` (kind `Type -> Type`)
+# does not (tests/conformance/type_error/kind_unconstrained_class_head).
 
 class Tagless t
   fn describe() -> String
 
-instance Tagless Box
+instance Tagless (Box a)
   fn describe() -> String = "box"
 
 instance Tagless Int

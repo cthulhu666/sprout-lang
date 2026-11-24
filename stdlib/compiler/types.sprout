@@ -1034,7 +1034,7 @@ export let inst_owner_prefix: String = "#inst/"
 export fn is_generated_var(name: String) -> Bool =
   str_starts_with(name, "$") || is_unann_placeholder(name) || is_exist_var(name)
 
-fn is_exist_var(name: String) -> Bool =
+export fn is_exist_var(name: String) -> Bool =
   if str_starts_with(name, "existv") then
     match parse_int(str_slice(name, 6, str_len(name))) with
     | Just _ -> true

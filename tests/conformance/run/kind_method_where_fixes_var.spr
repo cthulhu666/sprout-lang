@@ -1,0 +1,23 @@
+# `describe` applies the class variable `t` to the method's own variable `j`, and
+# nothing in the signature says what kind `j` has. `where Container j` does: `j` is a
+# type constructor, so `t` takes one, and `Hold` is a valid instance head. Kinds
+# default only after every constraint has been read.
+module main
+
+class Container c
+  fn count(x: c Int) -> Int
+
+instance Container Maybe
+  fn count(x: Maybe Int) -> Int = maybe_with_default(0, x)
+
+type Hold f = Hold(f Int)
+
+class Holder t
+  fn describe(x: t j) -> Int where Container j
+
+instance Holder Hold
+  fn describe(x: Hold j) -> Int where Container j =
+    match x with
+    | Hold inner -> count(inner)
+
+fn main() -> Unit !{IO} = print(to_string(describe(Hold (Just(4)))))

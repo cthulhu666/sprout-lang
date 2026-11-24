@@ -999,11 +999,10 @@ fn head_is_concrete(te: ast.TypeExpr) -> Bool =
   types.type_id_is_concrete(types.type_id(typed_ast.type_expr_head_name(te)))
 
 # The instance head and the dispatch type arrive at the SAME application depth:
-# every recorder records the class variable's binding, and the head-arity check
-# (infer.check_instance_head_kinds) rejects a head that would not match it. So the
-# two spines pair up as they stand — this used to peel a surplus off the concrete
-# side, computed per call, which was only ever right when the concrete side was
-# the deeper of the two. docs/instance-head-kinds-v0.md §5.
+# every recorder records the class variable's binding, and the kind check
+# (infer.check_instance_head_kinds) rejects a head whose kind is not the class
+# variable's. Equal kinds leave equal numbers of arguments unapplied, so the two
+# spines pair up as they stand (spec-v0.md §8.5).
 fn unify_type_expr(
   pattern: ast.TypeExpr,
   concrete: ast.TypeExpr,

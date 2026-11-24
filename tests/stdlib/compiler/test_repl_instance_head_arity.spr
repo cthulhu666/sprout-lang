@@ -5,16 +5,13 @@ import stdlib.compiler.bundler as bundler
 import stdlib.compiler.source as source
 import testsupport.envvar as envvar
 
-# The instance-head arity check on the REPL / analysis-service path
+# The instance-head kind check on the REPL / analysis-service path
 # (compile_source_with_cache), where a session's instance names an IMPORTED class
-# and an IMPORTED type. Both arities have to be recoverable there: the class's from
-# the `@class:` marker's scheme_vars, the type's from `@tyarity:`. A decls-only
-# table would leave the check silently inert here rather than failing loudly —
-# the failure mode docs/compiler-internals.md §Whole-program passes describes.
-#
-# Assertions pin the BEHAVIOUR, not which of the two sources answered: this path
-# currently bundles the prelude as decls, so the env half is the belt to that
-# braces and stays correct if the path moves back.
+# and an IMPORTED type. Both kinds have to be inferable there: this path bundles the
+# prelude and imports as decls, and kind inference reads the class and the type from
+# them. A check that read only the session source would be silently inert here rather
+# than failing loudly — the failure mode docs/compiler-internals.md §Whole-program
+# passes describes. See docs/kind-inference-v0.md.
 
 fn is_compile_ok(r: compiler.CompileResult) -> Bool =
   match r with
@@ -29,19 +26,19 @@ fn main() -> Unit !{IO} =
     | Just stdlib_root ->
         do
           cache <- bundler.new_load_env()
-          # `Functor f` applies its variable once, so a head over a session type
-          # must leave one argument off. This one does.
+          # `Functor`'s variable has kind `Type -> Type`, so a head over a session
+          # type must leave one argument off. This one does.
           let ok_src = "module app.session\n\ntype MyBox a = | MyBox a\n\ninstance Functor MyBox\n  fn fmap(f: a -> b, xs: MyBox a) -> MyBox b =\n    match xs with\n    | MyBox v -> MyBox(f(v))\n"
           r_ok <- compiler.compile_source_with_cache(ok_src, source.StdlibRoot(stdlib_root), cache)
           assert_true(state, "REPL: head leaving one argument off satisfies an imported class", is_compile_ok(r_ok))
           # The same head saturated leaves none, and must be rejected — the
-          # imported class's arity is what says so.
+          # imported class's kind is what says so.
           let over_src = "module app.session\n\ntype MyBox a = | MyBox a\n\ninstance Functor (MyBox a)\n  fn fmap(f: a -> b, xs: MyBox a) -> MyBox b =\n    match xs with\n    | MyBox v -> MyBox(f(v))\n"
           r_over <- compiler.compile_source_with_cache(over_src, source.StdlibRoot(stdlib_root), cache)
           assert_true(state, "REPL: saturated head under an applied class variable rejected", is_compile_ok(r_over) == false)
-          # An IMPORTED type as the head: `Result` takes two parameters, so bare it
-          # leaves two where `Functor` wants one. This is the @tyarity: half.
+          # An IMPORTED type as the head: `Result` has kind `Type -> Type -> Type`,
+          # where `Functor` wants `Type -> Type`.
           let imported_src = "module app.session\n\ninstance Functor Result\n  fn fmap(f: a -> b, xs: Result e a) -> Result e b = xs\n"
           r_imported <- compiler.compile_source_with_cache(imported_src, source.StdlibRoot(stdlib_root), cache)
-          assert_true(state, "REPL: imported type's arity read for an instance head", is_compile_ok(r_imported) == false)
+          assert_true(state, "REPL: imported type's kind read for an instance head", is_compile_ok(r_imported) == false)
     summary(state)

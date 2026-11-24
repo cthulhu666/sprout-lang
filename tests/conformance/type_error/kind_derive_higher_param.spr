@@ -1,0 +1,10 @@
+# A derived instance constrains each stored parameter with the derived class, and
+# `Eq` is over types. `f` is applied to `a` in the field, so it has kind
+# `Type -> Type` and `Eq f` could not hold. Reported at the type, not at the
+# instance the deriving clause writes.
+module main
+
+type Wrap f a deriving (Eq) = Wrap(f a)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(to_string(Wrap([1]) == Wrap([1])))

@@ -1,0 +1,13 @@
+# A method-level `where` is checked as a constraint, not as the class variable's own use.
+# `Maybe` has kind `Type -> Type`, but `t` takes a type: the clash is at the argument, not
+# a claim that `t` takes no argument.
+module main
+
+class D x
+  fn d(v: x) -> Int
+
+class C t
+  fn m(x: t Int) -> Int where D (t Maybe)
+#~^^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

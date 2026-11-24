@@ -77,7 +77,8 @@ Premises:
 
 1. A context names only head variables. Rule (a) subsumes spec §8.5 rule 3: a variable
    absent from the head occurs 0 times there.
-2. The head and the dispatch type pair at equal spine depth (`check_instance_head_kinds`),
+2. The head and the dispatch type pair at equal spine depth (`check_instance_head_kinds`
+   requires the head to have its class's kind, and equal kinds leave equal numbers unapplied),
    so substitution binds exactly the head variables. An unbound variable forwards a
    dictionary; it never recurses.
 3. No overlapping instances, functional dependencies or type families.
