@@ -389,6 +389,21 @@ theorem lamParam_sound {Q : Ty → CState → Prop} {s : CState} {slot ann : Opt
     rw [Ty.vars_eq_namedIn]
     simpa [hasNamed] using ‹¬hasNamed _ = true›)
 
+/-- `ctorArity` leaves the state alone. -/
+theorem ctorArity_sound {Q : PUnit → CState → Prop} {s : CState} {tab : Table} {f : Expr}
+    {n : Nat} (h : ∀ s', s' = s → Q ⟨⟩ s') : Wp (ctorArity tab f n) Q s := by
+  unfold ctorArity
+  split
+  · split
+    · split
+      · exact Wp.reject' _ _
+      · exact Wp.pure' (h _ rfl)
+    · exact Wp.pure' (h _ rfl)
+  · exact Wp.pure' (h _ rfl)
+
+macro_rules
+  | `(tactic| sound_step) => `(tactic| sleaf ctorArity_sound)
+
 /-- A call of a known `fn` passes exactly its parameter count: nothing the checker accepts
 contradicts the judgment's `ArityOk`. -/
 def ArityGood (env : Env) (f : Expr) (n : Nat) : Prop :=

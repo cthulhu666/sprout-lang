@@ -8,6 +8,7 @@ import SproutCore.Gen
 import SproutCore.GenProgram
 import SproutCore.Shrink
 import SproutCore.Tests
+import SproutCore.TestsAdt
 import SproutCore.Judgment
 import SproutCore.Subst
 import SproutCore.FlowsLemmas

@@ -277,12 +277,33 @@ theorem runPlan_sound {p : Program} {pl : Plan} (hinv : Plan.Inv p pl) (hp : p.S
       obtain ⟨pos, hpos⟩ := (hinv.mains_eq sg body).mp hm
       exact hdone _ hpos
 
+/-- A program without type declarations has the empty table. -/
+theorem checkTypes_of_surf {p : Program} (hp : p.Surf) : checkTypes p = .ok {} := by
+  have hd : p.typeDecls = [] := by
+    unfold Program.typeDecls
+    rw [List.filterMap_eq_nil_iff]
+    intro d hd
+    have := hp d hd
+    cases d <;> simp_all [Decl.Surf]
+  unfold checkTypes
+  simp [hd]
+  rfl
+
 /-- **T2 for whole programs.** If the checker accepts a program whose written types are surface
 types and whose terms are surface terms (what the parser builds: no metavariable, skolem or `gen`),
 the declarative judgment types it. -/
 theorem checkProgram_sound {p : Program} {fuel : Nat} (hp : p.Surf)
     (h : checkProgram {} p fuel = .ok ()) : p.Typed := by
   unfold checkProgram at h
+  rw [bind_ok_iff] at h
+  obtain ⟨tab, htab, h⟩ := h
+  rw [checkTypes_of_surf hp] at htab
+  cases htab
+  change (do
+      let pl ← checkPlan p
+      match ((runPlan {} pl).run fuel).run {} with
+      | .ok _ => pure ()
+      | .error e => throw e) = Except.ok () at h
   rw [bind_ok_iff] at h
   obtain ⟨pl, hpl, h⟩ := h
   have hinv := checkPlan_inv hpl

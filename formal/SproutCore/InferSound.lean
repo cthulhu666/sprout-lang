@@ -231,7 +231,7 @@ theorem infer_sound (rules : Rules) (hr : rules.localLetMono = true) :
         inferLamArgs_sound rules hr env args _ _ _ _ hs hnf he hen ha hsa hsl hsln h
     unfold infer
     repeat' (first | sleaf inferF | sleaf plainK | sleaf lamK | sleaf arityCheck_sound | sound_step)
-    rename_i s0 hag τ ε s1 e1 w1 wτ _ hf ps r ce s2 e2 w2 wps _ wr _ hpeel s3 e3 w3 eff s4 e4
+    rename_i hag s0 τ ε s1 e1 w1 wτ _ hf ps r ce s2 e2 w2 wps _ wr _ hpeel s3 e3 w3 eff s4 e4
       w4 hlam hplain
     refine h r eff s4 (e1.trans (e2.trans (e3.trans e4))) w4
       (wr.mono (by omega) (Nat.le_refl _)) (by nf_close) ?_

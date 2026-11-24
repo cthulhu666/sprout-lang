@@ -362,8 +362,52 @@ theorem arityCheck_le (env : Env) (f : Expr) (n : Nat) :
   unfold arityCheck
   le_tac
 
+theorem ctorArity_le (tab : Table) (f : Expr) (n : Nat) :
+    Le (ctorArity tab f n) (ctorArity tab f n) := by
+  unfold ctorArity
+  le_tac
+
+theorem freshN_le (n : Nat) : Le (freshN n) (freshN n) := by
+  unfold freshN
+  le_tac
+
+macro_rules
+  | `(tactic| le_step) => `(tactic| with_reducible exact freshN_le _)
+
+mutual
+theorem checkPat_le (tab : Table) : ∀ (p : Pat) (t : Ty), Le (checkPat tab p t) (checkPat tab p t)
+  | .wild, t => by unfold checkPat; le_tac
+  | .var _, t => by unfold checkPat; le_tac
+  | .int _, t => by unfold checkPat; le_tac
+  | .bool _, t => by unfold checkPat; le_tac
+  | .str _, t => by unfold checkPat; le_tac
+  | .unit, t => by unfold checkPat; le_tac
+  | .tup ps, t => by
+    have hs : ∀ ts, Le (checkPats tab ps ts) (checkPats tab ps ts) := checkPats_le tab ps
+    unfold checkPat
+    le_tac
+  | .ctor _ ps, t => by
+    have hs : ∀ ts, Le (checkPats tab ps ts) (checkPats tab ps ts) := checkPats_le tab ps
+    unfold checkPat
+    le_tac
+
+theorem checkPats_le (tab : Table) :
+    ∀ (ps : List Pat) (ts : List Ty), Le (checkPats tab ps ts) (checkPats tab ps ts)
+  | p :: ps, t :: ts => by
+    have h1 : Le (checkPat tab p t) (checkPat tab p t) := checkPat_le tab p t
+    have h2 : Le (checkPats tab ps ts) (checkPats tab ps ts) := checkPats_le tab ps ts
+    unfold checkPats
+    le_tac
+  | [], _ => by unfold checkPats; le_tac
+  | _ :: _, [] => by unfold checkPats; le_tac
+end
+
 macro_rules
   | `(tactic| le_step) => `(tactic| with_reducible exact lamParam_le _ _)
+macro_rules
+  | `(tactic| le_step) => `(tactic| with_reducible exact ctorArity_le _ _ _)
+macro_rules
+  | `(tactic| le_step) => `(tactic| with_reducible exact checkPat_le _ _ _)
 macro_rules
   | `(tactic| le_step) => `(tactic| with_reducible exact arityCheck_le _ _ _)
 
@@ -428,7 +472,26 @@ theorem infer_le (rules : Rules) :
     unfold infer
     le_tac
   | env, .ctor _ => by unfold infer; le_tac
-  | env, .matchE _ _ => by unfold infer; le_tac
+  | env, .matchE scrut arms => by
+    have hs : Le (infer rules env scrut) (infer rules env scrut) := infer_le rules env scrut
+    have ha : ∀ st acc eff, Le (inferArms rules env st arms acc eff)
+        (inferArms rules env st arms acc eff) := fun st acc eff =>
+      inferArms_le rules env st arms acc eff
+    unfold infer
+    repeat' (first | le_step | dsimp only)
+
+theorem inferArms_le (rules : Rules) (env : Env) (st : Ty) :
+    ∀ (arms : List (Pat × Expr)) (acc : Option Ty) (eff : Eff),
+      Le (inferArms rules env st arms acc eff) (inferArms rules env st arms acc eff)
+  | [], acc, eff => by unfold inferArms; le_tac
+  | (p, e) :: arms, acc, eff => by
+    have he : ∀ env', Le (infer rules env' e) (infer rules env' e) :=
+      fun env' => infer_le rules env' e
+    have hr : ∀ acc eff, Le (inferArms rules env st arms acc eff)
+        (inferArms rules env st arms acc eff) := fun acc eff =>
+      inferArms_le rules env st arms acc eff
+    unfold inferArms
+    le_tac
 
 theorem inferPlainArgs_le (rules : Rules) (env : Env) :
     ∀ (args : List Expr) (slots : List Ty) (eff : Eff),
@@ -554,17 +617,21 @@ theorem checkProgram_fuel_mono (rules : Rules) (p : Program) {n m : Nat} (h : n 
     (hn : checkProgram rules p n ≠ .error .fuel) :
     checkProgram rules p m = checkProgram rules p n := by
   unfold checkProgram at hn ⊢
-  cases hp : checkPlan p with
+  cases ht : checkTypes p with
   | error e => rfl
+  | ok tab =>
+  cases hp : checkPlan p with
+  | error e => simp [Bind.bind, Except.bind]
   | ok pl =>
-    have key := runPlan_le rules pl n m {} h
-    rw [hp] at hn
+    let rules' := { rules with tab := tab }
+    have key := runPlan_le rules' pl n m {} h
+    rw [ht, hp] at hn
     simp only [Bind.bind, Except.bind] at hn ⊢
-    change (match (runPlan rules pl).go m {} with | .ok _ => pure () | .error e => throw e) =
-      (match (runPlan rules pl).go n {} with | .ok _ => pure () | .error e => throw e)
-    change (match (runPlan rules pl).go n {} with | .ok _ => pure () | .error e => throw e) ≠ _
+    change (match (runPlan rules' pl).go m {} with | .ok _ => pure () | .error e => throw e) =
+      (match (runPlan rules' pl).go n {} with | .ok _ => pure () | .error e => throw e)
+    change (match (runPlan rules' pl).go n {} with | .ok _ => pure () | .error e => throw e) ≠ _
       at hn
-    cases hr : (runPlan rules pl).go n {} with
+    cases hr : (runPlan rules' pl).go n {} with
     | ok v =>
       rw [hr] at hn
       rw [key (by rw [hr]; simp), hr]

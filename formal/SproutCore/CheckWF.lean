@@ -1667,6 +1667,16 @@ theorem arityCheck_wp {Q : PUnit → CState → Prop} {s : CState} {env : Env} {
 macro_rules
   | `(tactic| wp_step) => `(tactic| leaf arityCheck_wp)
 
+theorem ctorArity_wp {Q : PUnit → CState → Prop} {s : CState} {tab : Table} {f : Expr} {n : Nat}
+    (hs : s.WF) (h : ∀ s', s.sz ≤ s'.sz → s'.WF → Q ⟨⟩ s') : Wp (ctorArity tab f n) Q s := by
+  unfold ctorArity
+  split
+  all_goals repeat' wp_step
+  all_goals (refine h _ ?_ ?_ <;> wf_close)
+
+macro_rules
+  | `(tactic| wp_step) => `(tactic| leaf ctorArity_wp)
+
 theorem envMetas_wp {Q : List Nat → CState → Prop} {s : CState} {env : Env} (hs : s.WF)
     (he : Env.WF s.sz env) (h : ∀ ms s', s.sz ≤ s'.sz → s'.WF → Q ms s') :
     Wp (envMetas env) Q s := by

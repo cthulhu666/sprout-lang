@@ -1,7 +1,7 @@
 import SproutCore.Syntax
 
 /-!
-# The Sprout Core checker (stage 1)
+# The Sprout Core checker (stages 1 and 2a)
 
 Implements the spec's rules, not textbook HM. Every rule carries a tag
 `-- spec §<heading>: <keyword>`; `formal/spec-snapshot/` pins the spec text those tags cite
@@ -12,14 +12,46 @@ A type variable solved to an arrow keeps that arrow's effect, so the checker is 
 variable is solved to arrows of differing effects. The generator aims to stay out of that region
 (`Gen.lean`), and the oracle reports a program that leaves it as a disagreement; stage 4 replaces
 the model with effect variables and bounds.
+
+ADTs (stage 2a): `checkTypes` reads the type declarations into a `Table` before inference, and
+`infer` reads it through `Rules.tab`. Exhaustiveness (`covers`) and the unreachable-branch rule
+(`branchUnreachable`) are functions of the patterns and the resolved scrutinee type only.
 -/
 
 namespace SproutCore
 
-/-- Rule switches. All on is the model; the oracle self-test plants a model with one off. -/
+/-- A constructor of a declared type: the type it builds, that type's parameter count, and its
+field types with the type's parameters written `.gen i`. -/
+structure CtorInfo where
+  name : String
+  ty : String
+  nparams : Nat
+  fields : List Ty
+  deriving Repr, Inhabited
+
+/-- A declared type: its parameter count and its constructors in declaration order. -/
+structure TypeInfo where
+  name : String
+  nparams : Nat
+  ctors : List String
+  deriving Repr, Inhabited
+
+/-- The program's type declarations, read once before inference (`checkTypes`). -/
+structure Table where
+  types : List TypeInfo := []
+  ctors : List CtorInfo := []
+  deriving Repr, Inhabited
+
+def Table.type? (tab : Table) (n : String) : Option TypeInfo := tab.types.find? (·.name == n)
+
+def Table.ctor? (tab : Table) (c : String) : Option CtorInfo := tab.ctors.find? (·.name == c)
+
+/-- Rule switches. All on is the model; the oracle self-test plants a model with one off. `tab` is
+not a switch: `checkProgram` fills it from the program, and `infer` only reads it. -/
 structure Rules where
   /-- spec §5.6 existentials: "a local `let` is monomorphic". -/
   localLetMono : Bool := true
+  tab : Table := {}
   deriving Repr
 
 structure CState where
@@ -377,6 +409,206 @@ def fvArms (bound : List String) : List (Pat × Expr) → List String
   | (p, e) :: arms => fv (p.vars ++ bound) e ++ fvArms bound arms
 end
 
+/-! ### Patterns -/
+
+/-- `n` fresh variables. -/
+def freshN (n : Nat) : M (List Ty) := do
+  let mut ms := []
+  for _ in [0:n] do ms := ms ++ [← fresh]
+  return ms
+
+def CtorInfo.result (c : CtorInfo) : Ty := .adt c.ty ((List.range c.nparams).map .gen)
+
+/-- A constructor named in value position: nullary, a value of its type; else a pure function of
+its fields (spec §5.3). -/
+def CtorInfo.scheme (c : CtorInfo) : Ty :=
+  if c.fields.isEmpty then c.result else .arr c.fields c.result .pure
+
+mutual
+/-- Check a pattern against the type `t` of the value it matches; the variables it binds, left to
+right. The value flows into the pattern. -/
+def checkPat (tab : Table) : Pat → Ty → M (List (String × Ty))
+  | .wild, _ => pure []
+  | .var x, t => pure [(x, t)]
+  | .int _, t => do flow t .int; pure []
+  | .bool _, t => do flow t .bool; pure []
+  | .str _, t => do flow t .str; pure []
+  -- spec §5.5: "`()` is the unit pattern and matches only the `Unit` value"
+  | .unit, t => do flow t .unit; pure []
+  | .tup ps, t => do
+    -- spec §5.5: "Tuple patterns are positional and arity-sensitive"
+    let ms ← freshN ps.length
+    flow t (.tup ms)
+    checkPats tab ps ms
+  | .ctor c ps, t => do
+    let some ci := tab.ctor? c | reject "unknown-ctor" s!"unknown constructor {c}"
+    -- spec §5.3: a constructor is saturated by its declared fields
+    unless ps.length == ci.fields.length do
+      reject "ctor-arity" s!"{c} has {ci.fields.length} fields"
+    let ms ← freshN ci.nparams
+    -- spec §7 rule 7: a constructor pattern matches values of its declared type
+    flow t (.adt ci.ty ms)
+    checkPats tab ps (ci.fields.map (instTy ms.toArray))
+
+def checkPats (tab : Table) : List Pat → List Ty → M (List (String × Ty))
+  | p :: ps, t :: ts => do
+    let b ← checkPat tab p t
+    return b ++ (← checkPats tab ps ts)
+  | _, _ => pure []
+end
+
+def Pat.isCatchAll : Pat → Bool
+  | .wild | .var _ => true
+  | _ => false
+
+def Pat.isLit : Pat → Bool
+  | .int _ | .bool _ | .str _ | .unit => true
+  | _ => false
+
+mutual
+def Pat.size : Pat → Nat
+  | .tup ps => 1 + Pat.sizes ps
+  | .ctor _ ps => 1 + Pat.sizes ps
+  | _ => 1
+
+def Pat.sizes : List Pat → Nat
+  | [] => 0
+  | p :: ps => p.size + Pat.sizes ps
+end
+
+/-- The sub-pattern lists of the patterns `c q1 … qk`, in order. -/
+def ctorArgs (c : String) (k : Nat) : List Pat → List (List Pat)
+  | [] => []
+  | .ctor d qs :: ps => if d == c && qs.length == k then qs :: ctorArgs c k ps else ctorArgs c k ps
+  | _ :: ps => ctorArgs c k ps
+
+/-- The element lists of the tuple patterns of arity `k`, in order. -/
+def tupArgs (k : Nat) : List Pat → List (List Pat)
+  | [] => []
+  | .tup qs :: ps => if qs.length == k then qs :: tupArgs k ps else tupArgs k ps
+  | _ :: ps => tupArgs k ps
+
+/-- Column `i` of the rows: the sub-patterns at field position `i`. -/
+def column (i : Nat) (rows : List (List Pat)) : List Pat := rows.filterMap (·[i]?)
+
+def rowsSize (rows : List (List Pat)) : Nat := (rows.map Pat.sizes).sum
+
+theorem Pat.size_pos (p : Pat) : 1 ≤ p.size := by
+  cases p <;> simp [Pat.size] <;> omega
+
+theorem ctorArgs_size (c : String) (k : Nat) :
+    ∀ ps : List Pat, rowsSize (ctorArgs c k ps) + ps.length ≤ Pat.sizes ps
+  | [] => by simp [ctorArgs, rowsSize]
+  | p :: ps => by
+    have ih := ctorArgs_size c k ps
+    have hp := Pat.size_pos p
+    cases p with
+    | ctor d qs =>
+      simp only [ctorArgs]
+      split <;> simp_all [rowsSize, Pat.sizes, Pat.size] <;> omega
+    | _ => simp_all [ctorArgs, rowsSize, Pat.sizes] <;> omega
+
+theorem tupArgs_size (k : Nat) :
+    ∀ ps : List Pat, rowsSize (tupArgs k ps) + ps.length ≤ Pat.sizes ps
+  | [] => by simp [tupArgs, rowsSize]
+  | p :: ps => by
+    have ih := tupArgs_size k ps
+    have hp := Pat.size_pos p
+    cases p with
+    | tup qs =>
+      simp only [tupArgs]
+      split <;> simp_all [rowsSize, Pat.sizes, Pat.size] <;> omega
+    | _ => simp_all [tupArgs, rowsSize, Pat.sizes] <;> omega
+
+theorem Pat.size_le_of_getElem? : ∀ (qs : List Pat) (i : Nat) (p : Pat), qs[i]? = some p →
+    p.size ≤ Pat.sizes qs
+  | [], _, _, h => by simp at h
+  | q :: qs, 0, p, h => by simp at h; subst h; simp [Pat.sizes]
+  | q :: qs, i + 1, p, h => by
+    simp at h
+    have := Pat.size_le_of_getElem? qs i p h
+    simp [Pat.sizes]; omega
+
+theorem column_size (i : Nat) :
+    ∀ rows : List (List Pat), Pat.sizes (column i rows) ≤ rowsSize rows
+  | [] => by simp [column, rowsSize, Pat.sizes]
+  | q :: rows => by
+    have ih := column_size i rows
+    simp only [column, rowsSize] at ih ⊢
+    rw [List.filterMap_cons]
+    split
+    · simp; omega
+    · rename_i p hp
+      have := Pat.size_le_of_getElem? q i p hp
+      simp [Pat.sizes]; omega
+
+/-- spec §5.5: the patterns `ps` cover the type `t`, one column at a time. A catch-all covers
+anything; `Bool` needs `true` and `false`, `Unit` needs `()`; a constructor is covered when some
+pattern names it and, for each of its fields, the union of the sub-patterns at that position
+covers the field's type; an ADT when every constructor is. `Int`, `String`, a type variable and an
+arrow are covered only by a catch-all. A tuple is read as a type with one constructor whose fields
+are its elements (§5.5 names only constructors, `Bool`, `Unit` and scalars; its own example of the
+per-column gap is a tuple). No pattern covers nothing. `t` is resolved: no bound variable in it. -/
+def covers (tab : Table) (t : Ty) (ps : List Pat) : Bool :=
+  if _h : ps = [] then false
+  else if ps.any Pat.isCatchAll then true
+  else match t with
+  | .bool => ps.contains (.bool true) && ps.contains (.bool false)
+  | .unit => ps.contains .unit
+  | .tup ts =>
+    let rows := tupArgs ts.length ps
+    !rows.isEmpty && ts.zipIdx.all fun (f, i) => covers tab f (column i rows)
+  | .adt n args =>
+    match tab.type? n with
+    | none => false
+    | some ti => ti.ctors.all fun c =>
+      match tab.ctor? c with
+      | none => false
+      | some ci =>
+        let rows := ctorArgs c ci.fields.length ps
+        !rows.isEmpty && (ci.fields.map (instTy args.toArray)).zipIdx.all fun (f, i) =>
+          covers tab f (column i rows)
+  | _ => false
+termination_by Pat.sizes ps
+decreasing_by
+  all_goals
+    have h1 := column_size i rows
+    have h2 : ps.length ≥ 1 := List.length_pos_iff.mpr _h
+  · have := tupArgs_size ts.length ps; simp only [rows] at h1; omega
+  · have := ctorArgs_size c ci.fields.length ps; simp only [rows] at h1; omega
+
+/-- The patterns `c qs` cover the constructor `c` of `t` on their own. -/
+def ctorComplete (tab : Table) (t : Ty) (c : String) (qs : List Pat) : Bool :=
+  match t, tab.ctor? c with
+  | .adt _ args, some ci =>
+    qs.length == ci.fields.length &&
+      ((ci.fields.map (instTy args.toArray)).zip qs).all fun (f, q) => covers tab f [q]
+  | _, _ => false
+
+/-- spec §5.5: a top-level branch `p` after the branches `prev` is unreachable when it is shadowed
+by an earlier `_` or variable pattern, repeats an earlier top-level literal pattern, repeats an
+earlier constructor branch that covers that constructor completely, or comes after all
+constructors of an ADT are covered. "Covered" in the last case is the per-column notion of
+`covers`, the one §5.5 defines for exhaustiveness. -/
+def branchUnreachable (tab : Table) (t : Ty) (prev : List Pat) (p : Pat) : Bool :=
+  prev.any Pat.isCatchAll ||
+  (p.isLit && prev.contains p) ||
+  (match p with
+    | .ctor c _ => prev.any fun q =>
+      match q with
+      | .ctor d qs => d == c && ctorComplete tab t d qs
+      | _ => false
+    | _ => false) ||
+  (match t with
+    | .adt .. => covers tab t prev
+    | _ => false)
+
+/-- The index of the first unreachable top-level branch, if any. -/
+def unreachableAt (tab : Table) (t : Ty) : List Pat → List Pat → Nat → Option Nat
+  | _, [], _ => none
+  | prev, p :: ps, i =>
+    if branchUnreachable tab t prev p then some i else unreachableAt tab t (prev ++ [p]) ps (i + 1)
+
 /-! ### Expressions -/
 
 def isLam : Expr → Bool
@@ -442,6 +674,22 @@ def arityCheck (env : Env) (f : Expr) (n : Nat) : M Unit :=
     | _ => pure ()
   | _ => pure ()
 
+/-- A call of a constructor passes exactly its field count (spec §5.3: "under-applying one is the
+same compile error as under-applying a function"). An unknown one is left to `infer`. -/
+def ctorArity (tab : Table) (f : Expr) (n : Nat) : M Unit :=
+  match f with
+  | .ctor c =>
+    match tab.ctor? c with
+    | some ci =>
+      if ci.fields.length != n then reject "arity" s!"{c} expects {ci.fields.length} arguments"
+      else pure ()
+    | none => pure ()
+  | _ => pure ()
+
+/-- Bind a pattern's variables, the later over the earlier. -/
+def bindPat (env : Env) (bs : List (String × Ty)) : Env :=
+  bs.foldl (fun env (x, t) => (x, Bind.mono t) :: env) env
+
 /-- A lambda's parameter type: the annotation, else fresh. In argument position it is then tied
 to the callee's slot. -/
 def lamParam (slot : Option Ty) (ann : Option Ty) : M Ty := do
@@ -479,6 +727,7 @@ def infer (rules : Rules) (env : Env) : Expr → M (Ty × Eff)
   | .app f args => do
     -- spec §5.3: a call saturates a known function; under- and over-application is an error
     arityCheck env f args.length
+    ctorArity rules.tab f args.length
     let (tf, ef) ← infer rules env f
     let (slots, res, callEff) ← peel tf args.length
     -- spec §7 rule 3: non-lambda arguments are unified against their slots first
@@ -514,8 +763,41 @@ def infer (rules : Rules) (env : Env) : Expr → M (Ty × Eff)
     let (env', eff) ← inferSteps rules env steps
     let (t, ef) ← infer rules env' final
     pure (t, eff.join ef)
-  | .ctor _ => reject "unsupported" "constructor"
-  | .matchE _ _ => reject "unsupported" "match"
+  | .ctor c => do
+    let some ci := rules.tab.ctor? c | reject "unknown-ctor" s!"unknown constructor {c}"
+    -- spec §7 rule 7: a constructor produces values of its declared type; spec §5.3: a nullary
+    -- one is a value, any other one named bare is a function value
+    return (← instantiate ci.nparams ci.scheme, .pure)
+  | .matchE scrut arms => do
+    let (ts, es) ← infer rules env scrut
+    let (rt, eff) ← inferArms rules env ts arms none .pure
+    let st ← zonk ts
+    let pats := arms.map (·.1)
+    if let some i := unreachableAt rules.tab st [] pats 0 then
+      -- spec §5.5: "Unreachable top-level branches are a compile error"
+      reject "unreachable" s!"branch {i + 1} is unreachable"
+    -- spec §5.5: "A `match` must be exhaustive"
+    unless covers rules.tab st pats do reject "non-exhaustive" "the branches do not cover the type"
+    let rt ← match rt with
+      | some t => pure t
+      | none => fresh
+    pure (rt, es.join eff)
+
+/-- The arms of a `match` on a value of type `st`: the join of their types so far and their
+joined effect. -/
+def inferArms (rules : Rules) (env : Env) (st : Ty) :
+    List (Pat × Expr) → Option Ty → Eff → M (Option Ty × Eff)
+  | [], acc, eff => pure (acc, eff)
+  | (p, e) :: arms, acc, eff => do
+    let bs ← checkPat rules.tab p st
+    -- spec §7 rule 6: pattern-bound variables are scoped to their branch
+    let (t, ef) ← infer rules (bindPat env bs) e
+    -- spec §7 rule 5: branches have a unified result type; spec §7 rule 8: joined as peers, the
+    -- same treatment as `if`
+    let acc' ← match acc with
+      | none => pure t
+      | some a => joinTy true a t
+    inferArms rules env st arms (some acc') (eff.join ef)
 
 /-- The non-lambda arguments against their slots, in order, joining their effects into `eff`. -/
 def inferPlainArgs (rules : Rules) (env : Env) : List Expr → List Ty → Eff → M Eff
@@ -802,12 +1084,91 @@ def runPlan (rules : Rules) (pl : Plan) : M Unit := do
       unless e == .io do reject "main-sig" "main must declare the IO effect"
       checkBody rules env [] r e body
 
+/-! ### Type declarations -/
+
+/-- spec §5.6: the built-in primitive types and the runtime types; a one-constructor type may not
+name its constructor after one. Prelude types are outside Core. -/
+def builtinTypeNames : List String :=
+  ["Int", "Double", "Bool", "String", "Char", "Unit", "Bytes", "Vector", "Map", "Ref", "Builder"]
+
+mutual
+/-- A constructor field's written type, its parameters read as `.gen i`. `types` holds every type
+the program declares with its parameter count, so references may go forward and be mutual. -/
+def fieldTy (types : List (String × Nat)) (params : List String) : Ty → Except CErr Ty
+  | .named v =>
+    match params.findIdx? (· == v) with
+    | some i => pure (.gen i)
+    -- spec §5.6: a type variable must be bound by the declaration's parameter list
+    | none => throw (.reject "unknown-type" s!"type variable {v} is not a parameter")
+  | .adt n ts => do
+    match types.lookup n with
+    -- spec §5.6: "Referencing an undeclared uppercase type name is a compile error"
+    | none => throw (.reject "unknown-type" s!"unknown type {n}")
+    | some k =>
+      if ts.length != k then throw (.reject "type-arity" s!"{n} takes {k} arguments") else
+      return .adt n (← fieldTys types params ts)
+  | .tup ts => return .tup (← fieldTys types params ts)
+  | .arr ps r e => do
+    -- spec §7 rule 9: no spelling puts an effect on an arrow whose written result is an arrow
+    match r, e with
+    | .arr .., .io => throw (.reject "ill-formed" "effect on an arrow whose result is an arrow")
+    | _, _ => return mkArr (← fieldTys types params ps) (← fieldTy types params r) e
+  | .mv _ | .skolem _ | .gen _ => throw (.reject "ill-formed" "not a written type")
+  | t => pure t
+
+def fieldTys (types : List (String × Nat)) (params : List String) :
+    List Ty → Except CErr (List Ty)
+  | [] => pure []
+  | t :: ts => return (← fieldTy types params t) :: (← fieldTys types params ts)
+end
+
+/-- The type declarations, in source order. -/
+def Program.typeDecls (p : Program) : List (String × List String × List (String × List Ty)) :=
+  p.decls.filterMap fun d => match d with
+    | .typeD n ps cs => some (n, ps, cs)
+    | _ => none
+
+/-- The declaration checks, and the table `infer` reads. -/
+def checkTypes (p : Program) : Except CErr Table := do
+  let decls := p.typeDecls
+  let types := decls.map fun (n, ps, _) => (n, ps.length)
+  let tnames := types.map (·.1)
+  for (n, i) in tnames.zipIdx do
+    -- spec §5.1: a name may be declared at most once at a module's top level
+    if tnames.zipIdx.any (fun (m, j) => m == n && j != i) then
+      throw (.reject "duplicate" s!"type {n} is declared more than once")
+  let cnames := decls.flatMap fun (_, _, cs) => cs.map (·.1)
+  let values := p.decls.filterMap fun d => match d with
+    | .fn n .. | .letD n .. => some n
+    | _ => none
+  for (c, i) in cnames.zipIdx do
+    -- spec §5.1: constructors share the one namespace with each other and with `fn` and `let`
+    if cnames.zipIdx.any (fun (d, j) => d == c && j != i) || values.contains c then
+      throw (.reject "dup-ctor" s!"{c} is defined more than once")
+  let mut ctors : List CtorInfo := []
+  for (n, ps, cs) in decls do
+    -- spec §5.6: the declaration lists its constructors after `=`
+    if cs.isEmpty then throw (.reject "ill-formed" s!"type {n} has no constructor")
+    if let [(c, _)] := cs then
+      -- spec §5.6: "A one-constructor type may not name its constructor after another type in
+      -- scope"
+      if c != n && (tnames.contains c || builtinTypeNames.contains c) then
+        throw (.reject "ctor-is-type" s!"{n}'s one constructor {c} is the name of a type")
+    for (c, fs) in cs do
+      -- spec §5.6: "A constructor carries at most **255 fields**"
+      if fs.length > 255 then throw (.reject "ill-formed" s!"{c} has more than 255 fields")
+      let fs ← fieldTys types ps fs
+      ctors := ctors ++ [{ name := c, ty := n, nparams := ps.length, fields := fs }]
+  let tinfo := decls.map fun (n, ps, cs) => TypeInfo.mk n ps.length (cs.map (·.1))
+  return { types := tinfo, ctors := ctors }
+
 /-- The checker. `accept` is `ok ()`; a rejection carries `<key>: <detail>`, and `fuel` means a
 run was cut off at `fuel` (never a verdict). -/
 def checkProgram (rules : Rules := {}) (p : Program) (fuel : Nat := defaultFuel) :
     Except CErr Unit := do
+  let tab ← checkTypes p
   let pl ← checkPlan p
-  match ((runPlan rules pl).run fuel).run {} with
+  match ((runPlan { rules with tab := tab } pl).run fuel).run {} with
   | .ok _ => pure ()
   | .error e => throw e
 
