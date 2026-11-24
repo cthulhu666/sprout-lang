@@ -25,7 +25,20 @@ namespace SproutCore
 
 open Plausible
 
-abbrev G := StateT Nat Gen
+/-- A generated `type` declaration: fields are written types, a parameter as `.named`. -/
+structure AdtDecl where
+  name : String
+  params : List String
+  ctors : List (String × List Ty)
+  deriving Inhabited, Repr
+
+/-- The generator's state: the fresh-name counter and the program's `type` declarations, which
+every type and value generator reads. -/
+structure GSt where
+  n : Nat := 0
+  adts : List AdtDecl := []
+
+abbrev G := StateT GSt Gen
 
 def below (n : Nat) : G Nat := do
   let ⟨v, _⟩ ← Gen.choose Nat 0 (n - 1) (Nat.zero_le _)
@@ -38,9 +51,9 @@ def elem {α : Type} [Inhabited α] (xs : List α) : G α := do
   return xs[(← below xs.length)]!
 
 def freshName (pfx : String) : G String := do
-  let n ← get
-  set (n + 1)
-  pure s!"{pfx}{n}"
+  let st ← get
+  set { st with n := st.n + 1 }
+  pure s!"{pfx}{st.n}"
 
 def failG {α : Type} (msg : String) : G α := throw (GenError.genError msg)
 
@@ -62,17 +75,55 @@ def firstOf {α : Type} (cands : List (Nat × G α)) : G α := do
       catch _ => pure ()
   failG "all candidates failed"
 
+/-! ### ADTs -/
+
+partial def substTy (m : List (String × Ty)) : Ty → Ty
+  | .named v => (m.lookup v).getD (.named v)
+  | .tup ts => .tup (ts.map (substTy m))
+  | .arr ps r e => .arr (ps.map (substTy m)) (substTy m r) e
+  | .adt n ts => .adt n (ts.map (substTy m))
+  | t => t
+
+def adtOf (adts : List AdtDecl) (n : String) : Option AdtDecl := adts.find? (·.name == n)
+
+/-- A constructor's field types at the type arguments `args`. -/
+def instFields (ad : AdtDecl) (args : List Ty) (fs : List Ty) : List Ty :=
+  fs.map (substTy (ad.params.zip args))
+
+/-- `genExpr` at fuel `d` can build a value of `t` from literals and constructors: a tuple's
+elements and a constructor's fields one fuel lower, only a nullary constructor at fuel 0, so a
+recursive type always ends. A written type variable has no literal. -/
+partial def canBuild (adts : List AdtDecl) (d : Nat) : Ty → Bool
+  | .int | .bool | .str | .unit | .arr .. => true
+  | .tup ts => ts.all (canBuild adts (d - 1))
+  | .adt n args => match adtOf adts n with
+    | none => false
+    | some ad => ad.ctors.any fun (_, fs) =>
+      fs.isEmpty || (d > 0 && (instFields ad args fs).all (canBuild adts (d - 1)))
+  | _ => false
+
 /-! ### Types -/
 
 def genSimpleTy : G Ty :=
   firstOf [(4, pure .int), (3, pure .bool), (3, pure .str), (2, pure .unit)]
 
-partial def genClosedTy (depth : Nat) : G Ty :=
+/-- A declared type at simple arguments whose values `genExpr` builds at fuel 1. -/
+def genAdtTy : G Ty := do
+  let adts := (← get).adts
+  for _ in [0:4] do
+    let ad ← elem adts
+    let t := Ty.adt ad.name (← ad.params.mapM fun _ => genSimpleTy)
+    if canBuild adts 1 t then return t
+  failG "no buildable type"
+
+partial def genClosedTy (depth : Nat) : G Ty := do
+  let adts := (← get).adts
   firstOf [(6, genSimpleTy),
     (if depth > 0 then 2 else 0, do
       let n ← elem [2, 2, 3]
       let ts ← (List.range n).mapM fun _ => genClosedTy (depth - 1)
-      pure (.tup ts))]
+      pure (.tup ts)),
+    (if adts.isEmpty then 0 else 3, genAdtTy)]
 
 def genEff : G Eff := firstOf [(3, pure .pure), (2, pure .io)]
 
@@ -82,9 +133,19 @@ def isArr : Ty → Bool
 
 /-- An arrow over closed types. `ho` allows an arrow parameter of a unary arrow; `thunks` allows
 `() -> T`, which only a zero-parameter `fn` can supply. An `idArr` type, `(q.. -> R) -> q.. -> R`,
-is the type `idJoin` builds. -/
-def genArrTy (ho : Bool) (thunks : Bool := false) : G Ty :=
+is the type `idJoin` builds. With declared types, also a constructor's type. -/
+def genArrTy (ho : Bool) (thunks : Bool := false) : G Ty := do
+  let adts := (← get).adts
   firstOf [
+    -- a constructor's own type, which a bare constructor fills (spec §5.3)
+    (if adts.isEmpty then 0 else 2, do
+      let t ← genAdtTy
+      let .adt n args := t | failG "not an ADT"
+      let some ad := adtOf adts n | failG "unknown ADT"
+      let cs := ad.ctors.filter (!·.2.isEmpty)
+      if cs.isEmpty then failG "no constructor with fields"
+      let (_, fs) ← elem cs
+      pure (.arr (instFields ad args fs) t (← genEff))),
     (6, do
       let p ← firstOf [(if ho then 2 else 0, do
           let q ← genClosedTy 1
@@ -114,8 +175,12 @@ def isIdArr : Ty → Bool
   | _ => false
 
 /-- A type over the type variables `tvs`; an arrow only at parameter depth. -/
-partial def genTyWith (tvs : List String) (depth : Nat) (arrow : Bool) : G Ty :=
+partial def genTyWith (tvs : List String) (depth : Nat) (arrow : Bool) : G Ty := do
+  let adts := (← get).adts
   firstOf [(4, genSimpleTy),
+    (if adts.isEmpty then 0 else 2, do
+      let ad ← elem adts
+      pure (.adt ad.name (← ad.params.mapM fun _ => genTyWith tvs 0 false))),
     (if tvs.isEmpty then 0 else 6, do pure (.named (← elem tvs))),
     (if depth > 0 then 2 else 0, do
       let n ← elem [2, 2, 3]
@@ -128,6 +193,7 @@ partial def genTyWith (tvs : List String) (depth : Nat) (arrow : Bool) : G Ty :=
 partial def hasArrow : Ty → Bool
   | .arr .. => true
   | .tup ts => ts.any hasArrow
+  | .adt _ ts => ts.any hasArrow
   | _ => false
 
 /-! ### Signatures and environments -/
@@ -162,17 +228,117 @@ partial def matchTy (tvs : List String) : Ty → Ty → List (String × Ty) → 
     if ps.length == ts.length then
       (ps.zip ts).foldl (fun a (p, t) => a.bind fun a => matchTy tvs p t a) (some acc)
     else none
+  | .adt n ps, .adt m ts, acc =>
+    if n == m && ps.length == ts.length then
+      (ps.zip ts).foldl (fun a (p, t) => a.bind fun a => matchTy tvs p t a) (some acc)
+    else none
   | p, t, acc => if p == t then some acc else none
-
-partial def substTy (m : List (String × Ty)) : Ty → Ty
-  | .named v => (m.lookup v).getD (.named v)
-  | .tup ts => .tup (ts.map (substTy m))
-  | .arr ps r e => .arr (ps.map (substTy m)) (substTy m r) e
-  | t => t
 
 def wordList : List String := ["a", "hi", "x y", "", "ok", "sprout"]
 
+/-! ### Patterns -/
+
+/-- Patterns with the variables each binds, left to right. -/
+abbrev Arms := List (Pat × List (String × Ty))
+
+/-- One catch-all pattern: `_` or a fresh variable. -/
+def genCatch (t : Ty) : G (Pat × List (String × Ty)) := do
+  if ← chance 50 then return (.wild, [])
+  let y ← freshName "y"
+  return (.var y, [(y, t)])
+
+def joinRow (ps : List (Pat × List (String × Ty))) : List Pat × List (String × Ty) :=
+  (ps.map (·.1), ps.flatMap (·.2))
+
+/-- `k` distinct items, in drawing order. -/
+def distinct {α : Type} [BEq α] [Inhabited α] (k : Nat) (xs : List α) : G (List α) := do
+  let mut out : List α := []
+  for _ in [0:k] do
+    let x ← elem xs
+    unless out.contains x do out := out ++ [x]
+  pure out
+
+mutual
+/-- Patterns for one column of type `t`, usually covering it (spec §5.5): `Bool` by both
+literals, `Unit` by `()`, `Int` and `String` by literals and a catch-all, a tuple by splitting one
+or two of its columns (sometimes diagonally, the per-column gap's shape), an ADT by its
+constructors in some order, each with catch-all fields or one field split again, or some of them
+and a catch-all. `depth` bounds the nesting. -/
+partial def genPats (t : Ty) (depth : Nat) : G Arms := do
+  let adts := (← get).adts
+  let one : G Arms := do pure [← genCatch t]
+  match t with
+  | .bool => firstOf [(1, one), (5, do
+      let b ← chance 50
+      firstOf [(4, pure [(.bool b, []), (.bool !b, [])]),
+        (2, do pure ((.bool b, []) :: (← one)))])]
+  | .unit => firstOf [(1, one), (4, pure [(.unit, [])])]
+  | .int => firstOf [(1, one), (4, do
+      let ns ← distinct (← elem [1, 1, 2, 3]) (List.range 20)
+      pure (ns.map (fun n => (Pat.int n, [])) ++ (← one)))]
+  | .str => firstOf [(1, one), (3, do
+      let ws ← distinct (← elem [1, 1, 2]) wordList
+      pure (ws.map (fun w => (Pat.str w, [])) ++ (← one)))]
+  | .tup ts => firstOf [(1, one), (2, do
+      let (ps, bs) := joinRow (← ts.mapM genCatch)
+      pure [(.tup ps, bs)]),
+    (if depth > 0 then 5 else 0, do
+      let i ← below ts.length
+      let col ← genPats ts[i]! (depth - 1)
+      col.mapM fun pb => tupRow ts [(i, pb)]),
+    (if depth > 0 && ts.length ≥ 2 then 3 else 0, do
+      -- two columns: their product, or the diagonal (covered per column, maybe not as a whole)
+      let i ← below (ts.length - 1)
+      let j := i + 1 + (← below (ts.length - 1 - i))
+      let ci ← genPats ts[i]! (depth - 1)
+      let cj ← genPats ts[j]! (depth - 1)
+      if ci.length * cj.length ≤ 6 && (← chance 60) then
+        (ci.flatMap fun a => cj.map fun b => (a, b)).mapM fun (a, b) => tupRow ts [(i, a), (j, b)]
+      else
+        let n := max ci.length cj.length
+        (List.range n).mapM fun k =>
+          tupRow ts [(i, ci[k % ci.length]!), (j, cj[k % cj.length]!)])]
+  | .adt n args =>
+    match adtOf adts n with
+    | none => one
+    | some ad => firstOf [(1, one), (6, do
+        let cs ← firstOf [(5, pure ad.ctors), (2, pure ad.ctors.reverse)]
+        -- every constructor, or the first few and a catch-all
+        let k ← if ← chance 75 then pure cs.length else below cs.length
+        let rows ← (cs.take k).flatMapM fun (c, fs) => ctorRows c (instFields ad args fs) depth
+        if k < cs.length then pure (rows ++ (← one)) else pure rows)]
+  | _ => one
+
+/-- A tuple pattern with the given columns fixed and a catch-all in every other one. -/
+partial def tupRow (ts : List Ty) (fixed : List (Nat × (Pat × List (String × Ty)))) :
+    G (Pat × List (String × Ty)) := do
+  let cols ← ts.zipIdx.mapM fun (t, i) => match fixed.lookup i with
+    | some pb => pure pb
+    | none => genCatch t
+  let (ps, bs) := joinRow cols
+  pure (.tup ps, bs)
+
+/-- The rows for one constructor: catch-all fields, or one field split. -/
+partial def ctorRows (c : String) (fs : List Ty) (depth : Nat) : G Arms := do
+  if fs.isEmpty then return [(.ctor c [], [])]
+  firstOf [(3, do
+      let (ps, bs) := joinRow (← fs.mapM genCatch)
+      pure [(.ctor c ps, bs)]),
+    (if depth > 0 then 3 else 0, do
+      let i ← below fs.length
+      let col ← genPats fs[i]! (depth - 1)
+      col.mapM fun pb => do
+        let cols ← fs.zipIdx.mapM fun (t, j) => if j == i then pure pb else genCatch t
+        let (ps, bs) := joinRow cols
+        pure (.ctor c ps, bs))]
+end
+
 /-! ### Expressions -/
+
+/-- A type a `match` can take apart: not an arrow and not a rigid variable. -/
+def matchable : Ty → Bool
+  | .arr .. | .named _ => false
+  | _ => true
 
 mutual
 /-- An expression of type `ty` whose effect is within `env.canIO`. -/
@@ -184,6 +350,15 @@ partial def genExpr (env : GEnv) (fuel : Nat) (ty : Ty) : G Expr := do
     (f.eff.le (match ty with | .arr _ _ e => e | _ => .pure)) &&
     subTy (mkArr f.params f.ret f.eff) ty
   let fnCands : List (Nat × G Expr) := fnVals.map fun f => (4, pure (.var f.name))
+  let adts := (← get).adts
+  -- a constructor whose instantiated fields are `ps`, named bare as a function value (spec §5.3)
+  let bareCtors (ps : List Ty) (r : Ty) : List (Nat × G Expr) :=
+    match r with
+    | .adt n args => match adtOf adts n with
+      | some ad => (ad.ctors.filter fun (_, fs) => !fs.isEmpty && instFields ad args fs == ps).map
+          fun (c, _) => (3, pure (.ctor c))
+      | none => []
+    | _ => []
   let literal : List (Nat × G Expr) :=
     match ty with
     | .int => [(4, do pure (.int (← below 50)))]
@@ -191,7 +366,17 @@ partial def genExpr (env : GEnv) (fuel : Nat) (ty : Ty) : G Expr := do
     | .str => [(4, do pure (.str (← elem wordList)))]
     | .unit => [(3, pure .unit)]
     | .tup ts => [(4, do pure (.tup (← ts.mapM (genExpr env (fuel - 1)))))]
-    | .arr (p :: rest) r e => [(6, genLam env fuel p rest r e)]
+    | .arr ps@(p :: rest) r e => (6, genLam env fuel p rest r e) :: bareCtors ps r
+    -- a nullary constructor is a value; any other is called saturated (spec §5.3)
+    | .adt n args => match adtOf adts n with
+      | some ad => (ad.ctors.filter fun (_, fs) =>
+            let fs := instFields ad args fs
+            fs.isEmpty || (fuel > 0 && fs.all (canBuild adts (fuel - 1)))).map fun (c, fs) =>
+          let fs := instFields ad args fs
+          (if fs.isEmpty then 3 else 4, do
+            if fs.isEmpty then pure (.ctor c)
+            else pure (.app (.ctor c) (← fs.mapM (genExpr env (fuel - 1)))))
+      | none => []
     | _ => []
   let extra : List (Nat × G Expr) :=
     if rec_ then
@@ -255,7 +440,8 @@ partial def genExpr (env : GEnv) (fuel : Nat) (ty : Ty) : G Expr := do
         if ty == .unit && env.canIO then
           [(6, do pure (.app (.var "print_str") [← genExpr env (fuel - 1) .str]))]
         else []
-      callCands ++ hoCands ++ hoCands2 ++ retCands ++ [ite, letIn, doB, notE, idJoin] ++ io
+      let matchE : (Nat × G Expr) := (3, genMatch env fuel ty)
+      callCands ++ hoCands ++ hoCands2 ++ retCands ++ [ite, letIn, doB, notE, idJoin, matchE] ++ io
     else []
   firstOf (varCands ++ fnCands ++ literal ++ extra)
 
@@ -279,6 +465,23 @@ partial def genLam (env : GEnv) (fuel : Nat) (p : Ty) (rest : List Ty) (r : Ty) 
   let ann ← if hasNamed p then pure none else do
     pure (if (← chance 40) then some p else none)
   pure (.lam x ann body)
+
+/-- `match` on a variable in scope or a fresh value, with arms from `genPats`, sometimes a
+trailing catch-all after them. -/
+partial def genMatch (env : GEnv) (fuel : Nat) (ty : Ty) : G Expr := do
+  let scrutVars := env.vars.filter fun (_, t) => matchable t
+  let (scrut, st) ← firstOf [
+    (if scrutVars.isEmpty then 0 else 6, do
+      let (x, t) ← elem scrutVars
+      pure (Expr.var x, t)),
+    (4, do
+      let t ← firstOf [(5, genClosedTy 1), (2, pure .int), (1, pure .str)]
+      pure (← genExpr env (fuel - 1) t, t))]
+  let mut pats ← genPats st 2
+  if ← chance 8 then pats := pats ++ [← genCatch st]
+  let arms ← pats.mapM fun (p, bs) => do
+    pure (p, ← genExpr { env with vars := bs ++ env.vars } (fuel - 1) ty)
+  pure (.matchE scrut arms)
 
 partial def genDo (env : GEnv) (fuel : Nat) (ty : Ty) : G Expr := do
   let n ← elem [0, 1, 1, 2]
