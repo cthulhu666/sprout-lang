@@ -58,6 +58,8 @@ def Ty.surf : Ty → Bool
   | .unit => true
   | .tup ts => Ty.surfList ts
   | .arr ps r _ => Ty.surfList ps && r.surf
+  -- stage 2a: T2 covers programs without ADTs until 2c
+  | .adt _ _ => false
 
 def Ty.surfList : List Ty → Bool
   | [] => true
@@ -78,6 +80,9 @@ def Expr.Surf : Expr → Prop
   | .tup es => Expr.SurfList es
   | .notE e => e.Surf
   | .doB steps f => Step.SurfList steps ∧ f.Surf
+  -- stage 2a: T2 covers programs without constructors and `match` until 2c
+  | .ctor _ => False
+  | .matchE _ _ => False
 
 def Expr.SurfList : List Expr → Prop
   | [] => True
@@ -105,6 +110,7 @@ theorem Ty.wf_of_surf : ∀ t : Ty, t.surf = true → ∀ sz g, Ty.WF sz g t
   | .arr ps r e, h, sz, g => by
     simp only [Ty.surf, Bool.and_eq_true] at h
     exact Ty.WF_arr.mpr ⟨Ty.wfList_of_surf ps h.1 sz g, Ty.wf_of_surf r h.2 sz g⟩
+  | .adt _ _, h, _, _ => by simp [Ty.surf] at h
 
 theorem Ty.wfList_of_surf : ∀ ts : List Ty, Ty.surfList ts = true → ∀ sz g,
     ∀ t ∈ ts, Ty.WF sz g t
@@ -131,6 +137,8 @@ theorem Expr.src_of_surf : ∀ e : Expr, e.Surf → e.Src
   | .tup es, h => Expr.srcList_of_surf es h
   | .notE e, h => Expr.src_of_surf e h
   | .doB steps f, h => ⟨Expr.stepSrc_of_surf steps h.1, Expr.src_of_surf f h.2⟩
+  | .ctor _, h => h.elim
+  | .matchE _ _, h => h.elim
 
 theorem Expr.srcList_of_surf : ∀ es : List Expr, Expr.SurfList es → Expr.SrcList es
   | [], _ => trivial
@@ -158,6 +166,7 @@ theorem Ty.vars_eq_namedIn : ∀ t : Ty, t.vars = namedIn t
   | .arr ps r _ => by
     simp only [Ty.vars, namedIn]
     rw [Ty.varsList_eq_namedInList ps, Ty.vars_eq_namedIn r]
+  | .adt _ ts => by simp only [Ty.vars, namedIn]; exact Ty.varsList_eq_namedInList ts
 
 theorem Ty.varsList_eq_namedInList : ∀ ts : List Ty, Ty.varsList ts = namedInList ts
   | [] => rfl
@@ -195,6 +204,11 @@ theorem Ty.elab_ok {n : Nat} {σ : String → Ty} (hσ : ∀ s, (σ s).ok n = tr
         subst h
         exact Ty.ok_mkArr (Ty.elabList_ok hσ ps ps' hps) (Ty.elab_ok hσ r0 r' hr')
     · cases h
+  | .adt _ ts, r, h => by
+    simp only [Ty.elab, Option.map_eq_some_iff] at h
+    obtain ⟨rs, hrs, rfl⟩ := h
+    simp only [Ty.ok]
+    exact Ty.elabList_ok hσ ts rs hrs
 
 theorem Ty.elabList_ok {n : Nat} {σ : String → Ty} (hσ : ∀ s, (σ s).ok n = true) :
     ∀ (ts rs : List Ty), Ty.elabList σ ts = some rs → Ty.okList n rs = true
@@ -246,6 +260,7 @@ theorem elabTy_elab (f : String → Ty) : ∀ (t : Ty) (Q : Ty → CState → Pr
   | .bool, Q, s, _, h => by unfold elabTy; exact Wp.pure' (h _ _ rfl (by simp [Ty.elab]))
   | .str, Q, s, _, h => by unfold elabTy; exact Wp.pure' (h _ _ rfl (by simp [Ty.elab]))
   | .unit, Q, s, _, h => by unfold elabTy; exact Wp.pure' (h _ _ rfl (by simp [Ty.elab]))
+  | .adt _ _, Q, s, hsf, h => by simp [Ty.surf] at hsf
 
 theorem elabTyList_elab (f : String → Ty) :
     ∀ (ts : List Ty) (Q : List Ty → CState → Prop) (s : CState), Ty.surfList ts = true →
@@ -283,6 +298,9 @@ theorem Ty.app_of_ok (θ : Nat → Ty) : ∀ t : Ty, t.ok 0 = true → Ty.app θ
     simp only [Ty.ok, Bool.and_eq_true, Bool.not_eq_true'] at h
     simp only [Ty.app, Ty.appList_of_ok θ ps h.1.1, Ty.app_of_ok θ r h.1.2]
     exact mkArr_keep (by simpa using h.2)
+  | .adt _ ts, h => by
+    simp only [Ty.ok] at h
+    simp only [Ty.app, Ty.appList_of_ok θ ts h]
 
 theorem Ty.appList_of_ok (θ : Nat → Ty) : ∀ ts : List Ty, Ty.okList 0 ts = true →
     Ty.appList θ ts = ts
@@ -310,6 +328,9 @@ theorem Ty.mg_of_ok : ∀ t : Ty, t.ok 0 = true → metasOf t = [] ∧ gensOf t 
     have h1 := Ty.mgList_of_ok ps h.1.1
     have h2 := Ty.mg_of_ok r h.1.2
     simp [metasOf, gensOf, h1.1, h1.2, h2.1, h2.2]
+  | .adt _ ts, h => by
+    simp only [Ty.ok] at h
+    simpa [metasOf, gensOf] using Ty.mgList_of_ok ts h
 
 theorem Ty.mgList_of_ok : ∀ ts : List Ty, Ty.okList 0 ts = true →
     metasOfList ts = [] ∧ gensOfList ts = []

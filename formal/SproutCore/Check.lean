@@ -91,6 +91,7 @@ def zonkF : Nat → Ty → M Ty
     match ← shallowF k t with
     | .tup ts => return .tup (← ts.mapM (zonkF k))
     | .arr ps r e => return mkArr (← ps.mapM (zonkF k)) (← zonkF k r) e
+    | .adt n ts => return .adt n (← ts.mapM (zonkF k))
     | t => return t
 
 def zonk (t : Ty) : M Ty := do zonkF (← read) t
@@ -100,6 +101,7 @@ def metasOf : Ty → List Nat
   | .mv n => [n]
   | .tup ts => metasOfList ts
   | .arr ps r _ => metasOfList ps ++ metasOf r
+  | .adt _ ts => metasOfList ts
   | _ => []
 
 def metasOfList : List Ty → List Nat
@@ -152,6 +154,11 @@ def flowF : Nat → Ty → Ty → M Unit
     else
       unless ae.le .pure do reject "effect-slot" "IO function where a pure one is required"
       flowF k ar (.arr (eps.drop m) er ee)
+  | .adt n as, .adt m es =>
+    -- spec §7 rule 8: "A type ARGUMENT is judged covariantly"
+    if n == m && as.length == es.length then
+      for (x, y) in as.zip es do flowF k x y
+    else reject "mismatch" "type mismatch"
   | _, _ => reject "mismatch" "type mismatch"
 
 def flow (a e : Ty) : M Unit := do flowF (← read) a e
@@ -198,6 +205,11 @@ def joinTyF : Nat → Bool → Ty → Ty → M Ty
       else
         let r ← joinTyF k pos ar (.arr (bps.drop m) br be)
         return mkArr ps r (if pos then ae else .pure)
+  | .adt n as, .adt m bs =>
+    -- spec §7 rule 8: a type argument is covariant, so it joins at the same polarity
+    if n == m && as.length == bs.length then
+      return .adt n (← (as.zip bs).mapM fun (x, y) => joinTyF k pos x y)
+    else reject "mismatch" "branch types differ"
   | _, _ => reject "mismatch" "branch types differ"
 
 def joinTy (pos : Bool) (a b : Ty) : M Ty := do joinTyF (← read) pos a b
@@ -220,6 +232,7 @@ def instTy (ms : Array Ty) : Ty → Ty
   | .gen i => ms[i]!
   | .tup ts => .tup (instTyList ms ts)
   | .arr ps r e => .arr (instTyList ms ps) (instTy ms r) e
+  | .adt n ts => .adt n (instTyList ms ts)
   | t => t
 
 def instTyList (ms : Array Ty) : List Ty → List Ty
@@ -250,6 +263,9 @@ def genGo (keep : List Nat) (tab : Array Ty) : Ty → Array Ty × Ty
     let (tab, ps') := genGoList keep tab ps
     let (tab, r') := genGo keep tab r
     (tab, .arr ps' r' e)
+  | .adt n ts =>
+    let (tab, ts') := genGoList keep tab ts
+    (tab, .adt n ts')
   | t => (tab, t)
 
 def genGoList (keep : List Nat) (tab : Array Ty) : List Ty → Array Ty × List Ty
@@ -280,6 +296,7 @@ def namedIn : Ty → List String
   | .named s => [s]
   | .tup ts => namedInList ts
   | .arr ps r _ => namedInList ps ++ namedIn r
+  | .adt _ ts => namedInList ts
   | _ => []
 
 def namedInList : List Ty → List String
@@ -302,6 +319,7 @@ def elabTy (f : String → Ty) : Ty → M Ty
     match r, e with
     | .arr .., .io => reject "ill-formed" "effect on an arrow whose result is an arrow"
     | _, _ => pure (mkArr (← elabTyList f ps) r' e)
+  | .adt n ts => return .adt n (← elabTyList f ts)
   | t => pure t
 
 def elabTyList (f : String → Ty) : List Ty → M (List Ty)
@@ -318,6 +336,19 @@ def stepBound : List String → List Step → List String
   | bound, [] => bound
   | bound, .letS x _ :: rest => stepBound (x :: bound) rest
   | bound, .exprS _ :: rest => stepBound bound rest
+
+mutual
+/-- The variables a pattern binds, left to right. -/
+def Pat.vars : Pat → List String
+  | .var x => [x]
+  | .tup ps => Pat.varsList ps
+  | .ctor _ ps => Pat.varsList ps
+  | _ => []
+
+def Pat.varsList : List Pat → List String
+  | [] => []
+  | p :: ps => p.vars ++ Pat.varsList ps
+end
 
 mutual
 def fvStep (bound : List String) : List Step → List String
@@ -338,7 +369,12 @@ def fv (bound : List String) : Expr → List String
   | .tup es => fvList bound es
   | .notE e => fv bound e
   | .doB steps final => fvStep bound steps ++ fv (stepBound bound steps) final
+  | .matchE scrut arms => fv bound scrut ++ fvArms bound arms
   | _ => []
+
+def fvArms (bound : List String) : List (Pat × Expr) → List String
+  | [] => []
+  | (p, e) :: arms => fv (p.vars ++ bound) e ++ fvArms bound arms
 end
 
 /-! ### Expressions -/
@@ -478,6 +514,8 @@ def infer (rules : Rules) (env : Env) : Expr → M (Ty × Eff)
     let (env', eff) ← inferSteps rules env steps
     let (t, ef) ← infer rules env' final
     pure (t, eff.join ef)
+  | .ctor _ => reject "unsupported" "constructor"
+  | .matchE _ _ => reject "unsupported" "match"
 
 /-- The non-lambda arguments against their slots, in order, joining their effects into `eff`. -/
 def inferPlainArgs (rules : Rules) (env : Env) : List Expr → List Ty → Eff → M Eff
@@ -683,6 +721,7 @@ def checkPlan (p : Program) : Except CErr Plan := do
     | .fn n ps sg b => nodes := nodes.push (.fnN ⟨n, ps, sg, b⟩)
     | .letD n a i => nodes := nodes.push (.letN n a i)
     | .mainFn sg b => mains := mains ++ [(nodes.size, sg, b)]
+    | .typeD .. => pure ()
   let names := nodes.toList.map Node.name
   -- spec §5.1: a name may be declared at most once at a module's top level
   for (n, i) in names.zipIdx do

@@ -40,6 +40,12 @@ partial def shrinkExpr : Expr → List Expr
     (List.range steps.length).map (fun i => Expr.doB (steps.eraseIdx i) final) ++
     (shrinkExpr final).map (.doB steps ·) ++
     (shrinkAt steps shrinkStep).map (.doB · final)
+  | .ctor _ => []
+  | .matchE scrut arms =>
+    [scrut] ++ arms.map (·.2) ++
+    (List.range arms.length).map (fun i => Expr.matchE scrut (arms.eraseIdx i)) ++
+    (shrinkExpr scrut).map (.matchE · arms) ++
+    (shrinkAt arms fun (p, e) => (shrinkExpr e).map (p, ·)).map (.matchE scrut ·)
 end
 
 def shrinkSig : Option (Ty × Eff) → List (Option (Ty × Eff))
@@ -54,6 +60,7 @@ def shrinkDecl : Decl → List Decl
   | .letD n a i =>
     (if a.isSome then [Decl.letD n none i] else []) ++ (shrinkExpr i).map (.letD n a ·)
   | .mainFn sg b => (shrinkExpr b).map (.mainFn sg ·)
+  | .typeD .. => []
 
 def shrinkProgram (p : Program) : List Program :=
   let ds := p.decls

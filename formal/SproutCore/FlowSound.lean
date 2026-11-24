@@ -298,6 +298,12 @@ theorem flowF_sound : ∀ (k : Nat) (a e : Ty) (Q : PUnit → CState → Prop) (
       have hlt : aps.length < eps.length := by simp at hlen hgt; omega
       exact flow_arr_lt θ aps eps ar er ae ee hlt (arr_params_ne_of_lt hne hlt) hae
         (fun p hp' => hp p hp' θ (hθ.back e3)) (hr θ hθ)
+    · have hc := ‹(_ && _) = true›
+      simp only [Bool.and_eq_true, beq_iff_eq] at hc
+      obtain ⟨rfl, hl⟩ := hc
+      have hp := ‹∀ (p : Ty × Ty), p ∈ _ → ∀ (θ : Nat → Ty), Solves θ _ → Flows _ _›
+      rw [Ty.app_adt, Ty.app_adt]
+      exact Flows.adt _ _ _ (flowsAll_of_zip (f := Ty.app θ) hl (fun p hp' => hp p hp' θ hθ))
 
 theorem flow_sound {Q : PUnit → CState → Prop} {s : CState} {a e : Ty} (hs : s.WF)
     (hnf : s.NF) (ha : Ty.WF s.sz 0 a) (han : a.NF) (he : Ty.WF s.sz 0 e) (hen : e.NF)
@@ -362,6 +368,18 @@ theorem join_tup (pos : Bool) (θ : Nat → Ty) (as es bs : List Ty) (hl : as.le
     exact ⟨Flows.tup _ _ this.1, Flows.tup _ _ this.2⟩
   · simp only [JoinR, ite_true] at this ⊢
     exact ⟨Flows.tup _ _ this.1, Flows.tup _ _ this.2⟩
+
+theorem join_adt (pos : Bool) (θ : Nat → Ty) (n : String) (as es bs : List Ty)
+    (hl : as.length = es.length)
+    (h : All2 (fun p r => JoinR pos (Ty.app θ p.1) (Ty.app θ p.2) (Ty.app θ r)) (as.zip es) bs) :
+    JoinR pos (Ty.app θ (.adt n as)) (Ty.app θ (.adt n es)) (Ty.app θ (.adt n bs)) := by
+  have := joinAll_of_all2 pos (Ty.app θ) as es bs hl h
+  rw [Ty.app_adt, Ty.app_adt, Ty.app_adt]
+  cases pos
+  · simp only [JoinR, Bool.false_eq_true, ite_false] at this ⊢
+    exact ⟨Flows.adt _ _ _ this.1, Flows.adt _ _ _ this.2⟩
+  · simp only [JoinR, ite_true] at this ⊢
+    exact ⟨Flows.adt _ _ _ this.1, Flows.adt _ _ _ this.2⟩
 
 /-- `joinTyF`'s arrow case, equal stored arity. -/
 theorem join_arr_eq (pos : Bool) (θ : Nat → Ty) (aps bps ps : List Ty) (ar br r : Ty)
@@ -542,8 +560,14 @@ local macro "join_close" : tactic => `(tactic| (
   · rename_i _ _ aps ar ae eps er ee hlen hemp hgt bs s1 e1 _ _ _ hps r s3 e3 _ _ _ hr
     have hlt : aps.length < eps.length := by simp at hlen hgt; omega
     exact join_arr_lt _ θ aps eps bs ar er r ae ee hlt (ne_left_of_not_or hemp)
-      (hps θ (hθ.back e3)) (hr θ hθ)))
+      (hps θ (hθ.back e3)) (hr θ hθ)
+  · rename_i _ _ n as m es hc bs s1 _ _ _ _ hall
+    simp only [Bool.and_eq_true, beq_iff_eq] at hc
+    obtain ⟨rfl, hl⟩ := hc
+    exact join_adt _ θ n as es bs hl (hall θ hθ)))
 
+-- the walk over twelve arms at two polarities needs more than the default budget
+set_option maxHeartbeats 300000 in
 theorem joinTyF_sound : ∀ (k : Nat) (pos : Bool) (a b : Ty) (Q : Ty → CState → Prop) (s : CState),
     s.WF → s.NF → Ty.WF s.sz 0 a → a.NF → Ty.WF s.sz 0 b → b.NF →
     (∀ r s', Ext s s' → s'.WF → Ty.WF s'.sz 0 r → r.NF →

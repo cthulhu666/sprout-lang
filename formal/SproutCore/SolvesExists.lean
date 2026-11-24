@@ -35,6 +35,9 @@ theorem Ty.app_congr {θ1 θ2 : Nat → Ty} :
     simp only [Ty.app, metasOf, List.mem_append] at *
     rw [Ty.appList_congr ps (fun m hm => h m (Or.inl hm)),
       Ty.app_congr r (fun m hm => h m (Or.inr hm))]
+  | .adt _ ts, h => by
+    simp only [Ty.app, metasOf] at *
+    rw [Ty.appList_congr ts h]
 
 theorem Ty.appList_congr {θ1 θ2 : Nat → Ty} :
     ∀ ts : List Ty, (∀ m ∈ metasOfList ts, θ1 m = θ2 m) → Ty.appList θ1 ts = Ty.appList θ2 ts

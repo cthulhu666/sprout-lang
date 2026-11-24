@@ -73,6 +73,11 @@ theorem Ty.elab_noSk {σ : String → Ty} (hσ : ∀ s, (σ s).noSk = true) :
         subst h
         exact noSk_mkArr (noSkList_iff.mpr (Ty.elabList_noSk hσ ps ps' hps)) (Ty.elab_noSk hσ r0 r' hr')
     · cases h
+  | .adt _ ts, r, h => by
+    simp only [Ty.elab, Option.map_eq_some_iff] at h
+    obtain ⟨rs, hrs, rfl⟩ := h
+    simp only [Ty.noSk]
+    exact noSkList_iff.mpr (Ty.elabList_noSk hσ ts rs hrs)
 
 theorem Ty.elabList_noSk {σ : String → Ty} (hσ : ∀ s, (σ s).noSk = true) :
     ∀ (ts rs : List Ty), Ty.elabList σ ts = some rs → ∀ r ∈ rs, r.noSk = true
@@ -125,6 +130,11 @@ theorem Ty.elab_inst (ts : List Ty) {σ : String → Ty} :
         rw [Ty.inst_mkArr]
         simp
     · cases h
+  | .adt n ts', r, h => by
+    simp only [Ty.elab, Option.map_eq_some_iff] at h
+    obtain ⟨rs, hrs, rfl⟩ := h
+    have := Ty.elabList_inst ts ts' rs hrs
+    simp only [Ty.elab, this, Option.map_some, Ty.inst, Ty.instList_eq_map]
 
 theorem Ty.elabList_inst (ts : List Ty) {σ : String → Ty} :
     ∀ (tl rs : List Ty), Ty.elabList σ tl = some rs →

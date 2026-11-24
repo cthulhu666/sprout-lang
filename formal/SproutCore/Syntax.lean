@@ -1,9 +1,10 @@
 /-!
-# Sprout Core, stage 1 syntax (docs/lean-model-v0.md §4, §9)
+# Sprout Core syntax (docs/lean-model-v0.md §4, §9)
 
-Types, terms and declarations of the stage-1 fragment: Int/Bool/String/Unit, tuples, arrows
-carrying an effect in {pure, IO}, lambdas, application, local `let`, `if`, `do` blocks and the
-`!{IO}` primitive `print_str`. No ADTs, no linearity, no effect variables.
+Types, terms and declarations of stages 1 and 2: Int/Bool/String/Unit, tuples, arrows carrying an
+effect in {pure, IO}, user ADTs, lambdas, application, local `let`, `if`, `do` blocks, the `!{IO}`
+primitive `print_str`, constructors and `match`. No linearity, no effect variables, no records,
+`wrap` or existentials.
 -/
 
 namespace SproutCore
@@ -41,6 +42,8 @@ inductive Ty where
   | unit
   | tup (ts : List Ty)
   | arr (ps : List Ty) (r : Ty) (e : Eff)
+  /-- A user type applied to its arguments: `Maybe Int` is `.adt "Maybe" [.int]`. -/
+  | adt (name : String) (args : List Ty)
   deriving Repr, Inhabited
 
 /-! `deriving BEq` on a nested inductive is an `opaque` constant: no theorem can say what it
@@ -59,6 +62,7 @@ def Ty.beq : Ty → Ty → Bool
   | .unit, .unit => true
   | .tup as, .tup bs => Ty.beqList as bs
   | .arr ps r e, .arr qs s f => Ty.beqList ps qs && Ty.beq r s && e == f
+  | .adt n as, .adt m bs => n == m && Ty.beqList as bs
   | _, _ => false
 
 def Ty.beqList : List Ty → List Ty → Bool
@@ -85,6 +89,10 @@ theorem Ty.eq_of_beq (a b : Ty) (h : Ty.beq a b = true) : a = b := by
     simp only [Ty.beq, Bool.and_eq_true] at h
     obtain ⟨⟨h1, h2⟩, h3⟩ := h
     rw [Ty.eq_of_beqList ps qs h1, Ty.eq_of_beq r s h2, Eff.eq_of_beq h3]
+  · rename_i n as m bs
+    simp only [Ty.beq, Bool.and_eq_true] at h
+    obtain ⟨h1, h2⟩ := h
+    rw [beq_iff_eq.mp h1, Ty.eq_of_beqList as bs h2]
 
 theorem Ty.eq_of_beqList (as bs : List Ty) (h : Ty.beqList as bs = true) : as = bs := by
   cases as <;> cases bs <;> first
@@ -106,6 +114,9 @@ theorem Ty.beq_refl (a : Ty) : Ty.beq a a = true := by
     simp only [Ty.beq, Bool.and_eq_true]
     refine ⟨⟨Ty.beqList_refl ps, Ty.beq_refl r⟩, ?_⟩
     cases e <;> decide
+  · rename_i n as
+    simp only [Ty.beq, Bool.and_eq_true]
+    exact ⟨beq_self_eq_true n, Ty.beqList_refl as⟩
 
 theorem Ty.beqList_refl (as : List Ty) : Ty.beqList as as = true := by
   cases as <;> first | (simp [Ty.beqList]; done) | skip
@@ -117,6 +128,18 @@ end
 instance : LawfulBEq Ty where
   eq_of_beq h := Ty.eq_of_beq _ _ h
   rfl := Ty.beq_refl _
+
+/-- Patterns (spec §5.5). `int` is a non-negative literal, as `Expr.int` is. -/
+inductive Pat where
+  | wild
+  | var (x : String)
+  | int (n : Nat)
+  | bool (b : Bool)
+  | str (s : String)
+  | unit
+  | tup (ps : List Pat)
+  | ctor (name : String) (args : List Pat)
+  deriving BEq, Repr, Inhabited
 
 mutual
 
@@ -134,6 +157,10 @@ inductive Expr where
   | tup (es : List Expr)
   | notE (e : Expr)
   | doB (steps : List Step) (final : Expr)
+  /-- A constructor named in value position: nullary, a value; else a function value (§5.3).
+  A saturated call is `.app (.ctor c) args`. -/
+  | ctor (name : String)
+  | matchE (scrut : Expr) (arms : List (Pat × Expr))
   deriving BEq, Repr, Inhabited
 
 /-- A non-final `do` step: a `let` or a bare expression whose value is discarded. -/
@@ -151,6 +178,8 @@ inductive Decl where
   | fn (name : String) (params : List (String × Option Ty)) (sig : Option (Ty × Eff)) (body : Expr)
   | letD (name : String) (ann : Option Ty) (init : Expr)
   | mainFn (sig : Option (Ty × Eff)) (body : Expr)
+  /-- `type name params = | c fields | …`; a field's type variables are `.named` params. -/
+  | typeD (name : String) (params : List String) (ctors : List (String × List Ty))
   deriving BEq, Repr, Inhabited
 
 /-- A program is its declarations in source order. The printer keeps that order. -/

@@ -115,6 +115,7 @@ theorem zonkF_le : ∀ k j, k ≤ j → ∀ t, Le (zonkF k t) (zonkF j t) := by
     · exact Le.bind (Le.mapM (fun a => ih j (by omega) a)) fun _ => Le.pure _
     · exact Le.bind (Le.mapM (fun a => ih j (by omega) a)) fun _ =>
         Le.bind (ih j (by omega) _) fun _ => Le.pure _
+    · exact Le.bind (Le.mapM (fun a => ih j (by omega) a)) fun _ => Le.pure _
     · exact Le.pure _
 
 theorem zonk_le (t : Ty) : Le (zonk t) (zonk t) :=
@@ -322,6 +323,9 @@ theorem elabTy_le (f : String → Ty) : ∀ t, Le (elabTy f t) (elabTy f t)
   | .bool => by unfold elabTy; le_tac
   | .str => by unfold elabTy; le_tac
   | .unit => by unfold elabTy; le_tac
+  | .adt _ ts => by
+    unfold elabTy
+    refine Le.bind (elabTyList_le f ts) fun _ => Le.pure _
 
 theorem elabTyList_le (f : String → Ty) : ∀ ts, Le (elabTyList f ts) (elabTyList f ts)
   | [] => by unfold elabTyList; le_tac
@@ -423,6 +427,8 @@ theorem infer_le (rules : Rules) :
       fun env' => infer_le rules env' final
     unfold infer
     le_tac
+  | env, .ctor _ => by unfold infer; le_tac
+  | env, .matchE _ _ => by unfold infer; le_tac
 
 theorem inferPlainArgs_le (rules : Rules) (env : Env) :
     ∀ (args : List Expr) (slots : List Ty) (eff : Eff),

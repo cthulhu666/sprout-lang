@@ -33,6 +33,8 @@ def Decl.Surf : Decl → Prop
   | .fn n ps sg b => FnInfo.Surf ⟨n, ps, sg, b⟩
   | .letD _ a i => (∀ t, a = some t → t.surf = true) ∧ i.Surf
   | .mainFn _ b => b.Surf
+  -- stage 2a: T2 covers programs without type declarations until 2c
+  | .typeD .. => False
 
 def Program.Surf (p : Program) : Prop := ∀ d ∈ p.decls, Decl.Surf d
 

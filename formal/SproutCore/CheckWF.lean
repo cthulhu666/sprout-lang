@@ -38,6 +38,7 @@ def gensOf : Ty → List Nat
   | .gen i => [i]
   | .tup ts => gensOfList ts
   | .arr ps r _ => gensOfList ps ++ gensOf r
+  | .adt _ ts => gensOfList ts
   | _ => []
 
 def gensOfList : List Ty → List Nat
@@ -102,6 +103,15 @@ theorem Ty.WF.mono {sz g sz' g' : Nat} {t : Ty} (h : Ty.WF sz g t) (hs : sz ≤ 
   · rintro ⟨h1, h2, h3⟩
     exact ⟨fun m hm => hm.elim (fun ⟨t, ht, hm⟩ => (h1 t ht).1 m hm) (h2 m),
       fun i hi => hi.elim (fun ⟨t, ht, hi⟩ => (h1 t ht).2 i hi) (h3 i)⟩
+
+@[simp] theorem Ty.WF_adt {sz g : Nat} {n : String} {ts : List Ty} :
+    Ty.WF sz g (.adt n ts) ↔ ∀ t ∈ ts, Ty.WF sz g t := by
+  simp only [Ty.WF, metasOf, gensOf, mem_metasOfList, mem_gensOfList]
+  constructor
+  · intro h t ht
+    exact ⟨fun m hm => h.1 m ⟨t, ht, hm⟩, fun i hi => h.2 i ⟨t, ht, hi⟩⟩
+  · intro h
+    exact ⟨fun m ⟨t, ht, hm⟩ => (h t ht).1 m hm, fun i ⟨t, ht, hi⟩ => (h t ht).2 i hi⟩
 
 /-! ### Weakest preconditions over the checker monad -/
 
@@ -517,8 +527,14 @@ macro_rules
   | `(tactic| wf_close) => `(tactic| (refine Ty.WF.arr_take ‹_› ?_ _; omega))
 macro_rules
   | `(tactic| wf_close) => `(tactic| (refine Ty.WF.arr_params ‹_› ?_; omega))
+theorem Ty.WF.adt_params {sz sz' : Nat} {n : String} {ts : List Ty}
+    (h : Ty.WF sz 0 (.adt n ts)) (hs : sz ≤ sz') : ∀ t ∈ ts, Ty.WF sz' 0 t :=
+  fun t ht => ((Ty.WF_adt.mp h) t ht).mono hs (Nat.le_refl _)
+
 macro_rules
   | `(tactic| wf_close) => `(tactic| (refine Ty.WF.tup_params ‹_› ?_; omega))
+macro_rules
+  | `(tactic| wf_close) => `(tactic| (refine Ty.WF.adt_params ‹_› ?_; omega))
 
 /-- A loop whose body is a unit computation that preserves the invariant. -/
 theorem Wp.forIn_unit {α : Type} {body : α → M PUnit} {l : List α} {Q : PUnit → CState → Prop}
@@ -574,6 +590,10 @@ theorem namedInList_append (a b : List Ty) :
     Ty.NF (.arr ps r e) ↔ (∀ t ∈ ps, Ty.NF t) ∧ Ty.NF r := by
   simp [Ty.NF, namedIn, namedInList_eq_nil]
 
+@[simp] theorem Ty.NF_adt {n : String} {ts : List Ty} :
+    Ty.NF (.adt n ts) ↔ ∀ t ∈ ts, Ty.NF t := by
+  simp [Ty.NF, namedIn, namedInList_eq_nil]
+
 theorem namedIn_mkArr (ps : List Ty) (r : Ty) (e : Eff) :
     namedIn (mkArr ps r e) = namedIn (.arr ps r e) := by
   unfold mkArr
@@ -611,6 +631,10 @@ theorem Ty.NF.of_mv {t : Ty} (h : ∃ j, t = .mv j) : Ty.NF t := by
 
 theorem Ty.NF.tup_params {ts : List Ty} (h : Ty.NF (.tup ts)) : ∀ t ∈ ts, Ty.NF t :=
   Ty.NF_tup.mp h
+
+theorem Ty.NF.adt_params {n : String} {ts : List Ty} (h : Ty.NF (.adt n ts)) :
+    ∀ t ∈ ts, Ty.NF t :=
+  Ty.NF_adt.mp h
 
 theorem Ty.NF.list_cons {t : Ty} {ts : List Ty} (h1 : Ty.NF t) (h2 : ∀ u ∈ ts, Ty.NF u) :
     ∀ u ∈ t :: ts, Ty.NF u := by
@@ -962,6 +986,18 @@ theorem zonkF_wp {Q : Ty → CState → Prop} {s : CState} (hs : s.WF) :
           rcases hm with ⟨b, hb', hm⟩ | hm
           · exact (hb b hb').2 m hm
           · exact hu' m hm
+    | adt n ts =>
+      dsimp only
+      have hts : ∀ t ∈ ts, Ty.WF s1.sz 0 t := Ty.WF_adt.mp ht'
+      refine Wp.bind (Wp.mono (hlist ts hts) ?_)
+      · intro bs s2 ⟨e2, g2, hb⟩
+        subst e2
+        refine Wp.pure' (h _ _ rfl ?_ ?_)
+        · exact Ty.WF_adt.mpr fun b hb' => (hb b hb').1
+        · intro m hm
+          simp only [metasOf, mem_metasOfList] at hm
+          obtain ⟨b, hb', hm⟩ := hm
+          exact (hb b hb').2 m hm
     | mv n =>
       dsimp only
       refine Wp.pure' (h _ _ rfl ht' ?_)
@@ -1060,6 +1096,8 @@ macro_rules
 
 macro_rules
   | `(tactic| wf_close) => `(tactic| (apply Ty.WF_tup.mpr; wf_close))
+macro_rules
+  | `(tactic| wf_close) => `(tactic| (refine Ty.WF_adt.mpr ?_; wf_close))
 macro_rules
   | `(tactic| wf_close) => `(tactic| (apply Ty.WF_arr.mpr; constructor <;> wf_close))
 macro_rules
@@ -1206,6 +1244,9 @@ theorem instTy_wf {ms : Array Ty} {sz n : Nat} (hm : ms.size = n)
   | .bool, _ => by simp [instTy]
   | .str, _ => by simp [instTy]
   | .unit, _ => by simp [instTy]
+  | .adt _ ts, h => by
+    simp only [instTy]
+    exact Ty.WF_adt.mpr (instTyList_wf hm hms ts (Ty.WF_adt.mp h))
 
 theorem instTyList_wf {ms : Array Ty} {sz n : Nat} (hm : ms.size = n)
     (hms : ∀ t ∈ ms, Ty.WF sz 0 t) : ∀ ts : List Ty, (∀ t ∈ ts, Ty.WF sz n t) →
@@ -1275,6 +1316,10 @@ theorem genGo_wf (keep : List Nat) {sz : Nat} : ∀ (t : Ty) (tab : Array Ty),
   | .bool, tab, h => by simp [genGo]
   | .str, tab, h => by simp [genGo]
   | .unit, tab, h => by simp [genGo]
+  | .adt _ ts, tab, h => by
+    simp only [genGo]
+    obtain ⟨hg, hl⟩ := genGoList_wf keep ts tab (Ty.WF_adt.mp h)
+    exact ⟨hg, Ty.WF_adt.mpr hl⟩
 
 theorem genGoList_wf (keep : List Nat) {sz : Nat} : ∀ (ts : List Ty) (tab : Array Ty),
     (∀ t ∈ ts, Ty.WF sz 0 t) →
@@ -1342,6 +1387,12 @@ theorem elabTy_wp (f : String → Ty) (g : Nat) : ∀ (t : Ty) (Q : Ty → CStat
   | .bool, Q, s, hf, ht, h => by unfold elabTy; exact Wp.pure' (h _ _ rfl ht)
   | .str, Q, s, hf, ht, h => by unfold elabTy; exact Wp.pure' (h _ _ rfl ht)
   | .unit, Q, s, hf, ht, h => by unfold elabTy; exact Wp.pure' (h _ _ rfl ht)
+  | .adt _ ts, Q, s, hf, ht, h => by
+    unfold elabTy
+    refine Wp.bind (elabTyList_wp f g ts _ s hf (Ty.WF_adt.mp ht) ?_)
+    intro bs s1 e hb
+    subst e
+    exact Wp.pure' (h _ _ rfl (Ty.WF_adt.mpr hb))
 
 theorem elabTyList_wp (f : String → Ty) (g : Nat) :
     ∀ (ts : List Ty) (Q : List Ty → CState → Prop) (s : CState),
@@ -1459,6 +1510,9 @@ theorem Ty.wf_of_okn {n : Nat} : ∀ (t : Ty), t.ok n = true → ∀ sz, Ty.WF s
   | .arr ps r e, h, sz => by
     simp only [Ty.ok, Bool.and_eq_true, Bool.not_eq_true'] at h
     exact Ty.WF_arr.mpr ⟨Ty.wfList_of_okn ps h.1.1 sz, Ty.wf_of_okn r h.1.2 sz⟩
+  | .adt _ ts, h, sz => by
+    simp only [Ty.ok] at h
+    exact Ty.WF_adt.mpr (Ty.wfList_of_okn ts h sz)
 
 theorem Ty.wfList_of_okn {n : Nat} : ∀ (ts : List Ty), Ty.okList n ts = true → ∀ sz,
     ∀ t ∈ ts, Ty.WF sz n t
@@ -1488,6 +1542,9 @@ theorem Ty.nf_of_ok {n : Nat} : ∀ t : Ty, t.ok n = true → Ty.NF t
   | .arr ps r e, h => by
     simp only [Ty.ok, Bool.and_eq_true, Bool.not_eq_true'] at h
     exact Ty.NF_arr.mpr ⟨Ty.nfList_of_ok ps h.1.1, Ty.nf_of_ok r h.1.2⟩
+  | .adt _ ts, h => by
+    simp only [Ty.ok] at h
+    exact Ty.NF_adt.mpr (Ty.nfList_of_ok ts h)
 
 theorem Ty.nfList_of_ok {n : Nat} : ∀ ts : List Ty, Ty.okList n ts = true → ∀ t ∈ ts, Ty.NF t
   | [], _ => by simp
@@ -1574,6 +1631,9 @@ def Expr.Src : Expr → Prop
   | .tup es => Expr.SrcList es
   | .notE e => e.Src
   | .doB steps f => Step.SrcList steps ∧ f.Src
+  -- stage 2a: the invariants cover programs without constructors and `match` until 2c
+  | .ctor _ => False
+  | .matchE _ _ => False
 
 def Expr.SrcList : List Expr → Prop
   | [] => True
@@ -1784,6 +1844,8 @@ theorem infer_wp (rules : Rules) : ∀ (e : Expr) (env : Env) (Q : Ty × Eff →
     unfold infer
     repeat' (first | wp_step | leaf stepsK | leaf inferF)
     all_goals (refine h _ _ _ ?_ ?_ ?_ <;> wf_close)
+  | .ctor _, _, _, _, _, _, hsrc, _ => hsrc.elim
+  | .matchE _ _, _, _, _, _, _, hsrc, _ => hsrc.elim
 
 theorem inferPlainArgs_wp (rules : Rules) (env : Env) :
     ∀ (args : List Expr) (slots : List Ty) (eff : Eff) (Q : Eff → CState → Prop) (s : CState),
@@ -2342,6 +2404,7 @@ mutual
 def Ty.Canon : Ty → Prop
   | .tup ts => Ty.CanonList ts
   | .arr ps r e => Ty.CanonList ps ∧ r.Canon ∧ Ty.mergeable ps r e = false
+  | .adt _ ts => Ty.CanonList ts
   | _ => True
 
 def Ty.CanonList : List Ty → Prop
@@ -2459,6 +2522,12 @@ theorem zonkF_canon : ∀ (k : Nat) (t : Ty) (s : CState),
       intro r' s3 ⟨hr', e3⟩
       subst e3
       exact Wp.pure' ⟨mkArr_canon hb hr', rfl⟩
+    | adt n ts =>
+      dsimp only
+      refine Wp.bind (Wp.mono (hlist ts) ?_)
+      intro bs s2 ⟨e2, hb⟩
+      subst e2
+      exact Wp.pure' ⟨hb, rfl⟩
     | _ => dsimp only; exact Wp.pure' ⟨trivial, rfl⟩
 
 theorem zonk_canon (t : Ty) (s : CState) : Wp (zonk t) (fun r s' => r.Canon ∧ s' = s) s := by
