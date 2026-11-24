@@ -588,19 +588,23 @@ def ctorComplete (tab : Table) (t : Ty) (c : String) (qs : List Pat) : Bool :=
 /-- spec §5.5: a top-level branch `p` after the branches `prev` is unreachable when it is shadowed
 by an earlier `_` or variable pattern, repeats an earlier top-level literal pattern, repeats an
 earlier constructor branch that covers that constructor completely, or comes after all
-constructors of an ADT are covered. "Covered" in the last case is the per-column notion of
-`covers`, the one §5.5 defines for exhaustiveness. -/
+constructors of an ADT are covered. "Covered" in the last two cases is one earlier branch covering
+the constructor on its own: §5.5's per-column notion over several branches would flag a reachable
+`_` (`| P(Nothing, _) | P(_, Nothing) | _`). -/
 def branchUnreachable (tab : Table) (t : Ty) (prev : List Pat) (p : Pat) : Bool :=
+  let done (c : String) := prev.any fun q =>
+    match q with
+    | .ctor d qs => d == c && ctorComplete tab t d qs
+    | _ => false
   prev.any Pat.isCatchAll ||
   (p.isLit && prev.contains p) ||
   (match p with
-    | .ctor c _ => prev.any fun q =>
-      match q with
-      | .ctor d qs => d == c && ctorComplete tab t d qs
-      | _ => false
+    | .ctor c _ => done c
     | _ => false) ||
   (match t with
-    | .adt .. => covers tab t prev
+    | .adt n _ => match tab.type? n with
+      | some ti => ti.ctors.all done
+      | none => false
     | _ => false)
 
 /-- The index of the first unreachable top-level branch, if any. -/

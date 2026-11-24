@@ -210,15 +210,14 @@ def tupleRepeat : Program := ⟨[matchFn (.tup [.int, .int])
 
 #guard accepts tupleRepeat
 
-/-- "Covered" in the fourth case is §5.5's per-column notion, so a reachable `_` is flagged:
+/-- A reachable `_` after a per-column-covered constructor is not flagged:
 `type P = | P (Maybe Int) (Maybe Int)`, `| P Nothing _ | P _ Nothing | _` (`P (Just 1) (Just 2)`
-reaches the `_`). Compiler: accepts; it counts a constructor covered only by an all-catch-all
-branch. -/
+reaches the `_`). Compiler: accepts. -/
 def pairCtorGap : Program := ⟨[maybeD, .typeD "P" [] [("P", [maybeOf .int, maybeOf .int])],
   matchFn (.adt "P" []) [(.ctor "P" [pNothing, .wild], .int 1),
     (.ctor "P" [.wild, pNothing], .int 2), (.wild, .int 3)]]⟩
 
-#guard rejectKey pairCtorGap == "unreachable"
+#guard accepts pairCtorGap
 
 /-! ### Constructors (spec §5.3, §7 rule 7) -/
 
