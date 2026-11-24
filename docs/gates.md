@@ -192,8 +192,9 @@ the check command; it exists for `just test-pre-push`.
 
 Claude Code worktrees pin `core.hooksPath` to the main checkout's `.githooks`, so each hook first
 hands off (`exec`) to the worktree's own copy when it differs. A hook edit on a branch therefore
-runs before merge. The hand-off itself only runs once master, in the main checkout, has it. Tested
-by `just test-hook-handoff`.
+runs before merge. The hand-off itself runs only once the branch the main checkout has checked out
+has it. Each worktree's hooks are as strict as its own branch's copy; CI's
+`verify-bootstrap-fixed-point` is the backstop. Tested by `just test-hook-handoff`.
 
 `just pr-rebase` does this in one command (`scripts/pr_rebase.sh`; tested by `just test-pr-rebase`).
 It rebases onto `origin/master`, reseeds each replayed commit that touches `stdlib/compiler/` or
