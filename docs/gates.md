@@ -251,6 +251,14 @@ here — spent its baseline on its own first change and never reviewed it. And a
 again re-anchors too, or the files you just committed reappear as phantom `X` deletions in the next
 report.
 
+## Code-review redirect — `scripts/code_review_redirect.sh`
+
+Wired as a `UserPromptExpansion` hook (matcher `code-review`) in `.claude/settings.json`. A typed
+`/code-review`, with any args, is blocked with a message to run `/pr-tracker:sprout-review <args>`
+instead, since a plain `/code-review` leaves no run in the review ledger that `/prs` reads. The
+wrapper invokes `code-review` through the Skill tool, which does not fire this event. Empty or
+unparsable input passes. Covered by `just test-shell-hooks`.
+
 ## Both hooks read one worktree — the one named by `cwd`
 
 Until 2026-09-07 neither did. Each resolved a single root from `CLAUDE_PROJECT_DIR` (review gate) or
