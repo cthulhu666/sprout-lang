@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash scripts/guidelines_reminder.sh"
+            "command": "bash \"$(git rev-parse --show-toplevel)\"/scripts/guidelines_reminder.sh"
           }
         ]
       },
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash scripts/seed_gate.sh"
+            "command": "bash \"$(git rev-parse --show-toplevel)\"/scripts/seed_gate.sh"
           }
         ]
       }
@@ -25,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 scripts/review_gate.py"
+            "command": "python3 \"$(git rev-parse --show-toplevel)\"/scripts/review_gate.py"
           }
         ]
       }
