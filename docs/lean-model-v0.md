@@ -374,6 +374,9 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
      branch the unreachable rule flags is useless. Maranget's proof assumes no type is empty
      [11, 12]; Sprout accepts `type T = | C(T)`, which has no values. The direction T4 needs, an
      accepted match leaves no value unmatched, does not use that assumption; its converse does.
+     The oracle then referees unreachable disagreements with the full check: the `unreachable-*`
+     allowlist shapes match any such disagreement, so they would hide the compiler flagging a
+     reachable arm; an entry is allowed only when the full check finds the flagged arm useless.
    - **2c: T2 over ADTs and match.** Judgment rules for constructors, patterns and `match`.
    - **2d: T1.** A small-step semantics for Core, with progress and preservation. The checker's
      per-column rule lets a run get stuck on a match; the full check of 2b rules it out. CakeML's
