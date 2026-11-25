@@ -1095,6 +1095,17 @@ name its constructor after one. Prelude types are outside Core. -/
 def builtinTypeNames : List String :=
   ["Int", "Double", "Bool", "String", "Char", "Unit", "Bytes", "Vector", "Map", "Ref", "Builder"]
 
+/-- A written `n ts`: `n` is a declared type and `ts` gives each of its parameters. Core has no
+aliases, classes, externs or higher-kinded parameters, so a kind here is a parameter count. -/
+def adtArity (types : List (String × Nat)) (n : String) (ts : List Ty) : Except CErr Unit :=
+  match types.lookup n with
+  -- spec §5.6: "Referencing an undeclared uppercase type name is a compile error"; in a
+  -- signature the bundler refuses it, though §5.6 calls that position unvalidated
+  | none => throw (.reject "unknown-type" s!"unknown type {n}")
+  | some k =>
+    -- spec §8.5: every written type has kind `Type`
+    if ts.length != k then throw (.reject "type-arity" s!"{n} takes {k} arguments") else pure ()
+
 mutual
 /-- A constructor field's written type, its parameters read as `.gen i`. `types` holds every type
 the program declares with its parameter count, so references may go forward and be mutual. -/
@@ -1105,12 +1116,8 @@ def fieldTy (types : List (String × Nat)) (params : List String) : Ty → Excep
     -- spec §5.6: a type variable must be bound by the declaration's parameter list
     | none => throw (.reject "unknown-type" s!"type variable {v} is not a parameter")
   | .adt n ts => do
-    match types.lookup n with
-    -- spec §5.6: "Referencing an undeclared uppercase type name is a compile error"
-    | none => throw (.reject "unknown-type" s!"unknown type {n}")
-    | some k =>
-      if ts.length != k then throw (.reject "type-arity" s!"{n} takes {k} arguments") else
-      return .adt n (← fieldTys types params ts)
+    adtArity types n ts
+    return .adt n (← fieldTys types params ts)
   | .tup ts => return .tup (← fieldTys types params ts)
   | .arr ps r e => do
     -- spec §7 rule 9: no spelling puts an effect on an arrow whose written result is an arrow
@@ -1125,6 +1132,67 @@ def fieldTys (types : List (String × Nat)) (params : List String) :
   | [] => pure []
   | t :: ts => return (← fieldTy types params t) :: (← fieldTys types params ts)
 end
+
+/-! Every type a declaration writes outside a field: a `fn`'s parameters and result, a top-level
+`let` annotation and a lambda parameter annotation. `main`'s result is `Unit` or `Int`
+(`main-sig`). -/
+
+mutual
+/-- spec §8.5: "Every type the program writes is judged" -/
+def kindTy (types : List (String × Nat)) : Ty → Except CErr Unit
+  | .adt n ts => do adtArity types n ts; kindTys types ts
+  | .tup ts => kindTys types ts
+  | .arr ps r _ => do kindTys types ps; kindTy types r
+  | _ => pure ()
+
+def kindTys (types : List (String × Nat)) : List Ty → Except CErr Unit
+  | [] => pure ()
+  | t :: ts => do kindTy types t; kindTys types ts
+end
+
+def kindAnn (types : List (String × Nat)) : Option Ty → Except CErr Unit
+  | none => pure ()
+  | some t => kindTy types t
+
+mutual
+def kindExpr (types : List (String × Nat)) : Expr → Except CErr Unit
+  | .lam _ ann b => do kindAnn types ann; kindExpr types b
+  | .app f as => do kindExpr types f; kindExprs types as
+  | .letIn _ r b => do kindExpr types r; kindExpr types b
+  | .ite c t e => do kindExpr types c; kindExpr types t; kindExpr types e
+  | .tup es => kindExprs types es
+  | .notE e => kindExpr types e
+  | .doB steps f => do kindSteps types steps; kindExpr types f
+  | .matchE s arms => do kindExpr types s; kindArms types arms
+  | _ => pure ()
+
+def kindExprs (types : List (String × Nat)) : List Expr → Except CErr Unit
+  | [] => pure ()
+  | e :: es => do kindExpr types e; kindExprs types es
+
+def kindSteps (types : List (String × Nat)) : List Step → Except CErr Unit
+  | [] => pure ()
+  | .letS _ r :: rest => do kindExpr types r; kindSteps types rest
+  | .exprS e :: rest => do kindExpr types e; kindSteps types rest
+
+def kindArms (types : List (String × Nat)) : List (Pat × Expr) → Except CErr Unit
+  | [] => pure ()
+  | (_, e) :: arms => do kindExpr types e; kindArms types arms
+end
+
+def kindParams (types : List (String × Nat)) : List (String × Option Ty) → Except CErr Unit
+  | [] => pure ()
+  | (_, a) :: ps => do kindAnn types a; kindParams types ps
+
+def kindDecl (types : List (String × Nat)) : Decl → Except CErr Unit
+  | .fn _ ps sg b => do kindParams types ps; kindAnn types (sg.map (·.1)); kindExpr types b
+  | .letD _ a i => do kindAnn types a; kindExpr types i
+  | .mainFn _ b => kindExpr types b
+  | .typeD .. => pure ()
+
+def kindDecls (types : List (String × Nat)) : List Decl → Except CErr Unit
+  | [] => pure ()
+  | d :: ds => do kindDecl types d; kindDecls types ds
 
 /-- The type declarations, in source order. -/
 def Program.typeDecls (p : Program) : List (String × List String × List (String × List Ty)) :=
@@ -1163,6 +1231,7 @@ def checkTypes (p : Program) : Except CErr Table := do
       if fs.length > 255 then throw (.reject "ill-formed" s!"{c} has more than 255 fields")
       let fs ← fieldTys types ps fs
       ctors := ctors ++ [{ name := c, ty := n, nparams := ps.length, fields := fs }]
+  kindDecls types p.decls
   let tinfo := decls.map fun (n, ps, cs) => TypeInfo.mk n ps.length (cs.map (·.1))
   return { types := tinfo, ctors := ctors }
 

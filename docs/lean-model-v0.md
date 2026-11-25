@@ -365,7 +365,9 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
      Landed. Half the programs declare 1-3 types (recursive, mutual, now and then uninhabited);
      values come from constructor calls, nullary constructors and bare constructors in slots; a
      `match` on any non-arrow type takes full, partial-plus-catch-all, split and diagonal pattern
-     sets. Mutations: remove, move earlier or repeat an arm, a pattern or call of the wrong arity,
+     sets. Every written type, in a field, a signature or an annotation, names a declared type
+     applied to its parameter count (spec §8.5's kind rules; Core has no higher kinds).
+     Mutations: remove, move earlier or repeat an arm, a pattern or call of the wrong arity,
      an ill-formed field. About 54% of programs are accepted. Findings and fallbacks: §6.
    - **2b: T4.** Typed values. A full usefulness check (Maranget's `U_rec` [11], no or-patterns):
      if it accepts, every value of the column types matches a row. The per-column rule accepts

@@ -386,6 +386,51 @@ def fieldArity : Program := ⟨[maybeD, .typeD "T" [] [("C", [.adt "Maybe" [.int
 -- compiler: rejects ("the type `Maybe Int` has kind `Type` and takes no argument")
 #guard rejectKey fieldArity == "type-arity"
 
+/-! Written types outside a field are kind-checked too (spec §8.5): a signature, a top-level
+`let` annotation and a lambda parameter annotation. Compiler verdicts are on the printed program. -/
+
+/-- `fn f(x: t) -> Int = 1` after `type Maybe a`. -/
+def sigWith (t : Ty) : Program :=
+  ⟨[maybeD, .fn "f" [("x", some t)] (some (.int, .pure)) (.int 1)]⟩
+
+-- compiler: rejects ("in the signature of `f` the type `Maybe Int` … takes no argument")
+#guard rejectKey (sigWith (.adt "Maybe" [.int, .int])) == "type-arity"
+-- compiler: rejects ("the type `Maybe` has kind `Type -> Type`")
+#guard rejectKey (sigWith (.adt "Maybe" [])) == "type-arity"
+-- compiler: rejects, inside a tuple and an arrow
+#guard rejectKey (sigWith (.tup [.int, .adt "Maybe" [.int, .int]])) == "type-arity"
+#guard rejectKey (sigWith (.arr [.int] (.adt "Maybe" []) .pure)) == "type-arity"
+-- compiler: rejects ("the type `OZ` has kind `Type` and takes no argument")
+#guard rejectKey ⟨[ozD, .fn "f" [("x", some (.adt "OZ" [.int]))] (some (.int, .pure)) (.int 1)]⟩
+  == "type-arity"
+-- compiler: accepts
+#guard accepts (sigWith (maybeOf .int))
+
+/-- `fn f(x: Int) -> t = Nothing`. -/
+def retWith (t : Ty) : Program :=
+  ⟨[maybeD, .fn "f" [("x", some .int)] (some (t, .pure)) (.ctor "Nothing")]⟩
+
+-- compiler: rejects ("in the signature of `f` …"); accepts `Maybe Int`
+#guard rejectKey (retWith (.adt "Maybe" [.int, .int])) == "type-arity"
+#guard accepts (retWith (maybeOf .int))
+
+/-- `let l: t = Nothing`. -/
+def letWith (t : Ty) : Program := ⟨[maybeD, .letD "l" (some t) (.ctor "Nothing")]⟩
+
+-- compiler: rejects both ("in the annotation of `l` …"); accepts `Maybe Int`
+#guard rejectKey (letWith (.adt "Maybe" [.int, .int])) == "type-arity"
+#guard rejectKey (letWith (.adt "Maybe" [])) == "type-arity"
+#guard accepts (letWith (maybeOf .int))
+
+/-- `fn f() -> Int = (\(x: t) -> 1)(Nothing)`. -/
+def lamWith (t : Ty) : Program := ⟨[maybeD, .fn "f" [] (some (.int, .pure))
+  (.app (.lam "x" (some t) (.int 1)) [.ctor "Nothing"])]⟩
+
+-- compiler: rejects both ("in a lambda parameter annotation …"); accepts `Maybe Int`
+#guard rejectKey (lamWith (.adt "Maybe" [.int, .int])) == "type-arity"
+#guard rejectKey (lamWith (.adt "Maybe" [])) == "type-arity"
+#guard accepts (lamWith (maybeOf .int))
+
 /-- Forward and mutual references: `type A = | A0 | A1 B`, `type B = | B0 A`. -/
 def mutualTypes : Program := ⟨[.typeD "A" [] [("A0", []), ("A1", [.adt "B" []])],
   .typeD "B" [] [("B0", [.adt "A" []])]]⟩
@@ -424,7 +469,16 @@ def all : List (String × Program) := [
   ("patMismatch", patMismatch), ("armMismatch", armMismatch), ("patScope", patScope),
   ("armIO", armIO), ("inferredScrut", inferredScrut), ("listLen", listLen), ("dupCtor", dupCtor),
   ("fnNamedCtor", fnNamedCtor), ("unknownField", unknownField), ("freeVarField", freeVarField),
-  ("fieldArity", fieldArity), ("mutualTypes", mutualTypes), ("ctorIsType", ctorIsType),
+  ("fieldArity", fieldArity), ("sigMany", sigWith (.adt "Maybe" [.int, .int])),
+  ("sigFew", sigWith (.adt "Maybe" [])), ("sigOk", sigWith (maybeOf .int)),
+  ("sigTup", sigWith (.tup [.int, .adt "Maybe" [.int, .int]])),
+  ("sigArr", sigWith (.arr [.int] (.adt "Maybe" []) .pure)),
+  ("sigZero", ⟨[ozD, .fn "f" [("x", some (.adt "OZ" [.int]))] (some (.int, .pure)) (.int 1)]⟩),
+  ("retMany", retWith (.adt "Maybe" [.int, .int])), ("retOk", retWith (maybeOf .int)),
+  ("letMany", letWith (.adt "Maybe" [.int, .int])), ("letFew", letWith (.adt "Maybe" [])),
+  ("letOk", letWith (maybeOf .int)), ("lamMany", lamWith (.adt "Maybe" [.int, .int])),
+  ("lamFew", lamWith (.adt "Maybe" [])), ("lamOk", lamWith (maybeOf .int)),
+  ("mutualTypes", mutualTypes), ("ctorIsType", ctorIsType),
   ("ctorOwnName", ctorOwnName)]
 
 end SproutCore.TestsAdt
