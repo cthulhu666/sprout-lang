@@ -102,8 +102,40 @@ fn renamed_local_shadow(a: Vec3) -> Double =
   in let q = (let map = 2.0 in Quat(w = map, v = a))
      in q.w + map
 
+# Nested inlining is bounded per declaration; the result is still exact: 3^6 reads of 1.5 * 2.0.
+type Pair = (x: Double, y: Double)
+
+fn pair(a: Double, b: Double) -> Pair = Pair(x = a, y = b)
+
+fn h0(v: Pair) -> Double = v.x * v.y
+fn h1(v: Pair) -> Double = h0(v) + h0(v) + h0(v)
+fn h2(v: Pair) -> Double = h1(v) + h1(v) + h1(v)
+fn h3(v: Pair) -> Double = h2(v) + h2(v) + h2(v)
+fn h4(v: Pair) -> Double = h3(v) + h3(v) + h3(v)
+fn h5(v: Pair) -> Double = h4(v) + h4(v) + h4(v)
+fn h6(v: Pair) -> Double = h5(v) + h5(v) + h5(v)
+
+fn blow(a: Double) -> Double = h6(pair(a, 2.0))
+
+# `t` is read by `length` before a later do step rebinds it; `n` is the length of (2, 4, 6).
+fn waste(a: Vec3, b: Vec3) -> Double !{IO} =
+  let t = vec3.add(a, b)
+  in do
+       let n = vec3.length(t)
+       let t = 3.0
+       _ <- print(to_string(t))
+       n
+
+# A `!{}` builder is pure.
+fn pure_b(x: Double) -> Vec3 !{} = Vec3(x = x, y = x, z = x)
+
+fn empty_effect(a: Double) -> Double =
+  let t = pure_b(a)
+  in t.x + t.y
+
 fn main() -> Unit !{IO} =
   do
+    w <- waste(vec3.new(1.0, 2.0, 3.0), vec3.new(1.0, 2.0, 3.0))
     let a = Quat(w = 1.0, v = vec3.new(2.0, 3.0, 4.0))
     let b = Quat(w = 0.5, v = vec3.new(1.0, 0.0, -1.0))
     let c = Quat(w = -0.25, v = vec3.new(0.5, -2.0, 3.0))
@@ -129,5 +161,8 @@ fn main() -> Unit !{IO} =
       check_eq("unused field-only parameter", unused_param(p, r), 3.0),
       check_eq("bare and field use", use_bare_and_field(p, r), 92.0),
       check_eq("scale twice", scaled_x(3.0, p), 9.0),
-      check_eq("renamed local does not float", renamed_local_shadow(p), 3.0)
+      check_eq("renamed local does not float", renamed_local_shadow(p), 3.0),
+      check_eq("nested inlining stays exact", blow(1.5), 2187.0),
+      check_eq("do step rebinds after a read", w, vec3.length(vec3.new(2.0, 4.0, 6.0))),
+      check_eq("empty effect row builder", empty_effect(2.5), 5.0)
     ])

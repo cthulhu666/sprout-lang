@@ -299,6 +299,35 @@ else
   echo "  FAIL: SPROUT_OPT_OFF=rec_inline did not disable the inliner"; fail=1
 fi
 
+# An empty effect row is pure: a `!{}` builder inlines.
+body="$(fn_body 'main\.pos_empty_effect' <<<"$inl_ir")"
+if [ -n "$body" ] && [ "$(count_alloc <<<"$body")" -eq 0 ] && ! has_call main.pure_b <<<"$body"; then
+  echo "  ok: a !{} builder inlines, no allocation"
+else
+  echo "  FAIL: a !{} builder was not inlined (or has no body)"; fail=1
+fi
+
+# Growth is bounded per declaration (docs/record-sra-v0.md §4.5): `run` calls an h6 that calls h5
+# three times, down to h0, which would be 729 copies of h0's multiply without the budget.
+blow_ir="$(emit "$FIX/fixture_rec_inline_blow.spr")"
+body="$(fn_body 'main\.run' <<<"$blow_ir")"
+muls="$(grep -c 'fmul' <<<"$body")"
+if [ -n "$body" ] && [ "$muls" -lt 100 ]; then
+  echo "  ok: run stays small under nested inlining ($muls fmul)"
+else
+  echo "  FAIL: run grew to $muls fmul under nested inlining (or has no body)"; fail=1
+fi
+
+# A do step that rebinds `t` hides it only from the steps after it: `length(t)` before the rebind
+# still sees the split `t`.
+do_ir="$(emit "$FIX/fixture_rec_inline_do.spr")"
+body="$(fn_body 'main\.waste' <<<"$do_ir")"
+if [ -n "$body" ] && [ "$(count_alloc 3 <<<"$body")" -eq 0 ] && ! has_call stdlib.linalg.vec3.length <<<"$body"; then
+  echo "  ok: a do step's rebinder does not hide the split from earlier steps"
+else
+  echo "  FAIL: waste still builds its Vec3 or calls length (or has no body)"; fail=1
+fi
+
 # Argument order and traps survive inlining.
 check_trap "$FIX/fixture_rec_inline_order.spr" recinorder \
   'runtime error: arg a' 'inlined call with trapping arguments'

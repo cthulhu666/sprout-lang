@@ -664,7 +664,7 @@ export fn new_prog_env(decls: List typed_ast.TypedDecl, ctors: Dict sprout_ir.Ct
             fn_arities = build_fn_arities(decls, adt_index),
             lambda_ctr_ref = lambda_ctr_ref, lifted_idx_ref = lifted_idx_ref,
             adt_index = adt_index, argw = build_argw_index(decls, ctors),
-            groups = build_recursive_groups(decls), eta_wrappers_ref = eta_wrappers_ref)
+            groups = scc.recursive_groups(decls), eta_wrappers_ref = eta_wrappers_ref)
 
 # The same tables with fresh refs, for a pass that re-runs translation without
 # disturbing another pass's lambda names, indices and eta wrappers (a shared memo
@@ -3073,27 +3073,6 @@ fn add_argw_entry(d: typed_ast.TypedDecl, ctors: Dict sprout_ir.CtorInfo, acc: D
   let typed_ast.TFnDecl name params _ _ _ body = d else acc
       Just k = argw_param_index(params, body, ctors) else acc
   in dict_set_absent(name, k, acc)
-
-# fn name -> its recursive group: the strongly connected component of the typed-AST call
-# graph, an edge for a mention in any position. Tail-only edges would miss `1 + f(..)`.
-fn build_recursive_groups(decls: List typed_ast.TypedDecl) -> Dict Set =
-  scc.sccs_in_dependency_order(order, list_fold(\ (acc, d) -> add_call_edges(d, fnset, acc), dict_empty(), decls))
-  |> list_fold(\ (acc, members) -> index_group(members, set_from_list(members), acc), dict_empty())
-where
-  order = pb_fn_order(decls)
-  fnset = set_from_list(order)
-
-fn add_call_edges(d: typed_ast.TypedDecl, fnset: Set, acc: Dict Set) -> Dict Set =
-  let typed_ast.TFnDecl name _ _ _ _ body = d else acc
-  in dict_set_absent(name, mentioned_fns(body, fnset, set_empty()), acc)
-
-fn mentioned_fns(e: typed_ast.TypedExpr, fnset: Set, acc: Set) -> Set =
-  match e with
-  | typed_ast.TVar name _ _ -> if set_member(name, fnset) then set_insert(name, acc) else acc
-  | _ -> list_fold(\ (a, c) -> mentioned_fns(c, fnset, a), acc, typed_ast.children(e))
-
-fn index_group(members: List String, group: Set, acc: Dict Set) -> Dict Set =
-  list_fold(\ (a, m) -> dict_set(m, group, a), acc, members)
 
 fn group_of(name: String, penv: ProgEnv) -> Set =
   maybe_with_default(set_empty(), dict_get(name, penv.groups))
@@ -5735,14 +5714,6 @@ fn pb_fn_arity(decls: List typed_ast.TypedDecl) -> Dict Int =
       | typed_ast.TFnDecl name params _ _ _ _ -> dict_set(name, list_length(params), pb_fn_arity(rest))
       | _ -> pb_fn_arity(rest)
 
-fn pb_fn_order(decls: List typed_ast.TypedDecl) -> List String =
-  match decls with
-  | Nil -> Nil
-  | Cons d rest ->
-      match d with
-      | typed_ast.TFnDecl name _ _ _ _ _ -> Cons(name, pb_fn_order(rest))
-      | _ -> pb_fn_order(rest)
-
 fn pb_set_keep_in(s: Set, fnset: Set) -> Set =
   pb_keep_go(set_to_list(s), fnset, set_empty())
 
@@ -5837,7 +5808,7 @@ export fn pb_hetero_sccs(decls: List typed_ast.TypedDecl) -> List (List (String,
   |> pb_in_decl_order(pb_decl_index(order, 0, dict_empty()))
   |> list_map(pb_members_with_arity(_, arity))
 where
-  order = pb_fn_order(decls)
+  order = scc.fn_order(decls)
   arity = pb_fn_arity(decls)
   ret = pb_unifiable_ret_map(decls)
 

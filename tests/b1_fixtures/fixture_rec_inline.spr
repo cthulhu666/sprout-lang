@@ -65,6 +65,13 @@ fn neg_effect(a: Double) -> Double !{IO} =
   let t = eff_b(a)
   in t.x + t.y
 
+# An empty effect row is pure: the builder inlines.
+fn pure_b(x: Double) -> Vec3 !{} = Vec3(x = x, y = x, z = x)
+
+fn pos_empty_effect(a: Double) -> Double =
+  let t = pure_b(a)
+  in t.x + t.y
+
 fn big_b(a: Double) -> Vec3 =
   Vec3(x = (a * a) + (a * a) + (a * a) + (a * a) + (a * a) + (a * a) + (a * a) + (a * a)
            + (a * a) + (a * a) + (a * a) + (a * a) + (a * a) + (a * a) + (a * a) + (a * a),

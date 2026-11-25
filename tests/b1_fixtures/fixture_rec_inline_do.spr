@@ -1,0 +1,18 @@
+module main
+
+import stdlib.linalg.vec3
+import stdlib.linalg.vec3 (Vec3)
+
+# `t` is read by `length` (field-only) before a later do step rebinds `t`.
+fn waste(a: Vec3, b: Vec3) -> Double !{IO} =
+  let t = vec3.add(a, b)
+  in do
+       let n = vec3.length(t)
+       let t = 3.0
+       _ <- print(to_string(t))
+       n
+
+fn main() -> Unit !{IO} =
+  do
+    d <- waste(vec3.new(1.0, 2.0, 3.0), vec3.new(1.0, 2.0, 3.0))
+    print(to_string(d))

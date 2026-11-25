@@ -362,6 +362,7 @@ before the router; allocator attributes) are filed `P3` in BACKLOG §Sprout-IR /
   (`Ord`) and context-constrained instances (`Eq (Maybe a) where Eq a`) now devirtualize too, forwarding
   the resolved inner dicts. Only recursive inner-dict devirt (monomorphization) remains out of scope.
 - **SRA in `let..in`** (pure, non-do-block) and across a Maybe/Result do-bind (thread the SRA map
-  through the `translate_do_bind_*` helpers instead of resetting).
+  through the `translate_do_bind_*` helpers instead of resetting). Records are done by the typed-AST
+  `rec_inline` pass: see [record-sra-v0.md](record-sra-v0.md). This item is for tuples.
 - **Heap-field tuples** (`(String, String)`): needs per-slot rooting in `IRCallUnboxed{2,3}` + a
   multi-slot `op_heap_def`.

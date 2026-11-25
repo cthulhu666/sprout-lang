@@ -1,4 +1,5 @@
 module stdlib.compiler.scc
+import stdlib.compiler.typed_ast as typed_ast
 
 # Strongly connected components of a call graph — Kosaraju, iteratively.
 #
@@ -218,3 +219,41 @@ fn heap_pop(h: Heap) -> Maybe (String, Heap) =
   match h with
   | Leaf -> Nothing
   | Branch _ _ rep left right -> Just((rep, heap_merge(left, right)))
+
+# ---------------------------------------------------------------------------
+# The recursion graph of a typed program, shared by `ast_to_ir` (its recursive groups) and
+# `rec_inline` (which callees can inline).
+# ---------------------------------------------------------------------------
+
+# The top-level function names, in declaration order.
+export fn fn_order(decls: List typed_ast.TypedDecl) -> List String =
+  match decls with
+  | Nil -> Nil
+  | Cons d rest ->
+      match d with
+      | typed_ast.TFnDecl name _ _ _ _ _ -> Cons(name, fn_order(rest))
+      | _ -> fn_order(rest)
+
+# fn name -> the top-level functions its body mentions, in any position: a tail-only edge would
+# miss `1 + f(..)`. The first declaration of a name wins.
+export fn call_graph(decls: List typed_ast.TypedDecl) -> Dict Set =
+  let fnset = set_from_list(fn_order(decls))
+  in list_fold(\ (acc, d) -> add_call_edges(d, fnset, acc), dict_empty(), decls)
+
+fn add_call_edges(d: typed_ast.TypedDecl, fnset: Set, acc: Dict Set) -> Dict Set =
+  let typed_ast.TFnDecl name _ _ _ _ body = d else acc
+  in if dict_member(name, acc) then acc else dict_set(name, mentioned_fns(body, fnset, set_empty()), acc)
+
+# The members of `fnset` that `e` mentions, added to `acc`.
+export fn mentioned_fns(e: typed_ast.TypedExpr, fnset: Set, acc: Set) -> Set =
+  match e with
+  | typed_ast.TVar name _ _ -> if set_member(name, fnset) then set_insert(name, acc) else acc
+  | _ -> list_fold(\ (a, c) -> mentioned_fns(c, fnset, a), acc, typed_ast.children(e))
+
+# fn name -> its recursive group: the strongly connected component of the call graph.
+export fn recursive_groups(decls: List typed_ast.TypedDecl) -> Dict Set =
+  sccs_in_dependency_order(fn_order(decls), call_graph(decls))
+  |> list_fold(\ (acc, members) -> index_group(members, set_from_list(members), acc), dict_empty())
+
+fn index_group(members: List String, group: Set, acc: Dict Set) -> Dict Set =
+  list_fold(\ (a, m) -> dict_set(m, group, a), acc, members)

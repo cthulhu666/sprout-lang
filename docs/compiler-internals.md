@@ -286,16 +286,21 @@ A typed-AST pass in `ir_pipeline.compile_program_streaming`, after `dce.elim_unr
 before BCE. `let x = R(..) in b`, with `R` a non-linear record and every free `x` in `b` the base of
 a `.field` read, becomes one `let x$f$N$ri = e_f` per field in declaration order (the order a literal
 lowers in), and each `x.f` reads its let: no record is built. Any bare use keeps the let. The
-occurrence check stops below a pattern, lambda parameter or `do` step that rebinds `x`; `N` is a
+occurrence check (`splittable`, which allocates nothing; `subst` only rewrites) stops below a
+pattern, lambda parameter or `do` step that rebinds `x` (for the steps after it only); `N` is a
 program-wide counter and `$` is not an identifier character, so the new names are fresh.
 The inliner (stage 2) copies the body of a small pure top-level function (at most 64 nodes after
-its own calls inline, closed annotated types, no effect row or dictionary parameter, not in a
-recursive group, result a non-linear record or `Int`/`Double`/`Bool`/`Char`) when a record
+its own calls inline, closed annotated types, pure, no dictionary parameter, not in a
+recursive group and not calling itself, result a non-linear record or `Int`/`Double`/`Bool`/`Char`) when a record
 allocation goes away: a record builder read by a splitting let, or a call whose field-only
 parameter (read only by `.field` or passed to another field-only parameter) gets a builder call or
 a variable bound by a splitting let. Callees are prepared callee-first over the call graph and
 cached; a non-variable, non-literal argument is let-bound to `p$N$ri` in call order, every binder in
-the copy is renamed to a fresh `$` name, and the copy is walked again so its own calls inline. Leading
+the copy is renamed to a fresh `$` name, and the copy is walked again so its own calls inline. That
+re-walk would grow without bound (`h1 = h0 + h0 + h0`, down to `h6`, is 3^6 copies), so each
+declaration, instance method and callee preparation has an `inline_budget` of 256 nodes: an inline
+spends the callee's body size, a call the budget cannot cover stays a call, and its record stays
+boxed. The pass runs only on a bundled program (some top-level name is dotted). Leading
 pass-made lets (names ending `$ri`, never a bundler `$l_` local) float out of a split let's value.
 `SPROUT_OPT_OFF=rec_inline` disables both. IR shape
 and trap order are checked by `scripts/b1_gate.sh`; design: [record-sra-v0.md](record-sra-v0.md).
@@ -479,7 +484,7 @@ width-2 arms and `p_k` occurs in no arm, lowers to `IRCallUnboxed2` for `g` and 
   `argw_target` adds the shadow checks for `f` and `g` and the group rule. Translation ⊆
   collection, so a routed call names only emitted symbols.
 - **Recursive groups.** `ProgEnv.groups` is the SCC of the typed-AST call graph, an edge for a
-  mention in any position (`build_recursive_groups`); `TxEnv.group` is the calling fn's. A call
+  mention in any position (`scc.recursive_groups`, shared with `rec_inline`); `TxEnv.group` is the calling fn's. A call
   into the caller's own group is never routed, since `tco_rewrite` and mutual TCO find a loop by
   the callee's name. `@f_argw` and `@f_worker` carry `f`'s group. The result-worker tail chain
   (`translate_tail_unboxed`) follows the same rule: a worker never chains into its own group, so a

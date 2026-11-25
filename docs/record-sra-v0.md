@@ -70,13 +70,17 @@ Gated by `opt_config.Pass` `RecInline` (`rec_inline`, on by default), so
 ### 4.1 Eligible callee
 
 A top-level `TFnDecl f` is *eligible* when all hold:
-- its name is dotted (bundled). The bundler renames every local that could clash with a
-  top-level to `$l_<name>` (`docs/prelude-name-identity-v0.md` §5); on an undotted (unbundled)
-  program the pass does nothing.
+- the program is bundled. The bundler names every top-level declaration `module.name` (the
+  entry module `$entry.name`), so a program with such a name is bundled, and the pass does
+  nothing on one without. The callee's own name need not be dotted: a prelude callee inlines
+  too. The bundler renames every local that equals a top-level name to `$l_<name>`
+  (`docs/prelude-name-identity-v0.md` §5), so no local at the call site can capture a top-level
+  the copied body names;
 - every parameter and the return are annotated, and the annotations name closed types (no type
   variable); no parameter is a lowered dictionary (`__tc_`);
-- no effect row;
-- not in a recursive group (the graph `build_recursive_groups` builds);
+- pure: no effect row, or an empty one (`vec_wrappers.is_pure_decl`);
+- not in a recursive group (`scc.call_graph`, the graph `scc.recursive_groups` indexes) and not
+  mentioning itself;
 - its result type is a non-linear single-constructor record, or `Int`/`Double`/`Bool`/`Char`.
   Never an ADT or tuple: CPR routes those by the shape of the call, and an inlined call is no
   longer a call;
@@ -93,18 +97,25 @@ field-only.
 
 ### 4.2 Demand-driven trigger
 
-The walk carries a demand, `Fields` (the value is only read by field) or `Value`.
-- `let x = e in b`, where `e` is a record literal or a builder call: walk `b` assuming `x` is
-  flat if `x` is *splittable* in `b` (§4.4), and then walk `e` with `Fields`. Splittable is a
-  syntactic check on `b` that does not depend on what inlines: every occurrence of `x` is a
-  `TGetField` base or an argument at a field-only parameter of an eligible callee. Each such call
-  then has a flat argument (`x`), so it inlines by the next rule. This breaks the cycle "`t`
-  splits iff `scale(q.w, t)` inlines iff `t` is flat" with one walk.
-- `f(args)` under `Fields`, `f` a builder: inline.
+The walk carries a demand, `OnlyFields` (the value is only read by field) or `AsValue`, and a
+set of *flat* variables: those bound by a let that is about to split.
+- `let x = e in b`, where `e` is a record literal or a builder call and `x` is *splittable* in `b`:
+  `x` is flat. Splittable (`splittable`) is a syntactic check on `b` that allocates nothing and
+  does not depend on what inlines: every occurrence of `x` is a `TGetField` base or an argument
+  at a field-only parameter of an eligible callee that gets every parameter. Walk order: `e`
+  walks first, under `OnlyFields`; then `b`, with `x` flat; then the split (§4.4) runs on what the
+  walk produced. A call in `b` that takes the flat `x` at a field-only parameter inlines by the
+  next rule. This breaks the cycle "`t` splits iff `scale(q.w, t)` inlines iff `t` is flat"
+  with one walk. A let that is not expected to split walks `e` under `AsValue`, and `x` is not
+  flat in `b`.
+- `f(args)` under `OnlyFields`, `f` a builder: inline.
 - `f(args)`, `f` eligible, under either demand: inline if some field-only parameter `k` gets a
-  *flat argument*: a builder call, or a variable bound by a split let.
-- When `f` inlines, its field-only parameters' arguments are walked with `Fields`; all others
-  with `Value`.
+  *flat argument*: a builder call, or a flat variable.
+- Either way the inline needs the budget (§4.5).
+- When `f` inlines, each argument that is not a variable or literal is let-bound first (§4.3).
+  That let is an ordinary let: the walk decides its demand by the first rule, so a builder-call
+  argument at a field-only parameter is walked under `OnlyFields` and its let splits, and any
+  other argument is walked as a value.
 
 Nothing else inlines. `dot(a.v, b.v)` stays a call (its arguments are field loads, not flat).
 `add(a, b).x` stays a call (v0 does not fold a projection of a call).
@@ -138,19 +149,27 @@ rewrites each `TGetField x f` to `TVar x$f$N$ri` at the field's type. A lambda t
 captures the scalar; closure conversion handles it like any local. User lets split too
 (`q_rot`'s `t`).
 
-### 4.5 Order
+### 4.5 Order and budget
 
 Callee bodies are prepared callee-first (their own eligible calls processed) and cached. A callee
-whose result is a record is prepared with `Fields` demand, so a tail call to a builder inlines
-(`vec3.add`'s tail `new(..)` becomes its record literal). Each
-caller body is walked once: §4.2 decides, §4.3 inlines, §4.4 floats and splits on the way back up.
-Growth is linear in sites times `K`.
+whose result is a record is prepared with `OnlyFields` demand, so a tail call to a builder inlines
+(`vec3.add`'s tail `new(..)` becomes its record literal). Each caller body is walked once: §4.2
+decides, §4.3 inlines, §4.4 floats and splits on the way back up.
+
+The copy of an inlined body is walked again, so the callees it calls inline in turn, and a chain
+of callees that each call the next several times grows exponentially: with `h1 = h0 + h0 + h0`
+down to `h6`, one flat call to `h6` would become 3^6 copies of `h0`. Growth is therefore bounded
+by a budget per declaration (and per instance method, and per callee preparation) of
+`inline_budget = 256` nodes. An inline spends the node count of the callee's prepared body; a
+call the remaining budget cannot cover does not inline and stays a call. A let that expected the
+call to inline then keeps a bare use, so its record stays boxed: always correct, and the budget
+only costs the allocation it would have removed. `q_mul`, `q_rot` and `distance` fit.
 
 ### 4.6 What it does to the targets
 
 `q_rot`: `t` is used as `scale(q.w, t)` and `cross(q.v, t)`, both field-only, so `t` is
-splittable and `scale(2.0, cross(q.v, u))` is walked with `Fields`: `scale` inlines (builder),
-its `v` argument `cross(..)` inlines (builder under `Fields`). The outer `add` gets the flat
+splittable and `scale(2.0, cross(q.v, u))` is walked with `OnlyFields`: `scale` inlines (builder),
+its `v` argument `cross(..)` inlines (builder under `OnlyFields`). The outer `add` gets the flat
 `add(u, scale(q.w, t))` and `cross(q.v, t)`; both inline, and so does the outer `add`. Its tail
 `Vec3(..)` is the one result. 6 → 1.
 
@@ -204,7 +223,11 @@ Behaviour, results identical with `SPROUT_OPT_OFF=rec_inline`:
 - shadowing: by a match arm, by a lambda parameter, **by a same-name let**
   (`let t = V(..) in let t = V(x = t.y, ..) in t.x`);
 - a literal written out of declaration order whose fields trap differently;
-- an effectful argument's order; a trap inside an inlined body reports the callee's line.
+- an effectful argument's order; a trap inside an inlined body reports the callee's line;
+- nested callees past the budget (`h6` calling `h5` three times, down to `h0`): the result is
+  exact and the caller's IR stays small (`b1-gate`, `fixture_rec_inline_blow.spr`);
+- a `do` step that rebinds `t` hides it from the steps after it only (`fixture_rec_inline_do.spr`);
+- a builder with an empty effect row `!{}` inlines.
 
 Negatives (still a call): recursive, unannotated generic, constrained (dict param), effectful,
 over `K`, `if`-tailed builder, linear record, partial application, `do`-let. `specialise` runs
