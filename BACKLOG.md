@@ -167,10 +167,6 @@ Legend:
   `type T = | C a` is accepted, and `a` then acts as an opaque type no value has. Spec §5.6 allows
   only "a lowercase type variable ... bound by the enclosing type declaration's parameter list".
   Found by the Lean oracle (`free-tyvar`); add a `type_error/` fixture with the fix.
-- [ ] `P3` **The spec does not say that a field applies each type to its parameter count.**
-  `type T = | C (P Int Int)` for a one-parameter `P` is accepted, as is a signature `x: P Int Int`
-  or `x: P`; a field so written makes `C` unusable (`Type mismatch: P Int vs P`). §5.6 checks a
-  field's type names only. Found by the Lean oracle (`field-type-arity`); the model rejects it.
 - [ ] `P3` **The spec does not say whether a pattern may bind one name twice.** `| (a, a) -> a` is
   accepted, and the body sees one of the two. §5.5 and §7 rule 6 are silent. Decide (reject, or
   say which binding wins). The Lean model accepts, as the compiler does.

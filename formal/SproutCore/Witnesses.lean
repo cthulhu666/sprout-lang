@@ -76,11 +76,6 @@ def witnessAfterCtors : Program := ⟨[.typeD "U" [] [("C", [.tup [.int, .int]])
 /-- `type T = | C a`: a field names a type variable the declaration does not bind. -/
 def witnessFreeTyVar : Program := ⟨[.typeD "T" [] [("C", [.named "a"])]]⟩
 
-/-- `type P a = | P0 | P1 a`, `type T = | C (P Int Int)`: a field applies a type to too many
-arguments. -/
-def witnessFieldArity : Program := ⟨[.typeD "P" ["a"] [("P0", []), ("P1", [.named "a"])],
-  .typeD "T" [] [("C", [.adt "P" [.int, .int]])]]⟩
-
 /-- `fn f(c: Int, p: Int -> Int !{IO}) -> Int -> Int !{IO} = match c with | 0 -> \x -> x |
 1 -> \y -> y | _ -> p`: a match joining two pure lambdas, then an `!{IO}` function. -/
 def witnessJoinOrderMatch : Program :=
@@ -102,7 +97,6 @@ def witnesses : List (String × Program) :=
    ("unreachable-tuple", witnessUnreachableTuple),
    ("unreachable-ctor-repeat", witnessCtorRepeat),
    ("unreachable-after-ctors", witnessAfterCtors),
-   ("free-tyvar", witnessFreeTyVar),
-   ("field-type-arity", witnessFieldArity)]
+   ("free-tyvar", witnessFreeTyVar)]
 
 end SproutCore

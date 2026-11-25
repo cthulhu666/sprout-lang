@@ -216,12 +216,12 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
   Stage 2a's entries: `unreachable-bool`, `-unit` and `-tuple` (spec gap: the compiler also counts
   `Bool`, `Unit` and tuples for §5.5's "after all constructors" case), `unreachable-ctor-repeat`
   and `-after-ctors` (compiler bug: a constructor covered without catch-alls, as by `C ()`, does
-  not count), `free-tyvar` (compiler bug: `type T = | C a`), `field-type-arity` (spec gap:
-  `C (P Int Int)`) and `join-order-match` (stage 1's `join-order` bug through `match` arms). A
-  pattern binding a name twice and a type applied to the wrong number of arguments in a signature
-  are spec gaps both sides accept; an unknown type name in a signature is refused by the bundler,
-  though §5.6 calls that position unvalidated, so the generator never writes one. Each is a
-  `BACKLOG.md` entry.
+  not count), `free-tyvar` (compiler bug: `type T = | C a`) and `join-order-match` (stage 1's
+  `join-order` bug through `match` arms). A pattern binding a name twice is a spec gap both sides
+  accept; an unknown type name in a signature is refused by the bundler, though §5.6 calls that
+  position unvalidated, so the generator never writes one. Each is a `BACKLOG.md` entry. Written
+  types are kind-checked on both sides (spec §8.5): a field, signature, `let` or lambda annotation
+  that applies a type to the wrong number of arguments is rejected.
 
 ## 7. Drift gate
 

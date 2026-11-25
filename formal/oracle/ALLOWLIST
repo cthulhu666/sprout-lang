@@ -49,10 +49,6 @@ unreachable-after-ctors | model-rejects/compiler-accepts: unreachable | compiler
 # Compiler bug: spec §5.6 allows a lowercase type variable in a field only when the declaration's
 # parameter list binds it; the compiler accepts `type T = | C a` and reads `a` as an opaque type.
 free-tyvar | model-rejects/compiler-accepts: unknown-type | compiler accepts a field type variable the declaration does not bind (spec §5.6)
-# Spec gap: §5.6 checks the type names in a field, not how many arguments each is applied to. The
-# compiler accepts `type T = | C (P Int Int)` for a one-parameter `P`, and no value of `C` can then
-# be built or matched. The model rejects it: such a field has no type.
-field-type-arity | model-rejects/compiler-accepts: type-arity | the spec does not say that a field's type must apply each type to its parameter count
 # Compiler bug, the `join-order` one through `match`: arms join as peers (spec §7 rule 5, rule 8),
 # but `| 0 -> \x -> x | 1 -> \y -> y | _ -> p` with `p: Int -> Int !{IO}` against an `!{IO}`
 # result is rejected, while the same arms with `p` first are accepted.
