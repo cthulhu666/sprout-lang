@@ -1,4 +1,5 @@
-# `f f` applies a variable to itself, so its kind would have to contain itself.
+# `f f` in a parameter applies a variable to itself, so its kind would have to contain itself.
+# The signature is inconsistent on its own, so it is blamed and not the `where`.
 module main
 
 class Pretty t

@@ -1,0 +1,8 @@
+# An alias used in another alias's body is checked at the kind it was given.
+module main
+
+type alias Const a = Int
+type alias Bad = Const Maybe
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

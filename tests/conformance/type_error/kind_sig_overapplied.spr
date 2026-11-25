@@ -1,0 +1,7 @@
+# A signature type must be well-kinded. `Int` takes no argument.
+module main
+
+fn f(x: Int Bool) -> Int = 1
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

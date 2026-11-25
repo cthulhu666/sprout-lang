@@ -1,0 +1,13 @@
+# An alias and a type that need each other are rejected in either declaration order, but the
+# member blamed differs. The type is declared first here and its field is blamed;
+# `kind_alias_group_order` declares the alias first and the alias is blamed.
+module main
+
+type Box a = Box(a)
+
+type T = T(A Int)
+#~^ ERROR
+
+type alias A = Box T
+
+fn main() -> Unit !{IO} = print("unreachable")

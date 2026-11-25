@@ -1,0 +1,10 @@
+# An alias parameter its body never mentions has kind `Type`, as a phantom type
+# parameter does. `Const Maybe` is checked against the alias, not its expansion `Int`.
+module main
+
+type alias Const a = Int
+
+fn f(x: Const Maybe) -> Int = 1
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

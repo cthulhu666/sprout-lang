@@ -1,0 +1,12 @@
+# An instance method signature that is inconsistent on its own is blamed, not the method's
+# `where`, whichever parameter comes first.
+module main
+
+class Pretty t
+  fn pretty(x: t) -> String
+
+instance Pretty Int
+#~^ ERROR
+  fn pretty(x: Int, y: u, z: u Int) -> String where Functor u = "int"
+
+fn main() -> Unit !{IO} = print("unreachable")

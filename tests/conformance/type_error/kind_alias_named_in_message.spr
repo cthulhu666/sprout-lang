@@ -1,0 +1,10 @@
+# A zero-parameter alias that stands for a type constructor is applied to the wrong kind.
+# The message names `E`, the alias written, and not `Result String`.
+module main
+
+type alias E = Result String
+
+fn f(x: E Maybe) -> Int = 1
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

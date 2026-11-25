@@ -1,0 +1,9 @@
+# A `where` constraint applies an alias to too few arguments.
+module main
+
+type alias Pair a b = (a, b)
+
+fn h(x: Int) -> Int where Eq (Pair Int) = x
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

@@ -59,10 +59,14 @@ would turn two instances into one. Guarded by
 (`bundler.sprout`), and this pass runs after bundling, so table keys and head references are qualified
 consistently.
 
-**An under-applied alias is left unexpanded** — there is nothing to substitute. The kind check
-gives it a fresh kind and does not judge it; the instance-method signature check rejects
-`type alias Half a = Tagged a` with `instance Boxed Half` (the method's type does not match
-the class's for that head).
+**An under-applied alias is left unexpanded** — there is nothing to substitute. The alias arity
+check rejects it where it is written: `type alias Half a = Tagged a` with `instance Boxed Half`
+fails with ``type alias `Half` takes 1 type argument, given 0`` (fixture
+`type_alias_arity_instance_head`).
+
+**A head is expanded before the kind check**, so a kind message about it names the expansion,
+not the alias. A signature is kind-checked as written, before expansion, and names the alias
+(`docs/kind-inference-v0.md` §4).
 
 ## 4. Consequences
 

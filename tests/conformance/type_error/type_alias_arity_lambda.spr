@@ -1,0 +1,9 @@
+# A lambda parameter annotation applies an alias to too few arguments.
+module main
+
+type alias Pair a b = (a, b)
+
+fn g() -> List Int = list_map(\ (p: Pair Int) -> 1, [])
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

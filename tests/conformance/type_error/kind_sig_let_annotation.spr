@@ -1,0 +1,7 @@
+# A top-level `let` annotation must be well-kinded.
+module main
+
+let n: Int Bool = 1
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

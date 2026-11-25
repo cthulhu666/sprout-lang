@@ -1,0 +1,1 @@
+in the signature of `f` the type `t` has kind `Type` and takes no argument, but it is applied to `Int`

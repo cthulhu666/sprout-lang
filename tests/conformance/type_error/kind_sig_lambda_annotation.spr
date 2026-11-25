@@ -1,0 +1,7 @@
+# A lambda parameter annotation is judged where the lambda is written.
+module main
+
+fn g() -> List Int = list_map(\ (x: Int Bool) -> 1, [])
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

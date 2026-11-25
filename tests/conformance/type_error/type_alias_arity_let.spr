@@ -1,0 +1,9 @@
+# A `let` annotation applies an alias to too few arguments.
+module main
+
+type alias Pair a b = (a, b)
+
+let origin: Pair Int = (0, 0)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

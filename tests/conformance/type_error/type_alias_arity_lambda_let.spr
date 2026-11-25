@@ -1,0 +1,9 @@
+# A lambda parameter annotation in a top-level `let` body applies an alias to too few arguments.
+module main
+
+type alias Pair a b = (a, b)
+
+let k = \ (p: Pair Int) -> 1
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")
