@@ -315,6 +315,13 @@ Legend:
   through `translate_do_bind_*` instead of resetting it); **heap-field tuples**
   (`IRCallUnboxed{2,3}` slots holding heap values must be rooted at the call site, and `op_heap_def`
   must report multiple slots).
+- [ ] `P2` **`sprout_field` is not declared read-only, so repeated field loads are not merged.**
+  `ir_lowering` declares it with no memory attribute, so LLVM keeps every `q.v` reload. After
+  `rec_inline`, the `q_mul`+`q_rot` bench runs 131–139 ms against 107–112 ms hand-expanded; with
+  the declaration edited to `memory(read) nounwind willreturn`, both ran 87.6 ms
+  (`docs/record-sra-v0.md` §8). Needs a check that no store path writes a field LLVM could miss.
+- [ ] `P3` **`rec_inline` gaps.** A `do`-block `let` (`TDoLetStep`) bound to a record literal does
+  not split, and a builder whose tail is an `if` does not inline (`docs/record-sra-v0.md` §2).
 - [ ] `P2` **A literal inside a `Maybe` pattern loses CPR, so every read allocates.**
   `ast_to_ir.is_simple_width2_arm` admits only a variable or `_` under the constructor, so
   `match mutvec_get(c, p) with | Just false -> …` builds a `Just` per call, while `| Just b -> …`
@@ -1709,9 +1716,11 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   uppercase in a parameter list needs no name resolution. Zero occurrences in `stdlib/`, `ide/`,
   `examples/` or `tests/` over every form and parameter position, so this breaks nothing here.
 
-- [ ] `P2` **Unbox small fixed-shape numeric records** (`Vec3 {x,y,z}` as 3 raw f64s, not a heap
-  pointer; `stdlib.linalg.vec3`'s `Vec3` is the first target) — the ergonomic-and-fast path for
-  individual small vectors, additive on top of the tested flat-buffer foundation.
+- [ ] `P2` **Unbox small records that cross a call.** `rec_inline` (`docs/record-sra-v0.md`)
+  removes a record built and read in one function, after inlining small builders. A record still
+  allocates when it crosses a call that does not inline (a callee over 64 nodes, recursive, or
+  effectful), is returned, or is stored. Field-wise worker copies were weighed and rejected there
+  (§3); revisit with a measured case.
 - [ ] `P2` **Native `Float` (f32) type + `Vector Float` unboxed path.** Doubles-everywhere is
   correct today; float32 earns its keep only when Sprout owns bulk GPU-bound buffers. Decide by
   measured buffer/upload cost.

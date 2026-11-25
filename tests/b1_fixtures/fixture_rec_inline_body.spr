@@ -1,0 +1,13 @@
+module main
+
+# A trap inside an inlined body still fires, with the runtime's text. `quot` and `mk` inline into
+# `run`, so the division happens in `run`'s own code. The b1-gate runs this.
+type P = (a: Int, b: Int)
+
+fn mk(a: Int, b: Int) -> P = P(a = a, b = b)
+
+fn quot(p: P) -> Int = p.a / p.b
+
+fn run(n: Int) -> Int = quot(mk(n, n - n))
+
+fn main() -> Unit !{IO} = print(int_to_string(run(7)))

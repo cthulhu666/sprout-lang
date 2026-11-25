@@ -109,7 +109,7 @@ LLVM argument for a dict slot, a type error for a comprehension or `do` binder.
 The invariant: after bundling no local equals a top-level a pass may name, or a `__` name. A
 pass that writes a name after bundling writes a top-level's name or a `__` name, or a local
 containing `$`, which no source identifier can (`rec_inline` binds split record fields as
-`x$f$N`).
+`x$f$N$ri`, inlined arguments and binders as `p$N$ri`).
 
 The rename is a pure function of the name, so nested shadowing keeps its structure and no map
 is needed. Binders: function and lambda parameters, instance-method parameters, extern

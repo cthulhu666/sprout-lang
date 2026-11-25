@@ -1,0 +1,14 @@
+module main
+
+import stdlib.linalg.vec3
+import stdlib.linalg.vec3 (Vec3)
+
+# Inlining keeps argument order: `scale(s, v)` evaluates `s` before `v`, so "arg a" is the trap
+# that fires, as it does when `scale` is called. The b1-gate runs this and expects "arg a".
+fn fail(msg: String) -> Double = panic(msg)
+
+fn pick(a: Vec3) -> Double =
+  let t = vec3.scale(fail("arg a"), vec3.scale(fail("arg b"), a))
+  in t.x
+
+fn main() -> Unit !{IO} = print(to_string(pick(vec3.new(1.0, 2.0, 3.0))))

@@ -1,0 +1,133 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.linalg.vec3
+import stdlib.linalg.vec3 (Vec3)
+import stdlib.math (sqrt)
+
+# Record builder inlining (docs/record-sra-v0.md stage 2): `vec3` builders inline into a caller
+# that reads their result by field. Results must equal the hand-expanded code, bit for bit.
+# Shape and trap-order checks: scripts/b1_gate.sh, on tests/b1_fixtures/fixture_rec_inline*.spr.
+
+type Quat = (w: Double, v: Vec3)
+
+fn q_mul(a: Quat, b: Quat) -> Quat =
+  Quat(w = (a.w * b.w) - vec3.dot(a.v, b.v),
+       v = vec3.add(vec3.add(vec3.scale(a.w, b.v), vec3.scale(b.w, a.v)), vec3.cross(a.v, b.v)))
+
+fn q_rot(q: Quat, u: Vec3) -> Vec3 =
+  let t = vec3.scale(2.0, vec3.cross(q.v, u))
+  in vec3.add(vec3.add(u, vec3.scale(q.w, t)), vec3.cross(q.v, t))
+
+# The same arithmetic with every intermediate written out, in the same operation order.
+fn q_mul_hand(a: Quat, b: Quat) -> Quat =
+  let dot = ((a.v.x * b.v.x) + (a.v.y * b.v.y)) + (a.v.z * b.v.z)
+      sx = (a.w * b.v.x) + (b.w * a.v.x)
+      sy = (a.w * b.v.y) + (b.w * a.v.y)
+      sz = (a.w * b.v.z) + (b.w * a.v.z)
+      cx = (a.v.y * b.v.z) - (a.v.z * b.v.y)
+      cy = (a.v.z * b.v.x) - (a.v.x * b.v.z)
+      cz = (a.v.x * b.v.y) - (a.v.y * b.v.x)
+  in Quat(w = (a.w * b.w) - dot, v = Vec3(x = sx + cx, y = sy + cy, z = sz + cz))
+
+fn q_rot_hand(q: Quat, u: Vec3) -> Vec3 =
+  let cx = (q.v.y * u.z) - (q.v.z * u.y)
+      cy = (q.v.z * u.x) - (q.v.x * u.z)
+      cz = (q.v.x * u.y) - (q.v.y * u.x)
+      tx = 2.0 * cx
+      ty = 2.0 * cy
+      tz = 2.0 * cz
+      dx = (q.v.y * tz) - (q.v.z * ty)
+      dy = (q.v.z * tx) - (q.v.x * tz)
+      dz = (q.v.x * ty) - (q.v.y * tx)
+  in Vec3(x = (u.x + (q.w * tx)) + dx, y = (u.y + (q.w * ty)) + dy, z = (u.z + (q.w * tz)) + dz)
+
+fn parts(v: Vec3) -> List Double = [v.x, v.y, v.z]
+
+fn quat_parts(q: Quat) -> List Double = [q.w, q.v.x, q.v.y, q.v.z]
+
+fn nested_distance(a: Vec3, b: Vec3, c: Vec3) -> Double = vec3.length(vec3.sub(vec3.add(a, b), c))
+
+fn nested_distance_hand(a: Vec3, b: Vec3, c: Vec3) -> Double =
+  let x = (a.x + b.x) - c.x
+      y = (a.y + b.y) - c.y
+      z = (a.z + b.z) - c.z
+  in sqrt(((x * x) + (y * y)) + (z * z))
+
+fn nested_ops(a: Vec3, b: Vec3) -> List Double =
+  parts(vec3.neg(vec3.add(vec3.scale(2.0, a), vec3.sub(b, a))))
+
+# A user let read by field and passed to an inlined builder.
+fn let_twice(a: Vec3, b: Vec3) -> Double =
+  let s = vec3.add(a, b)
+  in (s.x * s.x) + (s.y * s.x) + vec3.dot(s, s)
+
+# Read under a lambda, by field and by an inlined call.
+fn let_lambda(a: Vec3, b: Vec3) -> Double =
+  let s = vec3.scale(2.0, a)
+  in let f = \k -> (k * s.x) + vec3.dot(s, b)
+     in f(2.0) + f(3.0)
+
+# The inner `t` reads the outer one: scale(2.0, (2, 3, 4)) has y = 6.0.
+fn shadow_let(a: Vec3, b: Vec3) -> Double =
+  let t = vec3.add(a, b)
+  in let t = vec3.scale(t.x, t)
+     in t.y
+
+fn shadow_arm(m: Maybe Vec3, a: Vec3, b: Vec3) -> Double =
+  let t = vec3.add(a, b)
+  in match m with
+     | Just t -> t.x
+     | Nothing -> vec3.dot(t, t)
+
+fn shadow_lambda(a: Vec3, b: Vec3) -> Double =
+  let t = vec3.add(a, b)
+  in let get = \ (t: Vec3) -> vec3.dot(t, t)
+     in get(a) + t.z
+
+# A field-only parameter the callee never reads, and one read as a bare argument and by field.
+fn second(v: Vec3, k: Double) -> Double = k
+
+fn unused_param(a: Vec3, b: Vec3) -> Double = second(vec3.add(a, b), 3.0)
+
+fn bare_and_field(v: Vec3) -> Double = vec3.dot(v, v) + v.x
+
+fn use_bare_and_field(a: Vec3, b: Vec3) -> Double = bare_and_field(vec3.cross(a, b))
+
+# Argument evaluation order across a call that inlines: `s` is read before `v`'s fields.
+fn scaled_x(s: Double, a: Vec3) -> Double = vec3.scale(s, vec3.scale(s, a)).x
+
+# `map` is a prelude name, so the bundler renames both locals to `$l_map`. The inner one is not
+# the pass's, so it must not float over `q.w + map`, where it would capture the outer `map`.
+fn renamed_local_shadow(a: Vec3) -> Double =
+  let map = 1.0
+  in let q = (let map = 2.0 in Quat(w = map, v = a))
+     in q.w + map
+
+fn main() -> Unit !{IO} =
+  do
+    let a = Quat(w = 1.0, v = vec3.new(2.0, 3.0, 4.0))
+    let b = Quat(w = 0.5, v = vec3.new(1.0, 0.0, -1.0))
+    let c = Quat(w = -0.25, v = vec3.new(0.5, -2.0, 3.0))
+    let u = vec3.new(1.0, 0.0, -1.0)
+    let p = vec3.new(1.0, 2.0, 3.0)
+    let r = vec3.new(3.0, 2.0, 1.0)
+    let s = vec3.new(1.0, 0.0, 4.0)
+    run_suite("rec_inline", [
+      check_eq("q_mul, hand-computed", quat_parts(q_mul(a, b)), [2.5, -1.0, 7.5, -2.0]),
+      check_eq("q_mul, hand-expanded", quat_parts(q_mul(a, b)), quat_parts(q_mul_hand(a, b))),
+      check_eq("q_mul, chained", quat_parts(q_mul(q_mul(a, b), c)), quat_parts(q_mul_hand(q_mul_hand(a, b), c))),
+      check_eq("q_rot, hand-computed", parts(q_rot(a, u)), [-71.0, 0.0, 35.0]),
+      check_eq("q_rot, hand-expanded", parts(q_rot(c, p)), parts(q_rot_hand(c, p))),
+      check_eq("nested distance", nested_distance(p, r, s), nested_distance_hand(p, r, s)),
+      check_eq("nested distance, exact", vec3.length_squared(vec3.sub(vec3.add(p, r), s)), 25.0),
+      check_eq("nested ops", nested_ops(p, r), [-4.0, -4.0, -4.0]),
+      check_eq("user let used twice", let_twice(p, r), 80.0),
+      check_eq("used under a lambda", let_lambda(p, r), 50.0),
+      check_eq("same-name let", shadow_let(vec3.new(1.0, 1.0, 1.0), vec3.new(1.0, 2.0, 3.0)), 6.0),
+      check_eq("arm shadows, Just", shadow_arm(Just(vec3.new(9.0, 0.0, 0.0)), p, r), 9.0),
+      check_eq("arm shadows, Nothing", shadow_arm(Nothing, p, r), 48.0),
+      check_eq("lambda parameter shadows", shadow_lambda(p, r), 18.0),
+      check_eq("unused field-only parameter", unused_param(p, r), 3.0),
+      check_eq("bare and field use", use_bare_and_field(p, r), 92.0),
+      check_eq("scale twice", scaled_x(3.0, p), 9.0),
+      check_eq("renamed local does not float", renamed_local_shadow(p), 3.0)
+    ])

@@ -1,0 +1,93 @@
+module main
+
+import stdlib.linalg.vec3
+import stdlib.linalg.vec3 (Vec3)
+
+# Record builder inlining gate (docs/record-sra-v0.md stage 2). `q_mul` and `q_rot` are
+# uncharted-suns' quaternion kernels: each allocates only the record it returns once the `vec3`
+# builders inline. The `keep_*` and `neg_*` functions must keep their calls. The b1-gate checks
+# each function's own IR.
+
+type Quat = (w: Double, v: Vec3)
+type linear L = (x: Int, y: Int)
+
+fn q_mul(a: Quat, b: Quat) -> Quat =
+  Quat(w = (a.w * b.w) - vec3.dot(a.v, b.v),
+       v = vec3.add(vec3.add(vec3.scale(a.w, b.v), vec3.scale(b.w, a.v)), vec3.cross(a.v, b.v)))
+
+fn q_rot(q: Quat, u: Vec3) -> Vec3 =
+  let t = vec3.scale(2.0, vec3.cross(q.v, u))
+  in vec3.add(vec3.add(u, vec3.scale(q.w, t)), vec3.cross(q.v, t))
+
+# No allocation: the intermediate `sub` is read by `length`, field by field.
+fn dist_len(a: Vec3, b: Vec3) -> Double = vec3.length(vec3.sub(a, b))
+
+fn dist(a: Vec3, b: Vec3) -> Double = vec3.distance(a, b)
+
+# Kept: the builder's result escapes, is projected, or is passed to a function that is not inlined.
+fn keep_escape(a: Vec3, b: Vec3) -> List Vec3 =
+  let v = vec3.add(a, b)
+  in [v]
+
+fn keep_proj(a: Vec3, b: Vec3) -> Double = vec3.add(a, b).x
+
+fn g(v: Vec3) -> Maybe Double = if v.x > 0.0 then Just(v.x) else Nothing
+
+fn keep_cpr(a: Vec3, b: Vec3) -> Double =
+  match g(vec3.add(a, b)) with
+  | Just d -> d
+  | Nothing -> 0.0
+
+# Negatives: the callee is not eligible, so the call stays.
+fn rb(v: Vec3) -> Vec3 = Vec3(x = v.x, y = v.y, z = rb(v).z)
+
+fn neg_recursive(a: Vec3) -> Double =
+  let t = rb(a)
+  in t.x + t.y
+
+fn gen_b(x, y, z) = Vec3(x = x, y = y, z = z)
+
+fn neg_unannotated(a: Double) -> Double =
+  let t = gen_b(a, a, a)
+  in t.x + t.y
+
+fn con_b(x: a, y: Double) -> Vec3 where ToString a = Vec3(x = y, y = y, z = y)
+
+# A caller at a concrete type would call a specialised copy with no dictionary, which is an
+# ordinary closed function. A polymorphic caller keeps the dictionary parameter.
+fn neg_constrained(v: a) -> Double where ToString a =
+  let t = con_b(v, 1.0)
+  in t.x + t.y
+
+fn eff_b(x: Double) -> Vec3 !{IO} = Vec3(x = x, y = x, z = x)
+
+fn neg_effect(a: Double) -> Double !{IO} =
+  let t = eff_b(a)
+  in t.x + t.y
+
+fn big_b(a: Double) -> Vec3 =
+  Vec3(x = (a * a) + (a * a) + (a * a) + (a * a) + (a * a) + (a * a) + (a * a) + (a * a)
+           + (a * a) + (a * a) + (a * a) + (a * a) + (a * a) + (a * a) + (a * a) + (a * a),
+       y = (a * a) + (a * a) + (a * a) + (a * a) + (a * a) + (a * a) + (a * a) + (a * a)
+           + (a * a) + (a * a) + (a * a) + (a * a) + (a * a) + (a * a) + (a * a) + (a * a),
+       z = a)
+
+fn neg_over_k(a: Double) -> Double =
+  let t = big_b(a)
+  in t.x + t.y
+
+fn if_b(c: Bool, a: Vec3) -> Vec3 = if c then a else Vec3(x = a.y, y = a.x, z = a.z)
+
+fn neg_if_tail(c: Bool, a: Vec3) -> Double =
+  let t = if_b(c, a)
+  in t.x + t.y
+
+fn lin_b(a: Int) -> L = L(x = a, y = a)
+
+fn neg_linear(a: Int) -> Int =
+  let p = lin_b(a)
+  in p.x
+
+fn neg_partial(a: Vec3, b: Vec3) -> Vec3 =
+  let f = vec3.add(a, _)
+  in f(b)
