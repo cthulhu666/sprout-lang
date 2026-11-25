@@ -1,6 +1,6 @@
 # Record scalar replacement: inline record builders, split record lets (v0)
 
-Status: approved 2026-11-25; stage 1 implemented. Issue #913. A compiler optimisation: no syntax, semantics, typing or diagnostic change, so
+Status: approved 2026-11-25; stage 2 implemented. Issue #913. A compiler optimisation: no syntax, semantics, typing or diagnostic change, so
 nothing here is normative and `docs/spec-v0.md` is untouched.
 
 ## 1. Problem
@@ -132,15 +132,17 @@ keep the callee's source positions, so a trap reports the same line as before.
   parameter of a call §4.2 will inline. The walk is scope-aware: it stops below a pattern,
   lambda parameter or `do` step that rebinds `x`.
 
-The split emits `let x$f$N = e_f` for each field **in declaration order** (the order
+The split emits `let x$f$N$ri = e_f` for each field **in declaration order** (the order
 `record_exprs_in_decl_order` lowers a literal in today), with a fresh `N` per split, and
-rewrites each `TGetField x f` to `TVar x$f$N` at the field's type. A lambda that read `x.f` now
+rewrites each `TGetField x f` to `TVar x$f$N$ri` at the field's type. A lambda that read `x.f` now
 captures the scalar; closure conversion handles it like any local. User lets split too
 (`q_rot`'s `t`).
 
 ### 4.5 Order
 
-Callee bodies are prepared callee-first (their own eligible calls processed) and cached. Each
+Callee bodies are prepared callee-first (their own eligible calls processed) and cached. A callee
+whose result is a record is prepared with `Fields` demand, so a tail call to a builder inlines
+(`vec3.add`'s tail `new(..)` becomes its record literal). Each
 caller body is walked once: §4.2 decides, §4.3 inlines, §4.4 floats and splits on the way back up.
 Growth is linear in sites times `K`.
 
@@ -205,7 +207,9 @@ Behaviour, results identical with `SPROUT_OPT_OFF=rec_inline`:
 - an effectful argument's order; a trap inside an inlined body reports the callee's line.
 
 Negatives (still a call): recursive, unannotated generic, constrained (dict param), effectful,
-over `K`, `if`-tailed builder, linear record, partial application, `do`-let.
+over `K`, `if`-tailed builder, linear record, partial application, `do`-let. `specialise` runs
+before this pass, so a constrained function called at a concrete type is a closed copy with no
+dictionary and does inline; the constrained negative needs a polymorphic caller.
 
 Then smoke shape, golden IR (read the diff), GC stress, reseed, `just dod`, bench.
 
@@ -214,4 +218,8 @@ Then smoke shape, golden IR (read the diff), GC stress, reseed, `just dod`, benc
 1. **Split only** (§4.4 without inlining): user `let`s bound to a record literal. Small, testable
    alone: shadowing, order, lambda capture.
 2. **Inliner** (§4.1–4.3, 4.5) on top: reaches `q_mul`, `q_rot`, `distance`. Bench here.
+   Landed. `q_mul`'s prepared body is over `K`, so it is not itself a callee. The bench ran
+   428 ms boxed, 131–139 ms inlined, 107–112 ms hand-expanded (stage 2 compiler). The gap is
+   repeated `q.v` loads: `sprout_field` is declared without `readonly`, so LLVM cannot merge
+   them. Declaring it `memory(read)` in the emitted IR gave 87.6 ms for both.
 3. Follow-ups: `do`-let, `if`-tailed builders.

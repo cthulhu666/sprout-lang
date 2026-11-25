@@ -133,9 +133,9 @@ Bisect a miscompile against the Sprout-level passes without rebuilding the compi
   `[bce] versioned <fn>` or `[bce] kept <fn>: <reason>` line per loop it looked at, on stderr.
 - `SPROUT_OPT_OFF=wsi` — wrapper store inline (`stdlib/compiler/wsi.sprout`). A scalar
   `mutvec_set` then keeps its call to the wrapper and the write barrier. Also in `ir_pipeline`.
-- `SPROUT_OPT_OFF=rec_inline` — record let splitting (`stdlib/compiler/rec_inline.sprout`,
+- `SPROUT_OPT_OFF=rec_inline` — record let splitting and builder inlining (`stdlib/compiler/rec_inline.sprout`,
   [record-sra-v0.md](record-sra-v0.md)). A `let` bound to a record literal then builds the record
-  again. Also in `ir_pipeline`.
+  again, and `vec3`-style builders stay calls. Also in `ir_pipeline`.
 - `SPROUT_OPT_OFF=scalar` — scalar copies ([pointer-free-vectors-v0.md](pointer-free-vectors-v0.md)
   §4.3, `stdlib/compiler/scalar_copies.sprout`). The switch disables the copies: a vector built
   through a generic wrapper (`vec_from_list`, `mutvec_new`) stays scanned, while a direct call to

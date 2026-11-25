@@ -3,23 +3,37 @@ import stdlib.compiler.ast as ast
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.types as types
 import stdlib.compiler.source as source
+import stdlib.compiler.scc as scc
+import stdlib.string as string
 
-# Record scalar replacement. Design: docs/record-sra-v0.md. Stage 1 only: a record let split.
+# Record scalar replacement. Design: docs/record-sra-v0.md.
+#
+# Stage 1, the split. A record let
 #
 #   let x = R(f1 = e1, f2 = e2) in b      (R a non-linear record, x read only as `x.f`)
 #
 # becomes one scalar let per field, in declaration order, with each `x.f` in `b` read from its
-# let. The record is never built. A bare use of `x` (passed on, returned, stored, updated)
-# keeps the let as it is.
+# let. The record is never built. A bare use of `x` (passed on, returned, stored, updated) keeps
+# the let as it is.
+#
+# Stage 2, the inliner. A call to a small, pure, non-recursive top-level function inlines when a
+# record allocation goes away by it: a record builder (one whose body ends in a record literal)
+# whose result a split let reads, or a call that has a field-only parameter (one only read by
+# `.field` or passed to another such parameter) fed by a builder call or a variable bound by a
+# let that splits. Nothing else inlines. The inlined body is walked again in the caller's
+# context, so the builders it calls inline in turn and its record lets split.
 #
 # Fields are bound in DECLARATION order, which is the order lowering evaluates a literal in, not
 # the order the source wrote them, so traps and effects happen in the same order. A field no one
-# reads is still bound, so its trap still fires.
+# reads is still bound, so its trap still fires. An inlined call binds each argument that is not a
+# variable or literal, left to right, before the body: the call's own order.
 #
 # Scope: the occurrence check and the substitution both stop below a binder that rebinds `x`: a
 # match-arm pattern, a lambda parameter, a do step. `$` cannot appear in a user identifier, so
-# `x$f$N` cannot clash with a name the program wrote. `N` counts splits across the whole program,
-# so two splits of one name never share a suffix.
+# every name this pass makes (`x$f$N$ri` for a field, `p$N$ri` for an argument, `y$N$ri` for a
+# binder of an inlined body) cannot clash with a name the program wrote. `N` counts across the
+# whole program, so no two share it. Every binder in an inlined body is renamed, so a copy neither
+# captures nor is captured. Only lets named so float (`peel_lets`).
 
 # `recs` below: the field names of every non-linear record, in declaration order, by record name.
 export fn expand_program(prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
@@ -27,11 +41,14 @@ export fn expand_program(prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram
   | typed_ast.TypedProgram decls ->
       match list_filter_map(record_entry, decls) with
       | [] -> prog
-      | entries -> expand_decls(prog, decls, dict_from_list(entries))
+      | entries ->
+          let recs = dict_from_list(entries)
+              (callees, n) = prepare_callees(decls, recs)
+          in expand_decls(prog, decls, Ctx(recs = recs, callees = callees, flat = []), n)
 
-fn expand_decls(prog: typed_ast.TypedProgram, decls: List typed_ast.TypedDecl,
-                recs: Dict (List String)) -> typed_ast.TypedProgram =
-  match walk_seq(\ (d, n) -> walk_decl(d, recs, n), decls, 0) with
+fn expand_decls(prog: typed_ast.TypedProgram, decls: List typed_ast.TypedDecl, cx: Ctx, n: Int) ->
+    typed_ast.TypedProgram =
+  match walk_seq(\ (d, k) -> walk_decl(d, cx, k), decls, n) with
   | (rewritten, true, _) -> typed_ast.TypedProgram(rewritten)
   | (_, false, _) -> prog
 
@@ -49,42 +66,494 @@ fn field_decl_name(f: ast.RecordFieldDecl) -> String =
   | ast.RecordFieldDecl name _ -> name
 
 # ---------------------------------------------------------------------------
+# What the walk knows.
+# ---------------------------------------------------------------------------
+
+# A callee that may inline: its parameter names, which of them are field-only (parallel to
+# `params`), its body with its own calls already prepared, and the record its body builds when
+# the tail is a record literal (a builder).
+type Callee = (params: List String, field_only: List Bool, body: typed_ast.TypedExpr, builder: Maybe String)
+
+# `flat` lists the variables bound by a let that is about to split. A binder that rebinds one of
+# them removes it, so a name in `flat` is always the let's own.
+type Ctx = (recs: Dict (List String), callees: Dict Callee, flat: List String)
+
+# What the context does with a value: `OnlyFields` reads it by field, `AsValue` takes it whole.
+type Demand = OnlyFields | AsValue
+
+# How `subst` treats the variable: `Replace` swaps each `x.f` for the variable bound for `f` and
+# rejects any other use; `Verify` only checks that every use would allow the split, accepting
+# an argument at a field-only parameter of a call that will inline.
+type Mode =
+  | Replace (Dict String)
+  | Verify (Dict Callee)
+
+# The most nodes a callee body may have, once its own calls are prepared.
+let inline_limit: Int = 64
+
+fn wants_fields(dm: Demand) -> Bool =
+  match dm with
+  | OnlyFields -> true
+  | AsValue -> false
+
+# `cx` without the variables `names` bind.
+fn cx_without(cx: Ctx, names: List String) -> Ctx =
+  match cx.flat with
+  | [] -> cx
+  | flat -> cx with (flat = list_filter(\v -> !list_member(v, names), flat))
+
+# ---------------------------------------------------------------------------
+# Eligible callees (docs/record-sra-v0.md §4.1, §4.5).
+# ---------------------------------------------------------------------------
+
+type PrepEnv = (recs: Dict (List String), fns: Dict typed_ast.TypedDecl, graph: Dict Set, top: Set)
+
+# Callees by name, and the next free suffix. Callee-first over the call graph, so a callee's body
+# is prepared with the calls to eligible callees below it already inlined, and its field-only
+# parameters read the callee's own flags.
+fn prepare_callees(decls: List typed_ast.TypedDecl, recs: Dict (List String)) -> (Dict Callee, Int) =
+  let fn_decls = list_filter(is_fn_decl, decls)
+      names = set_to_list(set_from_list(list_filter_map(fn_decl_name, fn_decls)))
+      fnset = set_from_list(names)
+      graph = list_fold(add_fn_edges(fnset, _, _), dict_empty(), fn_decls)
+      pe = PrepEnv(recs = recs, fns = dict_from_list(list_filter_map(fn_entry, fn_decls)), graph = graph,
+                   top = set_from_list(list_filter_map(top_level_name, decls)))
+  in list_fold(prepare_comp(pe, _, _), (dict_empty(), 0), scc.sccs_in_dependency_order(names, graph))
+
+fn is_fn_decl(d: typed_ast.TypedDecl) -> Bool =
+  match d with
+  | typed_ast.TFnDecl _ _ _ _ _ _ -> true
+  | typed_ast.TExternFnDecl _ _ _ _ -> false
+  | typed_ast.TLetDecl _ _ -> false
+  | typed_ast.TInstanceDecl _ _ _ -> false
+  | typed_ast.TPassThrough _ -> false
+
+fn fn_decl_name(d: typed_ast.TypedDecl) -> Maybe String =
+  match d with
+  | typed_ast.TFnDecl name _ _ _ _ _ -> Just(name)
+  | _ -> Nothing
+
+fn fn_entry(d: typed_ast.TypedDecl) -> Maybe (String, typed_ast.TypedDecl) =
+  match d with
+  | typed_ast.TFnDecl name _ _ _ _ _ -> Just((name, d))
+  | _ -> Nothing
+
+# Every name a call can reach without a local binding: functions, externs and top-level lets.
+fn top_level_name(d: typed_ast.TypedDecl) -> Maybe String =
+  match d with
+  | typed_ast.TFnDecl name _ _ _ _ _ -> Just(name)
+  | typed_ast.TExternFnDecl name _ _ _ -> Just(name)
+  | typed_ast.TLetDecl name _ -> Just(name)
+  | typed_ast.TInstanceDecl _ _ _ -> Nothing
+  | typed_ast.TPassThrough _ -> Nothing
+
+# The recursion graph: an edge for a mention of a top-level function in any position, as
+# `ast_to_ir.build_recursive_groups` draws it.
+fn add_fn_edges(fnset: Set, acc: Dict Set, d: typed_ast.TypedDecl) -> Dict Set =
+  let typed_ast.TFnDecl name _ _ _ _ body = d else acc
+  in dict_set(name, mentioned_fns(body, fnset, set_empty()), acc)
+
+fn mentioned_fns(e: typed_ast.TypedExpr, fnset: Set, acc: Set) -> Set =
+  match e with
+  | typed_ast.TVar name _ _ -> if set_member(name, fnset) then set_insert(name, acc) else acc
+  | _ -> list_fold(\ (a, c) -> mentioned_fns(c, fnset, a), acc, typed_ast.children(e))
+
+# One strongly connected component. Only a lone function that does not call itself can be a callee.
+fn prepare_comp(pe: PrepEnv, st: (Dict Callee, Int), members: List String) -> (Dict Callee, Int) =
+  match members with
+  | [name] ->
+      let Just d = dict_get(name, pe.fns) else st
+      in if calls_itself(name, pe.graph) then st else prepare_fn(d, pe, st)
+  | _ -> st
+
+fn calls_itself(name: String, graph: Dict Set) -> Bool =
+  match dict_get(name, graph) with
+  | Just callees -> set_member(name, callees)
+  | Nothing -> false
+
+fn prepare_fn(d: typed_ast.TypedDecl, pe: PrepEnv, st: (Dict Callee, Int)) -> (Dict Callee, Int) =
+  let (callees, n) = st
+      typed_ast.TFnDecl name params ret eff cs body = d else st
+  in
+    if !header_eligible(name, params, ret, eff, cs, pe.recs) || !is_just(body_size(body, pe.top))
+    then st
+    else
+      let cx = Ctx(recs = pe.recs, callees = callees, flat = [])
+          (b, _, n1) = walk(body, tail_demand(ret, pe.recs), cx, n)
+      in match callee_of(params, b, callees, pe.top) with
+         | Just c -> (dict_set(name, c, callees), n1)
+         | Nothing -> (callees, n1)
+
+# A callee that returns a record is read by field, so its tail builder calls inline.
+fn tail_demand(ret: Maybe ast.TypeExpr, recs: Dict (List String)) -> Demand =
+  match ret with
+  | Just (ast.TypeName n) -> if dict_member(n, recs) then OnlyFields else AsValue
+  | _ -> AsValue
+
+fn callee_of(params: List ast.Param, body: typed_ast.TypedExpr, callees: Dict Callee, top: Set) -> Maybe Callee =
+  let Just size = body_size(body, top) else Nothing
+      names = ast.param_names(params)
+  in
+    if size > inline_limit then Nothing
+    else Just(Callee(params = names, field_only = list_map(field_only_param(_, body, callees), names),
+                     body = body, builder = tail_record(body)))
+
+# Every use of `p` is a field read or an argument at a field-only parameter.
+fn field_only_param(p: String, body: typed_ast.TypedExpr, callees: Dict Callee) -> Bool =
+  is_ok(subst(p, Verify(callees), body))
+
+fn tail_record(e: typed_ast.TypedExpr) -> Maybe String =
+  match e with
+  | typed_ast.TRecord rname _ _ _ -> Just(rname)
+  | typed_ast.TMatch _ [typed_ast.TypedMatchBranch(ast.VarPattern _ _) body] _ _ -> tail_record(body)
+  | _ -> Nothing
+
+# Bundled (dotted), pure, no dictionary parameter, every type written and closed, and a result
+# that is a non-linear record or a primitive: never an ADT or tuple, which CPR routes by the
+# shape of the call, and an inlined call is no longer a call.
+fn header_eligible(name: String, params: List ast.Param, ret: Maybe ast.TypeExpr, eff: Maybe (List String),
+                   cs: List ast.TypeConstraint, recs: Dict (List String)) -> Bool =
+  string.contains(name, ".") && is_nothing(eff) && list_length(cs) == 0
+  && all(param_eligible, params) && result_eligible(ret, recs)
+
+fn param_eligible(p: ast.Param) -> Bool =
+  match p with
+  | ast.Param name (Just te) mode -> closed_type(te) && !str_starts_with(name, "__tc_") && mode_plain(mode)
+  | ast.Param _ Nothing _ -> false
+
+fn mode_plain(m: ast.ParamMode) -> Bool =
+  match m with
+  | ast.ModeDefault -> true
+  | ast.ModeConsuming -> true
+  | ast.ModeBorrowing -> false
+  | ast.ModeOnce -> false
+  | ast.ModeLocal -> false
+  | ast.ModeOnceLocal -> false
+
+let primitive_results: List String = ["Int", "Double", "Bool", "Char"]
+
+fn result_eligible(ret: Maybe ast.TypeExpr, recs: Dict (List String)) -> Bool =
+  match ret with
+  | Just (ast.TypeName n) -> dict_member(n, recs) || list_member(n, primitive_results)
+  | _ -> false
+
+# No type variable, and no arrow, thunk or effect row.
+fn closed_type(te: ast.TypeExpr) -> Bool =
+  match te with
+  | ast.TypeName n -> !source.is_lowercase_name(n)
+  | ast.TypeApply f a -> closed_type(f) && closed_type(a)
+  | ast.TupleType items -> all(closed_type, items)
+  | ast.TypeArrow _ _ _ _ -> false
+  | ast.TypeThunk _ _ -> false
+  | ast.TypeEffect _ _ -> false
+
+# The node count of an inlinable body, `Nothing` when it holds a form that cannot be copied:
+# only variables, literals, arithmetic, field reads, record literals, calls of a top-level name
+# and one-arm variable lets. A lambda, `match`, `do`, `if`, tuple, range, record update or
+# dictionary reference makes the callee ineligible.
+fn body_size(e: typed_ast.TypedExpr, top: Set) -> Maybe Int =
+  match e with
+  | typed_ast.TVar _ _ _ -> Just(1)
+  | typed_ast.TInt _ _ _ -> Just(1)
+  | typed_ast.TFloat _ _ _ -> Just(1)
+  | typed_ast.TBool _ _ _ -> Just(1)
+  | typed_ast.TString _ _ _ -> Just(1)
+  | typed_ast.TChar _ _ _ -> Just(1)
+  | typed_ast.TUnit _ _ -> Just(1)
+  | typed_ast.TBinary _ l r _ _ -> sum_sizes([l, r], top, 1)
+  | typed_ast.TUnary _ x _ _ -> sum_sizes([x], top, 1)
+  | typed_ast.TGetField base _ _ _ -> sum_sizes([base], top, 1)
+  | typed_ast.TRecord _ fields _ _ -> sum_sizes(list_map(record_field_value, fields), top, 1)
+  | typed_ast.TCall callee args _ _ ->
+      match callee with
+      | typed_ast.TVar f _ _ -> if set_member(f, top) then sum_sizes(args, top, 2) else Nothing
+      | _ -> Nothing
+  | typed_ast.TMatch scrut branches _ _ ->
+      match branches with
+      | [typed_ast.TypedMatchBranch(ast.VarPattern _ _) body] -> sum_sizes([scrut, body], top, 1)
+      | _ -> Nothing
+  | typed_ast.TTuple _ _ _ -> Nothing
+  | typed_ast.TIf _ _ _ _ _ -> Nothing
+  | typed_ast.TDict _ _ _ _ -> Nothing
+  | typed_ast.TMethodRef _ _ _ _ _ -> Nothing
+  | typed_ast.TLambda _ _ _ _ -> Nothing
+  | typed_ast.TRange _ _ _ _ -> Nothing
+  | typed_ast.TDo _ _ _ -> Nothing
+  | typed_ast.TRecordUpdate _ _ _ _ -> Nothing
+
+fn sum_sizes(es: List typed_ast.TypedExpr, top: Set, acc: Int) -> Maybe Int =
+  match es with
+  | [] -> Just(acc)
+  | [x | rest] ->
+      match body_size(x, top) with
+      | Nothing -> Nothing
+      | Just k -> sum_sizes(rest, top, acc + k)
+
+fn record_field_value(f: typed_ast.TypedRecordField) -> typed_ast.TypedExpr =
+  match f with
+  | typed_ast.TypedRecordField _ v -> v
+
+# ---------------------------------------------------------------------------
 # The walk. Bottom-up, so a record let nested in another splits too. Every step returns the
 # rewritten node, whether anything below it changed, and the next free suffix; a node with no
 # change below it comes back as the same node, which `expand_program` uses to share the program.
 # ---------------------------------------------------------------------------
 
-fn walk_decl(d: typed_ast.TypedDecl, recs: Dict (List String), n: Int) -> (typed_ast.TypedDecl, Bool, Int) =
+fn walk_decl(d: typed_ast.TypedDecl, cx: Ctx, n: Int) -> (typed_ast.TypedDecl, Bool, Int) =
   match d with
   | typed_ast.TFnDecl name params ret eff cs body ->
-      let (b, changed, n1) = walk(body, recs, n)
+      let (b, changed, n1) = walk(body, AsValue, cx, n)
       in if changed then (typed_ast.TFnDecl(name, params, ret, eff, cs, b), true, n1) else (d, false, n1)
   | typed_ast.TLetDecl name value ->
-      let (v, changed, n1) = walk(value, recs, n)
+      let (v, changed, n1) = walk(value, AsValue, cx, n)
       in if changed then (typed_ast.TLetDecl(name, v), true, n1) else (d, false, n1)
   | typed_ast.TInstanceDecl c cs methods ->
-      let (ms, changed, n1) = walk_seq(\ (m, k) -> walk_method(m, recs, k), methods, n)
+      let (ms, changed, n1) = walk_seq(\ (m, k) -> walk_method(m, cx, k), methods, n)
       in if changed then (typed_ast.TInstanceDecl(c, cs, ms), true, n1) else (d, false, n1)
   | typed_ast.TExternFnDecl _ _ _ _ -> (d, false, n)
   | typed_ast.TPassThrough _ -> (d, false, n)
 
-fn walk_method(m: typed_ast.TypedInstanceMethod, recs: Dict (List String), n: Int) ->
+fn walk_method(m: typed_ast.TypedInstanceMethod, cx: Ctx, n: Int) ->
     (typed_ast.TypedInstanceMethod, Bool, Int) =
   match m with
   | typed_ast.TypedInstanceMethod name params ret eff cs body ->
-      let (b, changed, n1) = walk(body, recs, n)
+      let (b, changed, n1) = walk(body, AsValue, cx, n)
       in if changed then (typed_ast.TypedInstanceMethod(name, params, ret, eff, cs, b), true, n1)
          else (m, false, n1)
 
-fn walk(e: typed_ast.TypedExpr, recs: Dict (List String), n: Int) -> (typed_ast.TypedExpr, Bool, Int) =
-  let (rebuilt, changed, n1) = walk_children(e, recs, n)
-  in match split_let(rebuilt, recs, n1) with
-     | Just (split, n2) -> (split, true, n2)
-     | Nothing -> (rebuilt, changed, n1)
+# A call may inline, a let may split; every other form walks its children.
+fn walk(e: typed_ast.TypedExpr, dm: Demand, cx: Ctx, n: Int) -> (typed_ast.TypedExpr, Bool, Int) =
+  match e with
+  | typed_ast.TCall (typed_ast.TVar f _ _) args t p -> walk_call(e, f, args, t, p, dm, cx, n)
+  | typed_ast.TMatch scrut [typed_ast.TypedMatchBranch(ast.VarPattern x vp) body] t p ->
+      walk_let(e, scrut, x, vp, body, t, p, dm, cx, n)
+  | _ -> walk_children(e, cx, n)
 
-# `e` with each child walked, left to right. Exhaustive with no wildcard, as `typed_ast.children`
-# is, so a new expression form stops the build here.
-fn walk_children(e: typed_ast.TypedExpr, recs: Dict (List String), n: Int) -> (typed_ast.TypedExpr, Bool, Int) =
+# `f(args)`, when `f` is a callee and a record allocation goes away: copy its body in and walk the
+# copy, whose calls may now inline in turn. Otherwise the arguments walk as values.
+fn walk_call(e: typed_ast.TypedExpr, f: String, args: List typed_ast.TypedExpr, t: types.Type,
+             p: source.SourcePos, dm: Demand, cx: Ctx, n: Int) -> (typed_ast.TypedExpr, Bool, Int) =
+  match dict_get(f, cx.callees) with
+  | Just c ->
+      if inlines(c, args, dm, cx)
+      then
+        let (copy, n1) = instantiate(c, args, t, p, n)
+            (r, _, n2) = walk(copy, dm, cx, n1)
+        in (r, true, n2)
+      else walk_children(e, cx, n)
+  | Nothing -> walk_children(e, cx, n)
+
+# A builder under `OnlyFields` always inlines; any callee inlines when a field-only parameter gets a
+# flat argument. A call that does not pass every parameter is a partial application and stays.
+fn inlines(c: Callee, args: List typed_ast.TypedExpr, dm: Demand, cx: Ctx) -> Bool =
+  list_length(args) == list_length(c.params)
+  && ((wants_fields(dm) && is_just(c.builder)) || has_flat_arg(c.field_only, args, cx))
+
+fn has_flat_arg(flags: List Bool, args: List typed_ast.TypedExpr, cx: Ctx) -> Bool =
+  match flags with
+  | [] -> false
+  | [fo | rest] ->
+      match args with
+      | [] -> false
+      | [a | more] -> (fo && flat_arg(a, cx)) || has_flat_arg(rest, more, cx)
+
+# A builder call, or a variable bound by a let that will split.
+fn flat_arg(a: typed_ast.TypedExpr, cx: Ctx) -> Bool =
+  match a with
+  | typed_ast.TVar v _ _ -> list_member(v, cx.flat)
+  | typed_ast.TCall (typed_ast.TVar g _ _) gargs _ _ -> is_just(builder_call(g, gargs, cx))
+  | _ -> false
+
+# The record `g(gargs)` builds, when `g` is a builder and the call passes every parameter.
+fn builder_call(g: String, gargs: List typed_ast.TypedExpr, cx: Ctx) -> Maybe String =
+  let Just c = dict_get(g, cx.callees) else Nothing
+  in if list_length(gargs) == list_length(c.params) then c.builder else Nothing
+
+# ---------------------------------------------------------------------------
+# Inlining a call (docs/record-sra-v0.md §4.3).
+# ---------------------------------------------------------------------------
+
+# The callee's body with each parameter replaced. A variable or literal argument substitutes
+# directly, which keeps a split variable visible to the split; any other is let-bound first, in
+# argument order, to a fresh `param$N`. The lets carry the call's type and position; the body keeps
+# the callee's.
+fn instantiate(c: Callee, args: List typed_ast.TypedExpr, t: types.Type, p: source.SourcePos, n: Int) ->
+    (typed_ast.TypedExpr, Int) =
+  let (env, lets, n1) = bind_args(c.params, args, dict_empty(), [], n)
+      (body, n2) = inst(c.body, env, n1)
+  in (wrap_lets(lets, body, t, p), n2)
+
+fn bind_args(params: List String, args: List typed_ast.TypedExpr, env: Dict typed_ast.TypedExpr,
+             lets: List (String, typed_ast.TypedExpr), n: Int) ->
+    (Dict typed_ast.TypedExpr, List (String, typed_ast.TypedExpr), Int) =
+  match params with
+  | [] -> (env, list_reverse(lets), n)
+  | [pn | prest] ->
+      match args with
+      | [] -> (env, list_reverse(lets), n)
+      | [a | arest] ->
+          if is_atom(a) then bind_args(prest, arest, dict_set(pn, a, env), lets, n)
+          else
+            let fresh = pass_name(pn, n)
+                v = typed_ast.TVar(fresh, typed_ast.typed_expr_type(a), typed_ast.typed_expr_pos(a))
+            in bind_args(prest, arest, dict_set(pn, v, env), Cons((fresh, a), lets), n + 1)
+
+# A variable or a literal: evaluating it twice, or later, changes nothing.
+fn is_atom(e: typed_ast.TypedExpr) -> Bool =
+  match e with
+  | typed_ast.TVar _ _ _ -> true
+  | typed_ast.TInt _ _ _ -> true
+  | typed_ast.TFloat _ _ _ -> true
+  | typed_ast.TBool _ _ _ -> true
+  | typed_ast.TString _ _ _ -> true
+  | typed_ast.TChar _ _ _ -> true
+  | typed_ast.TUnit _ _ -> true
+  | typed_ast.TTuple _ _ _ -> false
+  | typed_ast.TIf _ _ _ _ _ -> false
+  | typed_ast.TMatch _ _ _ _ -> false
+  | typed_ast.TCall _ _ _ _ -> false
+  | typed_ast.TDict _ _ _ _ -> false
+  | typed_ast.TMethodRef _ _ _ _ _ -> false
+  | typed_ast.TLambda _ _ _ _ -> false
+  | typed_ast.TBinary _ _ _ _ _ -> false
+  | typed_ast.TUnary _ _ _ _ -> false
+  | typed_ast.TRange _ _ _ _ -> false
+  | typed_ast.TDo _ _ _ -> false
+  | typed_ast.TRecord _ _ _ _ -> false
+  | typed_ast.TGetField _ _ _ _ -> false
+  | typed_ast.TRecordUpdate _ _ _ _ -> false
+
+# `let n1 = v1 in let n2 = v2 in ... body`, the first binding outermost so it runs first.
+fn wrap_lets(lets: List (String, typed_ast.TypedExpr), body: typed_ast.TypedExpr, t: types.Type,
+             p: source.SourcePos) -> typed_ast.TypedExpr =
+  match lets with
+  | [] -> body
+  | [(name, value) | rest] ->
+      typed_ast.TMatch(value,
+                       [typed_ast.TypedMatchBranch(ast.VarPattern(name, typed_ast.typed_expr_pos(value)),
+                                                   wrap_lets(rest, body, t, p))],
+                       t, p)
+
+# `e` with each variable `env` maps replaced, and every let binder renamed to a fresh name. A
+# callee body holds only the forms `body_size` admits, so the rest cannot arrive.
+fn inst(e: typed_ast.TypedExpr, env: Dict typed_ast.TypedExpr, n: Int) -> (typed_ast.TypedExpr, Int) =
+  match e with
+  | typed_ast.TVar v _ _ ->
+      match dict_get(v, env) with
+      | Just r -> (r, n)
+      | Nothing -> (e, n)
+  | typed_ast.TInt _ _ _ -> (e, n)
+  | typed_ast.TFloat _ _ _ -> (e, n)
+  | typed_ast.TBool _ _ _ -> (e, n)
+  | typed_ast.TString _ _ _ -> (e, n)
+  | typed_ast.TChar _ _ _ -> (e, n)
+  | typed_ast.TUnit _ _ -> (e, n)
+  | typed_ast.TBinary op l r t p ->
+      let (l1, n1) = inst(l, env, n)
+          (r1, n2) = inst(r, env, n1)
+      in (typed_ast.TBinary(op, l1, r1, t, p), n2)
+  | typed_ast.TUnary op x t p ->
+      let (x1, n1) = inst(x, env, n)
+      in (typed_ast.TUnary(op, x1, t, p), n1)
+  | typed_ast.TGetField base fld t p ->
+      let (b1, n1) = inst(base, env, n)
+      in (typed_ast.TGetField(b1, fld, t, p), n1)
+  | typed_ast.TRecord name fields t p ->
+      let (fs, n1) = inst_fields(fields, env, n)
+      in (typed_ast.TRecord(name, fs, t, p), n1)
+  | typed_ast.TCall callee args t p ->
+      let (f, n1) = inst(callee, env, n)
+          (xs, n2) = inst_list(args, env, n1)
+      in (typed_ast.TCall(f, xs, t, p), n2)
+  | typed_ast.TMatch scrut branches t p -> inst_let(scrut, branches, t, p, env, n)
+  | typed_ast.TTuple _ _ _ -> inst_unreachable()
+  | typed_ast.TIf _ _ _ _ _ -> inst_unreachable()
+  | typed_ast.TDict _ _ _ _ -> inst_unreachable()
+  | typed_ast.TMethodRef _ _ _ _ _ -> inst_unreachable()
+  | typed_ast.TLambda _ _ _ _ -> inst_unreachable()
+  | typed_ast.TRange _ _ _ _ -> inst_unreachable()
+  | typed_ast.TDo _ _ _ -> inst_unreachable()
+  | typed_ast.TRecordUpdate _ _ _ _ -> inst_unreachable()
+
+fn inst_unreachable() -> (typed_ast.TypedExpr, Int) =
+  panic("rec_inline.inst: a callee body holds a form body_size rejects (internal error)")
+
+fn inst_list(es: List typed_ast.TypedExpr, env: Dict typed_ast.TypedExpr, n: Int) ->
+    (List typed_ast.TypedExpr, Int) =
+  match es with
+  | [] -> ([], n)
+  | [x | rest] ->
+      let (y, n1) = inst(x, env, n)
+          (ys, n2) = inst_list(rest, env, n1)
+      in (Cons(y, ys), n2)
+
+fn inst_fields(fields: List typed_ast.TypedRecordField, env: Dict typed_ast.TypedExpr, n: Int) ->
+    (List typed_ast.TypedRecordField, Int) =
+  match fields with
+  | [] -> ([], n)
+  | [typed_ast.TypedRecordField name v | rest] ->
+      let (v1, n1) = inst(v, env, n)
+          (rest1, n2) = inst_fields(rest, env, n1)
+      in (Cons(typed_ast.TypedRecordField(name, v1), rest1), n2)
+
+# A one-arm variable let: the value sees the outer scope, the body sees the fresh binder.
+fn inst_let(scrut: typed_ast.TypedExpr, branches: List typed_ast.TypedMatchBranch, t: types.Type,
+            p: source.SourcePos, env: Dict typed_ast.TypedExpr, n: Int) -> (typed_ast.TypedExpr, Int) =
+  match branches with
+  | [typed_ast.TypedMatchBranch(ast.VarPattern x vp) body] ->
+      let (s, n1) = inst(scrut, env, n)
+          fresh = pass_name(x, n1)
+          v = typed_ast.TVar(fresh, typed_ast.typed_expr_type(s), vp)
+          (b, n2) = inst(body, dict_set(x, v, env), n1 + 1)
+      in (typed_ast.TMatch(s, [typed_ast.TypedMatchBranch(ast.VarPattern(fresh, vp), b)], t, p), n2)
+  | _ -> inst_unreachable()
+
+# ---------------------------------------------------------------------------
+# A let, and the split it may take.
+# ---------------------------------------------------------------------------
+
+# `let x = scrut in body`. When `scrut` is a record literal or a builder call and `body` only reads
+# `x` by field or hands it to a field-only parameter, `x` will split: `scrut` walks as read by
+# field, and `body` walks with `x` flat, so the calls that take `x` inline. That is one walk for
+# a cycle ("`x` splits iff the call inlines iff `x` is flat"). The split itself then runs on what
+# the walk produced.
+fn walk_let(e: typed_ast.TypedExpr, scrut: typed_ast.TypedExpr, x: String, vp: source.SourcePos,
+            body: typed_ast.TypedExpr, t: types.Type, p: source.SourcePos, dm: Demand, cx: Ctx, n: Int) ->
+    (typed_ast.TypedExpr, Bool, Int) =
+  let flat_x = split_expected(scrut, x, body, cx)
+      (s, ch1, n1) = walk(scrut, if flat_x then OnlyFields else AsValue, cx, n)
+      cx_body = bind_flat(cx, x, flat_x)
+      (b, ch2, n2) = walk(body, dm, cx_body, n1)
+      rebuilt = if ch1 || ch2
+                then typed_ast.TMatch(s, [typed_ast.TypedMatchBranch(ast.VarPattern(x, vp), b)], t, p)
+                else e
+  in match split_let(rebuilt, cx.recs, n2) with
+     | Just (split, n3) -> (split, true, n3)
+     | Nothing -> (rebuilt, ch1 || ch2, n2)
+
+# `cx` for the body of `let x`: `x` flat when it will split, and not flat otherwise, since it
+# shadows an outer variable of the same name.
+fn bind_flat(cx: Ctx, x: String, is_flat: Bool) -> Ctx =
+  let outer = cx_without(cx, [x])
+  in if is_flat then outer with (flat = Cons(x, outer.flat)) else outer
+
+# Whether the let will split: its value is a record literal or a builder call, and every use of
+# `x` in the body allows it.
+fn split_expected(scrut: typed_ast.TypedExpr, x: String, body: typed_ast.TypedExpr, cx: Ctx) -> Bool =
+  let Just rname = record_source(scrut, cx) else false
+      Just _ = dict_get(rname, cx.recs) else false
+  in is_ok(subst(x, Verify(cx.callees), body))
+
+fn record_source(scrut: typed_ast.TypedExpr, cx: Ctx) -> Maybe String =
+  match scrut with
+  | typed_ast.TRecord rname _ _ _ -> Just(rname)
+  | typed_ast.TCall (typed_ast.TVar g _ _) gargs _ _ -> builder_call(g, gargs, cx)
+  | _ -> Nothing
+
+# `e` with each child walked, left to right, as a value. Exhaustive with no wildcard, as
+# `typed_ast.children` is, so a new expression form stops the build here. A binder removes the
+# variables it rebinds from `flat` for what it scopes over.
+fn walk_children(e: typed_ast.TypedExpr, cx: Ctx, n: Int) -> (typed_ast.TypedExpr, Bool, Int) =
   match e with
   | typed_ast.TVar _ _ _ -> (e, false, n)
   | typed_ast.TInt _ _ _ -> (e, false, n)
@@ -96,77 +565,86 @@ fn walk_children(e: typed_ast.TypedExpr, recs: Dict (List String), n: Int) -> (t
   | typed_ast.TDict _ _ _ _ -> (e, false, n)
   | typed_ast.TMethodRef _ _ _ _ _ -> (e, false, n)
   | typed_ast.TTuple items t p ->
-      let (xs, changed, n1) = walk_exprs(items, recs, n)
+      let (xs, changed, n1) = walk_exprs(items, cx, n)
       in if changed then (typed_ast.TTuple(xs, t, p), true, n1) else (e, false, n1)
   | typed_ast.TIf cond then_e else_e t p ->
-      let (c, ch1, n1) = walk(cond, recs, n)
-          (a, ch2, n2) = walk(then_e, recs, n1)
-          (b, ch3, n3) = walk(else_e, recs, n2)
+      let (c, ch1, n1) = walk(cond, AsValue, cx, n)
+          (a, ch2, n2) = walk(then_e, AsValue, cx, n1)
+          (b, ch3, n3) = walk(else_e, AsValue, cx, n2)
       in if ch1 || ch2 || ch3 then (typed_ast.TIf(c, a, b, t, p), true, n3) else (e, false, n3)
   | typed_ast.TMatch scrut branches t p ->
-      let (s, ch1, n1) = walk(scrut, recs, n)
-          (bs, ch2, n2) = walk_seq(\ (b, k) -> walk_branch(b, recs, k), branches, n1)
+      let (s, ch1, n1) = walk(scrut, AsValue, cx, n)
+          (bs, ch2, n2) = walk_seq(\ (b, k) -> walk_branch(b, cx, k), branches, n1)
       in if ch1 || ch2 then (typed_ast.TMatch(s, bs, t, p), true, n2) else (e, false, n2)
   | typed_ast.TCall callee args t p ->
-      let (f, ch1, n1) = walk(callee, recs, n)
-          (xs, ch2, n2) = walk_exprs(args, recs, n1)
+      let (f, ch1, n1) = walk(callee, AsValue, cx, n)
+          (xs, ch2, n2) = walk_exprs(args, cx, n1)
       in if ch1 || ch2 then (typed_ast.TCall(f, xs, t, p), true, n2) else (e, false, n2)
   | typed_ast.TLambda params body t p ->
-      let (b, changed, n1) = walk(body, recs, n)
+      let (b, changed, n1) = walk(body, AsValue, cx_without(cx, list_map(param_name, params)), n)
       in if changed then (typed_ast.TLambda(params, b, t, p), true, n1) else (e, false, n1)
   | typed_ast.TBinary op left right t p ->
-      let (l, ch1, n1) = walk(left, recs, n)
-          (r, ch2, n2) = walk(right, recs, n1)
+      let (l, ch1, n1) = walk(left, AsValue, cx, n)
+          (r, ch2, n2) = walk(right, AsValue, cx, n1)
       in if ch1 || ch2 then (typed_ast.TBinary(op, l, r, t, p), true, n2) else (e, false, n2)
   | typed_ast.TUnary op operand t p ->
-      let (x, changed, n1) = walk(operand, recs, n)
+      let (x, changed, n1) = walk(operand, AsValue, cx, n)
       in if changed then (typed_ast.TUnary(op, x, t, p), true, n1) else (e, false, n1)
   | typed_ast.TRange lo hi t p ->
-      let (a, ch1, n1) = walk(lo, recs, n)
-          (b, ch2, n2) = walk(hi, recs, n1)
+      let (a, ch1, n1) = walk(lo, AsValue, cx, n)
+          (b, ch2, n2) = walk(hi, AsValue, cx, n1)
       in if ch1 || ch2 then (typed_ast.TRange(a, b, t, p), true, n2) else (e, false, n2)
   | typed_ast.TDo steps t p ->
-      let (ss, changed, n1) = walk_seq(\ (s, k) -> walk_step(s, recs, k), steps, n)
+      let cx_do = cx_without(cx, do_binders(steps))
+          (ss, changed, n1) = walk_seq(\ (s, k) -> walk_step(s, cx_do, k), steps, n)
       in if changed then (typed_ast.TDo(ss, t, p), true, n1) else (e, false, n1)
   | typed_ast.TRecord name fields t p ->
-      let (fs, changed, n1) = walk_seq(\ (f, k) -> walk_field(f, recs, k), fields, n)
+      let (fs, changed, n1) = walk_seq(\ (f, k) -> walk_field(f, cx, k), fields, n)
       in if changed then (typed_ast.TRecord(name, fs, t, p), true, n1) else (e, false, n1)
   | typed_ast.TGetField base fld t p ->
-      let (b, changed, n1) = walk(base, recs, n)
+      let (b, changed, n1) = walk(base, AsValue, cx, n)
       in if changed then (typed_ast.TGetField(b, fld, t, p), true, n1) else (e, false, n1)
   | typed_ast.TRecordUpdate base fields t p ->
-      let (b, ch1, n1) = walk(base, recs, n)
-          (fs, ch2, n2) = walk_seq(\ (f, k) -> walk_field(f, recs, k), fields, n1)
+      let (b, ch1, n1) = walk(base, AsValue, cx, n)
+          (fs, ch2, n2) = walk_seq(\ (f, k) -> walk_field(f, cx, k), fields, n1)
       in if ch1 || ch2 then (typed_ast.TRecordUpdate(b, fs, t, p), true, n2) else (e, false, n2)
 
-fn walk_exprs(es: List typed_ast.TypedExpr, recs: Dict (List String), n: Int) ->
-    (List typed_ast.TypedExpr, Bool, Int) =
-  walk_seq(\ (x, k) -> walk(x, recs, k), es, n)
+fn walk_exprs(es: List typed_ast.TypedExpr, cx: Ctx, n: Int) -> (List typed_ast.TypedExpr, Bool, Int) =
+  walk_seq(\ (x, k) -> walk(x, AsValue, cx, k), es, n)
 
-fn walk_branch(b: typed_ast.TypedMatchBranch, recs: Dict (List String), n: Int) ->
-    (typed_ast.TypedMatchBranch, Bool, Int) =
+fn walk_branch(b: typed_ast.TypedMatchBranch, cx: Ctx, n: Int) -> (typed_ast.TypedMatchBranch, Bool, Int) =
   match b with
   | typed_ast.TypedMatchBranch pat body ->
-      let (x, changed, n1) = walk(body, recs, n)
+      let (x, changed, n1) = walk(body, AsValue, cx_without(cx, ast.pattern_names(pat)), n)
       in if changed then (typed_ast.TypedMatchBranch(pat, x), true, n1) else (b, false, n1)
 
-fn walk_step(s: typed_ast.TypedDoStep, recs: Dict (List String), n: Int) -> (typed_ast.TypedDoStep, Bool, Int) =
+# Every name a do block's steps bind. A later step's binder hides a variable from the steps after
+# it only, but dropping it from all of them costs an inline, never a wrong one.
+fn do_binders(steps: List typed_ast.TypedDoStep) -> List String =
+  list_flat_map(step_binders, steps)
+
+fn step_binders(s: typed_ast.TypedDoStep) -> List String =
+  match s with
+  | typed_ast.TDoBindStep pat _ _ -> ast.pattern_names(pat)
+  | typed_ast.TDoLetStep name _ -> [name]
+  | typed_ast.TDoExprStep _ -> []
+
+fn walk_step(s: typed_ast.TypedDoStep, cx: Ctx, n: Int) -> (typed_ast.TypedDoStep, Bool, Int) =
   match s with
   | typed_ast.TDoBindStep pat value mode ->
-      let (v, changed, n1) = walk(value, recs, n)
+      let (v, changed, n1) = walk(value, AsValue, cx, n)
       in if changed then (typed_ast.TDoBindStep(pat, v, mode), true, n1) else (s, false, n1)
   | typed_ast.TDoLetStep name value ->
-      let (v, changed, n1) = walk(value, recs, n)
+      let (v, changed, n1) = walk(value, AsValue, cx, n)
       in if changed then (typed_ast.TDoLetStep(name, v), true, n1) else (s, false, n1)
   | typed_ast.TDoExprStep value ->
-      let (v, changed, n1) = walk(value, recs, n)
+      let (v, changed, n1) = walk(value, AsValue, cx, n)
       in if changed then (typed_ast.TDoExprStep(v), true, n1) else (s, false, n1)
 
-fn walk_field(f: typed_ast.TypedRecordField, recs: Dict (List String), n: Int) ->
-    (typed_ast.TypedRecordField, Bool, Int) =
+fn walk_field(f: typed_ast.TypedRecordField, cx: Ctx, n: Int) -> (typed_ast.TypedRecordField, Bool, Int) =
   match f with
   | typed_ast.TypedRecordField name value ->
-      let (v, changed, n1) = walk(value, recs, n)
+      let (v, changed, n1) = walk(value, AsValue, cx, n)
       in if changed then (typed_ast.TypedRecordField(name, v), true, n1) else (f, false, n1)
 
 # `g` over a list, left to right, threading the suffix counter. Tail recursive.
@@ -182,25 +660,58 @@ fn walk_seq_go(g: a -> Int -> (a, Bool, Int), xs: List a, n: Int, acc: List a, c
       in walk_seq_go(g, rest, n1, Cons(y, acc), changed || ch)
 
 # ---------------------------------------------------------------------------
-# The split.
+# The split (docs/record-sra-v0.md §4.4).
 # ---------------------------------------------------------------------------
 
 # A `let x = R(..) in b` is a one-arm match on a variable pattern (`ast.let_bind_match`; `where`
 # is the same construct). Splits it when `R` is a splittable record, the literal names every field
-# once, and every free occurrence of `x` in `b` is the base of a field read.
+# once, and every free occurrence of `x` in `b` is the base of a field read. Lets leading the value
+# float out first, when the pass made them (`is_pass_name`):
+#
+#   let x = (let y = e0 in r) in b   ->   let y = e0 in let x = r in b
+#
+# `y` is fresh, so `b` cannot mention it. Any other let stays and blocks the split: a user's, and
+# a bundler-renamed one (`$l_<name>`), which holds `$` too and may shadow a name `b` reads.
 fn split_let(e: typed_ast.TypedExpr, recs: Dict (List String), n: Int) -> Maybe(typed_ast.TypedExpr, Int) =
   match e with
-  | typed_ast.TMatch (typed_ast.TRecord rname fields _ _)
-      [typed_ast.TypedMatchBranch(ast.VarPattern x vp) body] t p ->
-      let Just decl_names = dict_get(rname, recs) else Nothing
+  | typed_ast.TMatch scrut [typed_ast.TypedMatchBranch(ast.VarPattern x vp) body] t p ->
+      let (floated, tail) = peel_lets(scrut, [])
+          typed_ast.TRecord rname fields _ _ = tail else Nothing
+          Just decl_names = dict_get(rname, recs) else Nothing
           Just values = in_decl_order(decl_names, fields) else Nothing
           fresh = list_map(fresh_name(x, n, _), decl_names)
-          Ok body1 = subst(x, dict_from_list(zip(decl_names, fresh)), body) else Nothing
-      in Just((bind_fields(zip(fresh, values), body1, vp, t, p), n + 1))
+          Ok body1 = subst(x, Replace(dict_from_list(zip(decl_names, fresh))), body) else Nothing
+      in Just((rewrap_floated(floated, bind_fields(zip(fresh, values), body1, vp, t, p), t), n + 1))
   | _ -> Nothing
 
+# The leading pass-made lets of `e` as (name, pattern position, value, position), outermost
+# first, and what they scope over.
+fn peel_lets(e: typed_ast.TypedExpr, acc: List (String, source.SourcePos, typed_ast.TypedExpr, source.SourcePos)) ->
+    (List (String, source.SourcePos, typed_ast.TypedExpr, source.SourcePos), typed_ast.TypedExpr) =
+  match e with
+  | typed_ast.TMatch value [typed_ast.TypedMatchBranch(ast.VarPattern y yp) inner] _ ip ->
+      if is_pass_name(y) then peel_lets(inner, Cons((y, yp, value, ip), acc)) else (list_reverse(acc), e)
+  | _ -> (list_reverse(acc), e)
+
+# The floated lets back around `inner`, the first outermost, each with the split let's type.
+fn rewrap_floated(floated: List (String, source.SourcePos, typed_ast.TypedExpr, source.SourcePos),
+                  inner: typed_ast.TypedExpr, t: types.Type) -> typed_ast.TypedExpr =
+  match floated with
+  | [] -> inner
+  | [(y, yp, value, ip) | rest] ->
+      typed_ast.TMatch(value, [typed_ast.TypedMatchBranch(ast.VarPattern(y, yp), rewrap_floated(rest, inner, t))],
+                       t, ip)
+
 fn fresh_name(x: String, n: Int, field: String) -> String =
-  x ++ "$" ++ field ++ "$" ++ int_to_string(n)
+  pass_name(x ++ "$" ++ field, n)
+
+# Every name this pass makes: `base$N$ri`. `N` is used once program-wide, so the name is fresh, and
+# the `$ri` suffix is this pass's alone: no source identifier holds `$`, and no other pass ends a
+# name in `$ri`.
+fn pass_name(base: String, n: Int) -> String =
+  base ++ "$" ++ int_to_string(n) ++ "$ri"
+
+fn is_pass_name(name: String) -> Bool = string.ends_with(name, "$ri")
 
 # The literal's field values in declaration order. `Nothing` when a declared field is missing or
 # the literal carries more fields than the record declares.
@@ -226,12 +737,12 @@ fn bind_fields(bindings: List (String, typed_ast.TypedExpr), body: typed_ast.Typ
                        [typed_ast.TypedMatchBranch(ast.VarPattern(name, vp), bind_fields(rest, body, vp, t, p))],
                        t, p)
 
-# `e` with each `x.f` read replaced by the variable `names` gives `f`; `Err` when `x` occurs any
+# `e` with each `x.f` read replaced (`Replace`), or checked (`Verify`); `Err` when `x` occurs any
 # other way. Below a binder that rebinds `x`, `x` is a different variable: left alone. A
 # scrutinee, a do-step value and a let's own value are outside the binder they feed.
 # Exhaustive with no wildcard: a new expression form may bind names, and a scope-blind default
 # would substitute below its binder.
-fn subst(x: String, names: Dict String, e: typed_ast.TypedExpr) -> Result Unit typed_ast.TypedExpr =
+fn subst(x: String, mode: Mode, e: typed_ast.TypedExpr) -> Result Unit typed_ast.TypedExpr =
   match e with
   | typed_ast.TVar v _ _ -> if v == x then Err(()) else Ok(e)
   | typed_ast.TInt _ _ _ -> Ok(e)
@@ -242,77 +753,107 @@ fn subst(x: String, names: Dict String, e: typed_ast.TypedExpr) -> Result Unit t
   | typed_ast.TUnit _ _ -> Ok(e)
   | typed_ast.TDict _ _ _ _ -> Ok(e)
   | typed_ast.TMethodRef _ _ _ _ _ -> Ok(e)
-  | typed_ast.TTuple _ _ _ -> typed_ast.traverse_children(subst(x, names, _), e)
-  | typed_ast.TIf _ _ _ _ _ -> typed_ast.traverse_children(subst(x, names, _), e)
-  | typed_ast.TCall _ _ _ _ -> typed_ast.traverse_children(subst(x, names, _), e)
-  | typed_ast.TBinary _ _ _ _ _ -> typed_ast.traverse_children(subst(x, names, _), e)
-  | typed_ast.TUnary _ _ _ _ -> typed_ast.traverse_children(subst(x, names, _), e)
-  | typed_ast.TRange _ _ _ _ -> typed_ast.traverse_children(subst(x, names, _), e)
-  | typed_ast.TRecord _ _ _ _ -> typed_ast.traverse_children(subst(x, names, _), e)
-  | typed_ast.TRecordUpdate _ _ _ _ -> typed_ast.traverse_children(subst(x, names, _), e)
-  | typed_ast.TGetField base fld t p -> subst_field(x, names, base, fld, t, p, e)
+  | typed_ast.TTuple _ _ _ -> typed_ast.traverse_children(subst(x, mode, _), e)
+  | typed_ast.TIf _ _ _ _ _ -> typed_ast.traverse_children(subst(x, mode, _), e)
+  | typed_ast.TCall callee args t p -> subst_call(x, mode, callee, args, t, p, e)
+  | typed_ast.TBinary _ _ _ _ _ -> typed_ast.traverse_children(subst(x, mode, _), e)
+  | typed_ast.TUnary _ _ _ _ -> typed_ast.traverse_children(subst(x, mode, _), e)
+  | typed_ast.TRange _ _ _ _ -> typed_ast.traverse_children(subst(x, mode, _), e)
+  | typed_ast.TRecord _ _ _ _ -> typed_ast.traverse_children(subst(x, mode, _), e)
+  | typed_ast.TRecordUpdate _ _ _ _ -> typed_ast.traverse_children(subst(x, mode, _), e)
+  | typed_ast.TGetField base fld t p -> subst_field(x, mode, base, fld, t, p, e)
   | typed_ast.TMatch scrut branches t p ->
-      let s = try subst(x, names, scrut)
-          bs = try traverse(subst_branch(x, names, _), branches)
+      let s = try subst(x, mode, scrut)
+          bs = try traverse(subst_branch(x, mode, _), branches)
       in Ok(typed_ast.TMatch(s, bs, t, p))
   | typed_ast.TLambda params body t p ->
       if list_member(x, list_map(param_name, params))
       then Ok(e)
       else
-        let b = try subst(x, names, body)
+        let b = try subst(x, mode, body)
         in Ok(typed_ast.TLambda(params, b, t, p))
   | typed_ast.TDo steps t p ->
-      let ss = try subst_steps(x, names, steps)
+      let ss = try subst_steps(x, mode, steps)
       in Ok(typed_ast.TDo(ss, t, p))
 
 # `x.f` becomes the variable bound for `f`; a read of anything else recurses into its base.
-fn subst_field(x: String, names: Dict String, base: typed_ast.TypedExpr, fld: String, t: types.Type,
+fn subst_field(x: String, mode: Mode, base: typed_ast.TypedExpr, fld: String, t: types.Type,
                p: source.SourcePos, e: typed_ast.TypedExpr) -> Result Unit typed_ast.TypedExpr =
   match base with
   | typed_ast.TVar v _ _ ->
       if v != x then Ok(e)
       else
-        match dict_get(fld, names) with
-        | Just name -> Ok(typed_ast.TVar(name, t, p))
-        | Nothing -> Err(())
-  | _ -> typed_ast.traverse_children(subst(x, names, _), e)
+        match mode with
+        | Verify _ -> Ok(e)
+        | Replace names ->
+            match dict_get(fld, names) with
+            | Just name -> Ok(typed_ast.TVar(name, t, p))
+            | Nothing -> Err(())
+  | _ -> typed_ast.traverse_children(subst(x, mode, _), e)
+
+# Under `Verify`, `x` as an argument at a field-only parameter of a callee that passes every
+# parameter is a use the split allows: the call will inline, so the argument becomes field reads.
+fn subst_call(x: String, mode: Mode, callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
+              t: types.Type, p: source.SourcePos, e: typed_ast.TypedExpr) ->
+    Result Unit typed_ast.TypedExpr =
+  match mode with
+  | Replace _ -> typed_ast.traverse_children(subst(x, mode, _), e)
+  | Verify callees ->
+      match inlinable_callee(callee, args, callees) with
+      | Just c ->
+          let xs = try traverse(subst_arg(x, mode, _), zip(args, c.field_only))
+          in Ok(typed_ast.TCall(callee, xs, t, p))
+      | Nothing -> typed_ast.traverse_children(subst(x, mode, _), e)
+
+# The callee of a call to a top-level callee that passes every parameter.
+fn inlinable_callee(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, callees: Dict Callee) ->
+    Maybe Callee =
+  let typed_ast.TVar f _ _ = callee else Nothing
+      Just c = dict_get(f, callees) else Nothing
+  in if list_length(args) == list_length(c.params) then Just(c) else Nothing
+
+fn subst_arg(x: String, mode: Mode, arg: (typed_ast.TypedExpr, Bool)) -> Result Unit typed_ast.TypedExpr =
+  let (a, field_only) = arg
+  in match a with
+     | typed_ast.TVar v _ _ -> if v == x && field_only then Ok(a) else subst(x, mode, a)
+     | _ -> subst(x, mode, a)
 
 fn param_name(p: ast.Param) -> String =
   match p with
   | ast.Param name _ _ -> name
 
-fn subst_branch(x: String, names: Dict String, b: typed_ast.TypedMatchBranch) ->
+fn subst_branch(x: String, mode: Mode, b: typed_ast.TypedMatchBranch) ->
     Result Unit typed_ast.TypedMatchBranch =
   match b with
   | typed_ast.TypedMatchBranch pat body ->
       if list_member(x, ast.pattern_names(pat))
       then Ok(b)
       else
-        let body1 = try subst(x, names, body)
+        let body1 = try subst(x, mode, body)
         in Ok(typed_ast.TypedMatchBranch(pat, body1))
 
 # A step's value sees the `x` of the steps before it; its binder covers only the steps after it.
-fn subst_steps(x: String, names: Dict String, steps: List typed_ast.TypedDoStep) ->
+fn subst_steps(x: String, mode: Mode, steps: List typed_ast.TypedDoStep) ->
     Result Unit (List typed_ast.TypedDoStep) =
   match steps with
   | [] -> Ok([])
   | [s | rest] ->
       match s with
-      | typed_ast.TDoBindStep pat value mode ->
-          let v = try subst(x, names, value)
-          in subst_rest(typed_ast.TDoBindStep(pat, v, mode), list_member(x, ast.pattern_names(pat)),
-                        x, names, rest)
+      | typed_ast.TDoBindStep pat value dmode ->
+          let v = try subst(x, mode, value)
+          in subst_rest(typed_ast.TDoBindStep(pat, v, dmode), list_member(x, ast.pattern_names(pat)),
+                        x, mode, rest)
       | typed_ast.TDoLetStep name value ->
-          let v = try subst(x, names, value)
-          in subst_rest(typed_ast.TDoLetStep(name, v), name == x, x, names, rest)
+          let v = try subst(x, mode, value)
+          in subst_rest(typed_ast.TDoLetStep(name, v), name == x, x, mode, rest)
       | typed_ast.TDoExprStep value ->
-          let v = try subst(x, names, value)
-          in subst_rest(typed_ast.TDoExprStep(v), false, x, names, rest)
+          let v = try subst(x, mode, value)
+          in subst_rest(typed_ast.TDoExprStep(v), false, x, mode, rest)
 
-fn subst_rest(done: typed_ast.TypedDoStep, rebinds: Bool, x: String, names: Dict String,
+fn subst_rest(done: typed_ast.TypedDoStep, rebinds: Bool, x: String, mode: Mode,
               rest: List typed_ast.TypedDoStep) -> Result Unit (List typed_ast.TypedDoStep) =
   if rebinds
   then Ok(Cons(done, rest))
   else
-    let more = try subst_steps(x, names, rest)
+    let more = try subst_steps(x, mode, rest)
     in Ok(Cons(done, more))

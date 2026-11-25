@@ -280,16 +280,25 @@ run ahead of a later argument's effect. A local binder cannot shadow a wrapper: 
 `vector_mutset` still lowers inline. IR shape is checked by `scripts/b1_gate.sh`; design:
 [scalar-store-inline-v0.md](scalar-store-inline-v0.md).
 
-### Record let splitting — `stdlib/compiler/rec_inline.sprout`
+### Record let splitting and builder inlining — `stdlib/compiler/rec_inline.sprout`
 
 A typed-AST pass in `ir_pipeline.compile_program_streaming`, after `dce.elim_unreachable` and
 before BCE. `let x = R(..) in b`, with `R` a non-linear record and every free `x` in `b` the base of
-a `.field` read, becomes one `let x$f$N = e_f` per field in declaration order (the order a literal
+a `.field` read, becomes one `let x$f$N$ri = e_f` per field in declaration order (the order a literal
 lowers in), and each `x.f` reads its let: no record is built. Any bare use keeps the let. The
 occurrence check stops below a pattern, lambda parameter or `do` step that rebinds `x`; `N` is a
 program-wide counter and `$` is not an identifier character, so the new names are fresh.
-`SPROUT_OPT_OFF=rec_inline` disables it. IR shape and trap order are checked by
-`scripts/b1_gate.sh`; design: [record-sra-v0.md](record-sra-v0.md).
+The inliner (stage 2) copies the body of a small pure top-level function (at most 64 nodes after
+its own calls inline, closed annotated types, no effect row or dictionary parameter, not in a
+recursive group, result a non-linear record or `Int`/`Double`/`Bool`/`Char`) when a record
+allocation goes away: a record builder read by a splitting let, or a call whose field-only
+parameter (read only by `.field` or passed to another field-only parameter) gets a builder call or
+a variable bound by a splitting let. Callees are prepared callee-first over the call graph and
+cached; a non-variable, non-literal argument is let-bound to `p$N$ri` in call order, every binder in
+the copy is renamed to a fresh `$` name, and the copy is walked again so its own calls inline. Leading
+pass-made lets (names ending `$ri`, never a bundler `$l_` local) float out of a split let's value.
+`SPROUT_OPT_OFF=rec_inline` disables both. IR shape
+and trap order are checked by `scripts/b1_gate.sh`; design: [record-sra-v0.md](record-sra-v0.md).
 
 ### GC safety linter
 

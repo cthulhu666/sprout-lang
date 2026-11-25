@@ -7,7 +7,8 @@ module main
 type P = (x: Double, y: Double, z: Double)
 type linear L = (x: Int, y: Int)
 
-fn take(p: P) -> Double = p.x
+# Not eligible for inlining (an `if` tail), so a bare use of the record stays a call.
+fn take(p: P) -> Double = if p.x > 0.0 then p.x else 0.0 - p.x
 
 # Split: no allocation.
 fn split_fields(a: Double, b: Double, c: Double) -> Double =

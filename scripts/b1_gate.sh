@@ -17,6 +17,9 @@
 #   rec    a `let` bound to a record literal and read only by `.field` allocates nothing
 #          (the `rec_inline` pass, docs/record-sra-v0.md); any other use, or a linear
 #          record, keeps the allocation; split fields keep declaration order and traps.
+#   inline `vec3` builders inline where an allocation goes away (q_mul, q_rot, distance) and
+#          stay calls where it does not (escape, projection, ineligible callee); arguments
+#          keep their order and a trap in an inlined body still fires.
 #
 # Run: mise exec -- just b1-gate   (needs build/compile_driver_bin_stage1)
 set -uo pipefail
@@ -235,6 +238,72 @@ check_trap "$FIX/fixture_rec_split_order.spr" recorder \
   'runtime error: a first' 'out-of-order record literal'
 check_trap "$FIX/fixture_rec_split_unused.spr" recunused \
   'runtime error: unused field' 'record literal with an unread field'
+
+# Record builder inlining (the `rec_inline` pass, stage 2) — `vec3` builders inline where a record
+# allocation goes away: q_mul keeps its Vec3 and Quat, q_rot its Vec3, and the rest build none.
+# `count_alloc [width]` reads a function body on stdin: its `sprout_alloc_obj` calls, all or of one width.
+count_alloc() {
+  if [ -n "${1:-}" ]; then grep -cE "@sprout_alloc_obj\(i64 [0-9]+, i64 $1\)"; else grep -cF '@sprout_alloc_obj('; fi
+}
+vec3_ops='stdlib[.]linalg[.]vec3[.](add|scale|cross)\('
+
+inl_ir="$(emit "$FIX/fixture_rec_inline.spr")"
+body="$(fn_body 'main\.q_mul' <<<"$inl_ir")"
+if [ -n "$body" ] && [ "$(count_alloc <<<"$body")" -eq 2 ] && [ "$(count_alloc 3 <<<"$body")" -eq 1 ] \
+   && ! grep -qE "$vec3_ops" <<<"$body" && has_call stdlib.linalg.vec3.dot <<<"$body"; then
+  echo "  ok: q_mul allocates one Vec3 and one Quat, keeps the dot call"
+else
+  echo "  FAIL: q_mul does not build exactly one Vec3 and one Quat without add/scale/cross calls"; fail=1
+fi
+body="$(fn_body 'main\.q_rot' <<<"$inl_ir")"
+if [ -n "$body" ] && [ "$(count_alloc <<<"$body")" -eq 1 ] && [ "$(count_alloc 3 <<<"$body")" -eq 1 ] \
+   && ! grep -qE "$vec3_ops" <<<"$body"; then
+  echo "  ok: q_rot allocates only the Vec3 it returns"
+else
+  echo "  FAIL: q_rot does not build exactly one Vec3 without add/scale/cross calls"; fail=1
+fi
+for fn in main.dist_len stdlib.linalg.vec3.distance; do
+  body="$(fn_body "${fn//./\\.}" <<<"$inl_ir")"
+  if [ -n "$body" ] && [ "$(count_alloc <<<"$body")" -eq 0 ] && ! has_call stdlib.linalg.vec3.sub <<<"$body"; then
+    echo "  ok: $fn builds no record and does not call sub"
+  else
+    echo "  FAIL: $fn still builds a record or calls sub (or has no body)"; fail=1
+  fi
+done
+for entry in keep_escape:stdlib.linalg.vec3.add keep_proj:stdlib.linalg.vec3.add keep_cpr:stdlib.linalg.vec3.add \
+             keep_cpr:main.g_worker neg_recursive:main.rb neg_unannotated:main.gen_b neg_effect:main.eff_b \
+             neg_over_k:main.big_b neg_if_tail:main.if_b neg_linear:main.lin_b; do
+  fn="${entry%%:*}"; sym="${entry#*:}"
+  if fn_body "main\\.$fn" <<<"$inl_ir" | has_call "$sym"; then
+    echo "  ok: $fn keeps the call to $sym"
+  else
+    echo "  FAIL: $fn lost its call to $sym (an ineligible or escaping builder was inlined)"; fail=1
+  fi
+done
+# A constrained callee may be specialised to `con_b$spec_Double`; either spelling is a call.
+if fn_body 'main\.neg_constrained' <<<"$inl_ir" | grep -qE '@main[.]con_b[($]'; then
+  echo "  ok: neg_constrained keeps the call to main.con_b"
+else
+  echo "  FAIL: neg_constrained lost its call to main.con_b (a constrained builder was inlined)"; fail=1
+fi
+# A partial application is a closure over the call, never an inlined body.
+if awk '/^define i64 @__sprout_ir_lambda_[0-9]+\(.*ph_0/,/^\}/' <<<"$inl_ir" | has_call stdlib.linalg.vec3.add; then
+  echo "  ok: a partial application of vec3.add keeps the call"
+else
+  echo "  FAIL: a partial application of vec3.add was inlined"; fail=1
+fi
+off_ir="$(env SPROUT_OPT_OFF=rec_inline "$STAGE1" --emit-ir stdlib "$FIX/fixture_rec_inline.spr" 2>/dev/null)"
+if fn_body 'main\.q_mul' <<<"$off_ir" | has_call stdlib.linalg.vec3.add; then
+  echo "  ok: SPROUT_OPT_OFF=rec_inline keeps the vec3 calls"
+else
+  echo "  FAIL: SPROUT_OPT_OFF=rec_inline did not disable the inliner"; fail=1
+fi
+
+# Argument order and traps survive inlining.
+check_trap "$FIX/fixture_rec_inline_order.spr" recinorder \
+  'runtime error: arg a' 'inlined call with trapping arguments'
+check_trap "$FIX/fixture_rec_inline_body.spr" recinbody \
+  'runtime error: division by zero' 'trap inside an inlined body'
 
 if [ "$fail" -eq 0 ]; then echo "b1-gate: PASS"; else echo "b1-gate: FAIL"; fi
 exit "$fail"
