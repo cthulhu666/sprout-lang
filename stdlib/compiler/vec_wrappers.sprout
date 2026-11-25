@@ -143,7 +143,7 @@ fn can_trap(e: typed_ast.TypedExpr) -> Bool =
   | typed_ast.TCall _ args _ _ -> any(can_trap, args)
   | _ -> false
 
-fn is_atomic(e: typed_ast.TypedExpr) -> Bool =
+export fn is_atomic(e: typed_ast.TypedExpr) -> Bool =
   match e with
   | typed_ast.TVar _ _ _ -> true
   | typed_ast.TInt _ _ _ -> true

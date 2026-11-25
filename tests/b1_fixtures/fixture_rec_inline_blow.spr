@@ -1,0 +1,17 @@
+module main
+
+type V = (x: Double, y: Double)
+
+fn mk(a: Double, b: Double) -> V = V(x = a, y = b)
+
+fn h0(v: V) -> Double = v.x * v.y
+fn h1(v: V) -> Double = h0(v) + h0(v) + h0(v)
+fn h2(v: V) -> Double = h1(v) + h1(v) + h1(v)
+fn h3(v: V) -> Double = h2(v) + h2(v) + h2(v)
+fn h4(v: V) -> Double = h3(v) + h3(v) + h3(v)
+fn h5(v: V) -> Double = h4(v) + h4(v) + h4(v)
+fn h6(v: V) -> Double = h5(v) + h5(v) + h5(v)
+
+fn run(a: Double) -> Double = h6(mk(a, 2.0))
+
+fn main() -> Unit !{IO} = print(to_string(run(1.5)))
