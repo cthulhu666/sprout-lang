@@ -380,13 +380,13 @@ def freeVarField : Program := ⟨[.typeD "T" [] [("C", [.named "a"])]]⟩
 #guard rejectKey freeVarField == "unknown-type"
 
 /-- A field applies a type to the wrong number of arguments: `type T = | C (Maybe Int Int)`.
-Spec §8.5 (kinds): every constructor field has kind `Type`. -/
+Spec §8.5.1 (kinds): every constructor field has kind `Type`. -/
 def fieldArity : Program := ⟨[maybeD, .typeD "T" [] [("C", [.adt "Maybe" [.int, .int]])]]⟩
 
 -- compiler: rejects ("the type `Maybe Int` has kind `Type` and takes no argument")
 #guard rejectKey fieldArity == "type-arity"
 
-/-! Written types outside a field are kind-checked too (spec §8.5): a signature, a top-level
+/-! Written types outside a field are kind-checked too (spec §8.5.1): a signature, a top-level
 `let` annotation and a lambda parameter annotation. Compiler verdicts are on the printed program. -/
 
 /-- `fn f(x: t) -> Int = 1` after `type Maybe a`. -/

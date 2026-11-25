@@ -1486,7 +1486,7 @@ PATH. It installs on first use, so nothing changes for a contributor who never t
   `checkProgram_sound` (`p.Surf → checkProgram {} p fuel = .ok () → p.Typed`), T2 for programs;
   its layers are `PlanInv`, `Ground`, `LetSound` and `FnSound`.
 - Spec snapshot: `formal/spec-snapshot/` holds spec §5.1–5.5, the intro of §5.6 (up to
-  `### 5.6.1`), §5.8, §7, §8.5 up to its `Applicative` part (for the kind rules) and §10.10, cut
+  `### 5.6.1`), §5.8, §7, §8.5.1 (kinds) and §10.10, cut
   by heading (`scripts/lean_spec_snapshot.py`). Any change to them fails `lean-model` until the
   model has been re-checked against the new text and `just lean-spec-snapshot` has refreshed the
   copy in the same commit. A `-- spec §…` rule tag in `formal/SproutCore/` citing a section

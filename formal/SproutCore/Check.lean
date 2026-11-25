@@ -1103,7 +1103,7 @@ def adtArity (types : List (String × Nat)) (n : String) (ts : List Ty) : Except
   -- signature the bundler refuses it, though §5.6 calls that position unvalidated
   | none => throw (.reject "unknown-type" s!"unknown type {n}")
   | some k =>
-    -- spec §8.5: every written type has kind `Type`
+    -- spec §8.5.1: every written type has kind `Type`
     if ts.length != k then throw (.reject "type-arity" s!"{n} takes {k} arguments") else pure ()
 
 mutual
@@ -1138,7 +1138,7 @@ end
 (`main-sig`). -/
 
 mutual
-/-- spec §8.5: "Every type the program writes is judged" -/
+/-- spec §8.5.1: "Every type the program writes is judged" -/
 def kindTy (types : List (String × Nat)) : Ty → Except CErr Unit
   | .adt n ts => do adtArity types n ts; kindTys types ts
   | .tup ts => kindTys types ts

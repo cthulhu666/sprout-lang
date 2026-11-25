@@ -440,7 +440,7 @@ def mutate (info : Info) (decls : List Decl) : G (List Decl) := do
         pure (decls ++ [.fn m [] (some (t, .pure)) (.app (.ctor kc) args)]))]
   | 23 =>
     -- a declared type applied to too many or too few arguments in a signature, a top-level `let`
-    -- annotation or a lambda parameter annotation (spec §8.5); the rest of the program types
+    -- annotation or a lambda parameter annotation (spec §8.5.1); the rest of the program types
     if adts.isEmpty then pure decls else
     let ad ← elem adts
     let n := ad.params.length

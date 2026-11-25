@@ -220,7 +220,7 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
   `join-order` bug through `match` arms). A pattern binding a name twice is a spec gap both sides
   accept; an unknown type name in a signature is refused by the bundler, though §5.6 calls that
   position unvalidated, so the generator never writes one. Each is a `BACKLOG.md` entry. Written
-  types are kind-checked on both sides (spec §8.5): a field, signature, `let` or lambda annotation
+  types are kind-checked on both sides (spec §8.5.1): a field, signature, `let` or lambda annotation
   that applies a type to the wrong number of arguments is rejected.
 
 ## 7. Drift gate
@@ -366,7 +366,7 @@ generator ──► Sprout Core term ──┬──► Lean checker ───�
      values come from constructor calls, nullary constructors and bare constructors in slots; a
      `match` on any non-arrow type takes full, partial-plus-catch-all, split and diagonal pattern
      sets. Every written type, in a field, a signature or an annotation, names a declared type
-     applied to its parameter count (spec §8.5's kind rules; Core has no higher kinds).
+     applied to its parameter count (spec §8.5.1's kind rules; Core has no higher kinds).
      Mutations: remove, move earlier or repeat an arm, a pattern or call of the wrong arity,
      an ill-formed field, a type applied to the wrong number of arguments in a signature or an
      annotation. About 54% of programs are accepted. Findings and fallbacks: §6.

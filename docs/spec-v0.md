@@ -3858,6 +3858,8 @@ instance Summable IntVec
   …
 ```
 
+### 8.5.1 Kinds
+
 **A class variable and every type it is applied to have a kind, and every constraint
 and instance head must respect it.**  A kind is `Type` (a type that has values) or
 `k1 -> k2` (a type constructor that takes a type of kind `k1` and yields one of kind
