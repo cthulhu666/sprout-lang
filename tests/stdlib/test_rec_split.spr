@@ -1,0 +1,107 @@
+import stdlib.test (check_eq, run_suite)
+
+# Record let splitting (docs/record-sra-v0.md stage 1): `let v = V(..) in <only v.f reads>` becomes
+# one scalar let per field. Results must match the unsplit program, most of all where a name is
+# rebound. Shape and evaluation-order checks: scripts/b1_gate.sh, on
+# tests/b1_fixtures/fixture_rec_split*.spr.
+
+type V = (x: Double, y: Double, z: Double)
+type Outer = (p: V, k: Double)
+
+fn take(v: V) -> Double = (v.x * 100.0) + (v.y * 10.0) + v.z
+
+fn simple(a: Double) -> Double =
+  let v = V(x = a, y = a * 2.0, z = 1.0)
+  in v.x + v.y + v.z
+
+fn used_twice(a: Double, b: Double) -> Double =
+  let v = V(x = a, y = b, z = 0.5)
+  in (v.x * v.x) + (v.y * v.x)
+
+# Written out of declaration order.
+fn reordered(a: Double, b: Double) -> Double =
+  let v = V(z = a, x = b, y = 7.0)
+  in (v.x * 100.0) + (v.y * 10.0) + v.z
+
+fn under_lambda(a: Double, b: Double) -> Double =
+  let v = V(x = a, y = b, z = 1.0)
+  in let f = \k -> (k * v.x) + v.z
+     in f(2.0) + f(3.0)
+
+fn where_bound(a: Double) -> Double =
+  v.x + v.y
+where
+  v = V(x = a, y = 10.0, z = 0.0)
+
+# The arm's `v` is the pattern's. `Nothing` reads the let's.
+fn shadow_arm_field(m: Maybe V) -> Double =
+  let v = V(x = 1.0, y = 2.0, z = 3.0)
+  in match m with
+     | Just v -> v.x
+     | Nothing -> v.y
+
+# A bare use of the pattern's `v` does not block the split of the let's.
+fn shadow_arm_bare(m: Maybe V) -> Double =
+  let v = V(x = 1.0, y = 2.0, z = 3.0)
+  in match m with
+     | Just v -> take(v)
+     | Nothing -> v.z
+
+fn shadow_lambda(a: Double) -> Double =
+  let v = V(x = a, y = 2.0, z = 3.0)
+  in let get = \ (v: V) -> v.x
+     in get(V(x = 50.0, y = 0.0, z = 0.0)) + v.y
+
+fn shadow_do_let() -> Double !{IO} =
+  do
+    let v = V(x = 1.0, y = 2.0, z = 3.0)
+    let a = v.x + v.y
+    a + v.z
+
+# The inner `t` reads the outer one: x = 2.0, y = 1.0.
+fn shadow_let() -> Double =
+  let t = V(x = 1.0, y = 2.0, z = 3.0)
+  in let t = V(x = t.y, y = t.x, z = t.z)
+     in t.x - t.y
+
+# Inner `t` is used bare; the outer one is read only by the inner literal.
+fn shadow_let_bare() -> Double =
+  let t = V(x = 1.0, y = 2.0, z = 3.0)
+  in let t = V(x = t.y, y = t.x, z = t.z)
+     in take(t)
+
+# Bare use blocks the split; the result is unchanged.
+fn bare_use(a: Double) -> Double =
+  let v = V(x = a, y = 2.0, z = 3.0)
+  in take(v)
+
+fn mixed_use(a: Double) -> Double =
+  let v = V(x = a, y = 2.0, z = 3.0)
+  in v.x + take(v)
+
+# A field that is itself a record literal.
+fn nested(a: Double) -> Double =
+  let o = Outer(p = V(x = a, y = 2.0, z = 3.0), k = 4.0)
+  in o.p.x + o.k
+
+fn main() -> Unit !{IO} =
+  do
+    shadowed <- shadow_do_let()
+    run_suite("rec_split", [
+      check_eq("simple", simple(1.0), 4.0),
+      check_eq("used twice", used_twice(3.0, 4.0), 21.0),
+      check_eq("out of declaration order", reordered(1.0, 2.0), 271.0),
+      check_eq("under a lambda", under_lambda(5.0, 0.0), 27.0),
+      check_eq("where", where_bound(2.0), 12.0),
+      check_eq("arm shadows, Just", shadow_arm_field(Just (V(x = 10.0, y = 20.0, z = 30.0))), 10.0),
+      check_eq("arm shadows, Nothing", shadow_arm_field(Nothing), 2.0),
+      check_eq("arm shadows, bare, Just", shadow_arm_bare(Just (V(x = 1.0, y = 2.0, z = 3.0))), 123.0),
+      check_eq("arm shadows, bare, Nothing", shadow_arm_bare(Nothing), 3.0),
+      check_eq("lambda parameter shadows", shadow_lambda(9.0), 52.0),
+      check_eq("do let", shadowed, 6.0),
+      check_eq("same-name let", shadow_let(), 1.0),
+      check_eq("same-name let, inner bare", shadow_let_bare(), 213.0),
+      check_eq("bare use", bare_use(1.0), 123.0),
+      check_eq("mixed use", mixed_use(1.0), 124.0),
+      check_eq("nested record", nested(1.0), 5.0)
+    ])

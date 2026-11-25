@@ -14,6 +14,9 @@
 #          aborts (non-zero exit + trap message).
 #   stores a scalar `vector_mutset` lowers inline, directly and through a store
 #          wrapper (`mutvec_set`, the `wsi` pass); any other value keeps the call.
+#   rec    a `let` bound to a record literal and read only by `.field` allocates nothing
+#          (the `rec_inline` pass, docs/record-sra-v0.md); any other use, or a linear
+#          record, keeps the allocation; split fields keep declaration order and traps.
 #
 # Run: mise exec -- just b1-gate   (needs build/compile_driver_bin_stage1)
 set -uo pipefail
@@ -196,6 +199,42 @@ if [ -n "$body" ] && grep -qF 'vpanic_' <<<"$body" && ! has_call stdlib.mutable.
 else
   echo "  FAIL: the out-of-bounds wrapper store still calls mutvec_set (or has no inline guard)"; fail=1
 fi
+
+# Record let splitting (the `rec_inline` pass) — a `let` bound to a record literal and read only by
+# `.field` allocates no record; a bare use, a mixed use and a linear record keep the allocation.
+# `has_alloc` reads a function body on stdin.
+has_alloc() { grep -qF '@sprout_alloc_obj('; }
+
+rec_ir="$(emit "$FIX/fixture_rec_split.spr")"
+for fn in split_fields split_twice split_lambda split_shadowed_arm; do
+  body="$(fn_body "main\\.$fn" <<<"$rec_ir")"
+  if [ -n "$body" ] && ! has_alloc <<<"$body"; then
+    echo "  ok: $fn record let is split, no allocation"
+  else
+    echo "  FAIL: $fn still allocates its record (or has no body)"; fail=1
+  fi
+done
+for fn in keep_in_list keep_passed keep_mixed keep_linear; do
+  body="$(fn_body "main\\.$fn" <<<"$rec_ir")"
+  if [ -n "$body" ] && has_alloc <<<"$body"; then
+    echo "  ok: $fn keeps its record allocation"
+  else
+    echo "  FAIL: $fn lost its record allocation (a record that must stay boxed was split)"; fail=1
+  fi
+done
+# SPROUT_OPT_OFF=rec_inline keeps the allocation.
+off_ir="$(env SPROUT_OPT_OFF=rec_inline "$STAGE1" --emit-ir stdlib "$FIX/fixture_rec_split.spr" 2>/dev/null)"
+if fn_body 'main\.split_fields' <<<"$off_ir" | has_alloc; then
+  echo "  ok: SPROUT_OPT_OFF=rec_inline keeps the allocation"
+else
+  echo "  FAIL: SPROUT_OPT_OFF=rec_inline did not disable the pass"; fail=1
+fi
+
+# Split fields evaluate in declaration order, and a field nothing reads is still evaluated.
+check_trap "$FIX/fixture_rec_split_order.spr" recorder \
+  'runtime error: a first' 'out-of-order record literal'
+check_trap "$FIX/fixture_rec_split_unused.spr" recunused \
+  'runtime error: unused field' 'record literal with an unread field'
 
 if [ "$fail" -eq 0 ]; then echo "b1-gate: PASS"; else echo "b1-gate: FAIL"; fi
 exit "$fail"

@@ -1,0 +1,49 @@
+module main
+
+# Record let splitting gate (docs/record-sra-v0.md stage 1): a `let` bound to a record literal and
+# read only by `.field` allocates nothing; any other use, or a linear record, keeps the allocation.
+# The b1-gate checks each function's own IR for `sprout_alloc_obj`.
+
+type P = (x: Double, y: Double, z: Double)
+type linear L = (x: Int, y: Int)
+
+fn take(p: P) -> Double = p.x
+
+# Split: no allocation.
+fn split_fields(a: Double, b: Double, c: Double) -> Double =
+  let p = P(x = a, y = b, z = c)
+  in p.x + p.y
+
+fn split_twice(a: Double, b: Double, c: Double) -> Double =
+  let p = P(x = a, y = b, z = c)
+  in (p.x * p.x) + p.z
+
+fn split_lambda(a: Double, b: Double, c: Double) -> Double =
+  let p = P(x = a, y = b, z = c)
+  in let f = \k -> k * p.x
+     in f(1.0) + f(2.0)
+
+# The inner `p` is the arm's; the let's is read only by field.
+fn split_shadowed_arm(m: Maybe P, a: Double) -> Double =
+  let p = P(x = a, y = a, z = a)
+  in match m with
+     | Just p -> p.y
+     | Nothing -> p.y
+
+# Kept: a bare use.
+fn keep_in_list(a: Double, b: Double, c: Double) -> List P =
+  let p = P(x = a, y = b, z = c)
+  in [p]
+
+fn keep_passed(a: Double, b: Double, c: Double) -> Double =
+  let p = P(x = a, y = b, z = c)
+  in take(p)
+
+fn keep_mixed(a: Double, b: Double, c: Double) -> Double =
+  let p = P(x = a, y = b, z = c)
+  in p.x + take(p)
+
+# Kept: a linear record.
+fn keep_linear(a: Int, b: Int) -> Int =
+  let p = L(x = a, y = b)
+  in p.x
