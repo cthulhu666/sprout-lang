@@ -1,0 +1,7 @@
+# A variable used at two kinds in one signature is rejected whichever parameter comes first.
+module main
+
+fn f(x: t Int, y: t) -> Int where Functor t = 1
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

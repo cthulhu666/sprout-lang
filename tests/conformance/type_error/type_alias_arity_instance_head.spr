@@ -1,0 +1,16 @@
+# An instance head names an alias with fewer arguments than it declares. `Half` is not
+# expanded, so it is reported where it is written.
+module main
+
+type Tagged k v = Tagged k v
+
+type alias Half a = Tagged a
+
+class Boxed t
+  fn label(xs: t Int) -> String
+
+instance Boxed Half
+#~^ ERROR
+  fn label(xs: Half Int) -> String = "half"
+
+fn main() -> Unit !{IO} = print("unreachable")

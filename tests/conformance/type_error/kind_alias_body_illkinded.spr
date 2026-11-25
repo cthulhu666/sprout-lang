@@ -1,0 +1,7 @@
+# An alias body must be well-kinded, even when the alias is never used.
+module main
+
+type alias Bad = Int Bool
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

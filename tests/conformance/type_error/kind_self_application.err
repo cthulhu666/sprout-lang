@@ -1,1 +1,1 @@
-in the constraint `Pretty (f f)` the type `f` is applied to `f`, so its kind would have to contain itself
+in the signature of `g` the type `f` is applied to `f`, so its kind would have to contain itself

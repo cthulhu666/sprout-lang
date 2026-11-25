@@ -1,0 +1,1 @@
+in constructor `T` the type `A` has kind `Type` and takes no argument, but it is applied to `Int`

@@ -1,0 +1,11 @@
+# A lambda parameter annotation in an instance method body is judged too.
+module main
+
+class Pretty t
+  fn pretty(x: t) -> String
+
+instance Pretty Int
+#~^ ERROR
+  fn pretty(x: Int) -> String = to_string(list_map(\ (y: Int Bool) -> 1, []))
+
+fn main() -> Unit !{IO} = print("unreachable")

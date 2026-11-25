@@ -1,0 +1,8 @@
+# The same signature as `kind_sig_param_order` with the parameters swapped. The signature is
+# inconsistent on its own, so it is blamed and not the `where`.
+module main
+
+fn f(x: t, y: t Int) -> Int where Functor t = 1
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

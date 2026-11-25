@@ -803,6 +803,82 @@ export fn record_field_type_exprs(fields: List RecordFieldDecl) -> List TypeExpr
   | [] -> []
   | [RecordFieldDecl _ te | rest] -> Cons(te, record_field_type_exprs(rest))
 
+# --- Lambda parameter annotations ---
+
+# Every type a lambda parameter is annotated with, anywhere under `e`, in source order. An
+# expression carries no other written type. Every `Expr` variant is spelled out, so one that
+# nests an expression fails the build here instead of being skipped.
+export fn lambda_param_annotations(e: Expr) -> List TypeExpr =
+  list_reverse(lambda_annots(e, []))
+
+# `acc` is newest first, so each annotation is added in constant time.
+fn lambda_annots(e: Expr, acc: List TypeExpr) -> List TypeExpr =
+  match e with
+  | VarExpr _ _ -> acc
+  | IntExpr _ _ -> acc
+  | FloatExpr _ _ -> acc
+  | BoolExpr _ _ -> acc
+  | StringExpr _ _ -> acc
+  | CharExpr _ _ -> acc
+  | UnitExpr _ -> acc
+  | StringTemplateExpr parts _ -> list_fold(\ (a, p) -> template_part_annots(p, a), acc, parts)
+  | TupleExpr items _ -> lambda_annots_all(items, acc)
+  | IfExpr c t f _ -> lambda_annots_all([c, t, f], acc)
+  | MatchExpr scrut branches _ ->
+      list_fold(\ (a, b) -> match_branch_annots(b, a), lambda_annots(scrut, acc), branches)
+  | CallExpr callee args _ -> lambda_annots_all(args, lambda_annots(callee, acc))
+  | LambdaExpr params body _ -> lambda_annots(body, list_fold(param_annot, acc, params))
+  | BinaryExpr _ l r _ -> lambda_annots_all([l, r], acc)
+  | UnaryExpr _ x _ -> lambda_annots(x, acc)
+  | IntRangeExpr lo hi _ -> lambda_annots_all([lo, hi], acc)
+  | DoExpr steps _ -> list_fold(\ (a, s) -> do_step_annots(s, a), acc, steps)
+  | RecordExpr _ fields _ -> list_fold(\ (a, f) -> record_field_annots(f, a), acc, fields)
+  | GetFieldExpr x _ _ -> lambda_annots(x, acc)
+  | RecordUpdateExpr base fields _ ->
+      list_fold(\ (a, f) -> record_field_annots(f, a), lambda_annots(base, acc), fields)
+  | ComprehensionExpr elem gens _ ->
+      list_fold(\ (a, g) -> comprehension_gen_annots(g, a), lambda_annots(elem, acc), gens)
+  | LetBindExpr _ value els body _ ->
+      lambda_annots(body, let_else_annots(els, lambda_annots(value, acc)))
+  | TryExpr x _ -> lambda_annots(x, acc)
+
+fn lambda_annots_all(es: List Expr, acc: List TypeExpr) -> List TypeExpr =
+  list_fold(\ (a, x) -> lambda_annots(x, a), acc, es)
+
+fn param_annot(acc: List TypeExpr, p: Param) -> List TypeExpr =
+  match p with
+  | Param _ (Just te) _ -> Cons(te, acc)
+  | Param _ Nothing _ -> acc
+
+fn match_branch_annots(b: MatchBranch, acc: List TypeExpr) -> List TypeExpr =
+  match b with
+  | MatchBranch _ body -> lambda_annots(body, acc)
+
+fn record_field_annots(f: RecordField, acc: List TypeExpr) -> List TypeExpr =
+  match f with
+  | RecordField _ value -> lambda_annots(value, acc)
+
+fn comprehension_gen_annots(g: ComprehensionGen, acc: List TypeExpr) -> List TypeExpr =
+  match g with
+  | ComprehensionGen _ src guards -> lambda_annots_all(guards, lambda_annots(src, acc))
+
+fn template_part_annots(p: TemplateExprPart, acc: List TypeExpr) -> List TypeExpr =
+  match p with
+  | LitPart _ -> acc
+  | InterpPart e -> lambda_annots(e, acc)
+
+fn let_else_annots(els: Maybe LetElse, acc: List TypeExpr) -> List TypeExpr =
+  match els with
+  | Nothing -> acc
+  | Just (LetElse _ handler) -> lambda_annots(handler, acc)
+
+fn do_step_annots(s: DoStep, acc: List TypeExpr) -> List TypeExpr =
+  match s with
+  | DoBindStep _ value -> lambda_annots(value, acc)
+  | DoLetStep _ value -> lambda_annots(value, acc)
+  | DoExprStep value -> lambda_annots(value, acc)
+  | DoPatStep _ _ value els _ -> let_else_annots(els, lambda_annots(value, acc))
+
 # --- Alias expansion in instance heads ---
 #
 # A `type alias` is transparent (spec §5.6.2), so `instance C Name` where

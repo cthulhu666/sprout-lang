@@ -1,0 +1,7 @@
+# An `extern fn` signature is judged like a fn's.
+module main
+
+extern fn probe(x: Int Bool) -> Int
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")

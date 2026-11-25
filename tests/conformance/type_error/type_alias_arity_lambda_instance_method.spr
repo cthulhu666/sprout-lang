@@ -1,0 +1,13 @@
+# A lambda parameter annotation in an instance method body applies an alias to too few arguments.
+module main
+
+type alias Pair a b = (a, b)
+
+class Pretty t
+  fn pretty(x: t) -> String
+
+instance Pretty Int
+#~^ ERROR
+  fn pretty(x: Int) -> String = to_string(list_map(\ (p: Pair Int) -> 1, []))
+
+fn main() -> Unit !{IO} = print("unreachable")

@@ -1,0 +1,1 @@
+in a lambda parameter annotation the type `Int` has kind `Type` and takes no argument, but it is applied to `Bool`

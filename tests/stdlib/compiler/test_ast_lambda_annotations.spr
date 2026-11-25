@@ -1,0 +1,70 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.string as string
+
+fn p() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
+
+fn ty(name: String) -> ast.TypeExpr = ast.TypeName(name)
+
+fn typed(name: String, t: String) -> ast.Param = ast.Param(name, Just(ty(t)), ast.ModeDefault)
+
+fn untyped(name: String) -> ast.Param = ast.Param(name, Nothing, ast.ModeDefault)
+
+fn lam(params: List ast.Param, body: ast.Expr) -> ast.Expr = ast.LambdaExpr(params, body, p())
+
+fn unit() -> ast.Expr = ast.UnitExpr(p())
+
+fn name_of(te: ast.TypeExpr) -> String =
+  match te with
+  | ast.TypeName n -> n
+  | _ -> "?"
+
+fn annots(e: ast.Expr) -> String = string.join(",", list_map(name_of, ast.lambda_param_annotations(e)))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_eq(state, "an expression with no lambda has no annotation", annots(unit()), "")
+
+    assert_eq(state, "only annotated parameters count, in source order",
+      annots(lam([typed("a", "A"), untyped("b"), typed("c", "C")], unit())), "A,C")
+
+    assert_eq(state, "a lambda's parameters come before the lambdas in its body",
+      annots(lam([typed("a", "A")], lam([typed("b", "B")], unit()))), "A,B")
+
+    assert_eq(state, "a callee comes before its arguments",
+      annots(ast.CallExpr(lam([typed("f", "F")], unit()),
+                          [lam([typed("x", "X")], unit()), lam([typed("y", "Y")], unit())], p())),
+      "F,X,Y")
+
+    assert_eq(state, "an if reads its condition, then, else in order",
+      annots(ast.IfExpr(lam([typed("a", "A")], unit()), lam([typed("b", "B")], unit()),
+                        lam([typed("c", "C")], unit()), p())),
+      "A,B,C")
+
+    assert_eq(state, "a match reads the scrutinee, then each branch",
+      annots(ast.MatchExpr(lam([typed("s", "S")], unit()),
+                           [ast.MatchBranch(ast.WildcardPattern(p()), lam([typed("a", "A")], unit())),
+                            ast.MatchBranch(ast.WildcardPattern(p()), lam([typed("b", "B")], unit()))],
+                           p())),
+      "S,A,B")
+
+    assert_eq(state, "a do step and its else handler are read",
+      annots(ast.DoExpr([ast.DoExprStep(lam([typed("a", "A")], unit())),
+                         ast.DoPatStep(ast.ArrowBind, ast.WildcardPattern(p()), lam([typed("b", "B")], unit()),
+                                       Just(ast.LetElse(Nothing, lam([typed("c", "C")], unit()))), p())],
+                        p())),
+      "A,B,C")
+
+    assert_eq(state, "a record field, a template part and a comprehension guard are read",
+      annots(ast.TupleExpr([ast.RecordExpr("R", [ast.RecordField("f", lam([typed("a", "A")], unit()))], p()),
+                            ast.StringTemplateExpr([ast.LitPart("x"), ast.InterpPart(lam([typed("b", "B")], unit()))], p()),
+                            ast.ComprehensionExpr(unit(),
+                              [ast.ComprehensionGen(ast.WildcardPattern(p()), unit(), [lam([typed("c", "C")], unit())])],
+                              p())],
+                           p())),
+      "A,B,C")
+
+    summary(state)

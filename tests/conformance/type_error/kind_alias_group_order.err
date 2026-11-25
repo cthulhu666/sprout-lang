@@ -1,0 +1,1 @@
+in the alias `A` the type `Box T` has kind `Type`, but the alias is used at kind `Type -> Type` (a type constructor that takes one type)

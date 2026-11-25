@@ -1,0 +1,11 @@
+# An instance method's signature is judged like a fn's.
+module main
+
+class Pretty t
+  fn pretty(x: t) -> String
+
+instance Pretty Int
+#~^ ERROR
+  fn pretty(x: Int Bool) -> String = "int"
+
+fn main() -> Unit !{IO} = print("unreachable")

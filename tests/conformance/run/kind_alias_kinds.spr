@@ -1,0 +1,24 @@
+# Aliases have kinds of their own, read from the alias and not from its expansion:
+# a higher-kinded alias, a zero-parameter alias applied further, a phantom parameter
+# used at kind `Type`, and an alias used inside another.
+module main
+
+type alias AtInt f = f Int
+type alias Failing = Result String
+type alias Phantom a = Int
+type alias Counted = AtInt List
+
+fn first_or_zero(x: AtInt Maybe) -> Int = maybe_with_default(0, x)
+
+fn count(x: Counted) -> Int = list_length(x)
+
+fn ok_or_zero(r: Failing Int) -> Int = result_with_default(0, r)
+
+fn phantom(x: Phantom String) -> Int = x
+
+fn main() -> Unit !{IO} =
+  do
+    print(to_string(first_or_zero(Just(3))))
+    print(to_string(count([1, 2, 3])))
+    print(to_string(ok_or_zero(Ok(5))))
+    print(to_string(phantom(7)))

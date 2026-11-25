@@ -3868,39 +3868,53 @@ saturated; used applied (`fn label(xs: t Int)`) it has kind `Type -> Type`, so i
 must leave one argument off.  With one class parameter (*A class takes one type
 parameter*, above), the kind of that variable is the kind of the class.
 
-Kinds are inferred over dependency groups of `type`, `record`, `wrap` and `class`
-declarations (Haskell 2010 §4.6).  Each type parameter and class variable starts as an
-unknown kind.  Every constructor field, `wrap` body and method signature has kind
-`Type`; an existential constraint `C t`, a method-level `where C' u` and a superclass
-`S t` each require the variable's kind to equal the class's.  The constraints of one group are
-unified together, and only then is each kind still unknown defaulted to `Type`; a later
-group reads the defaulted kind and cannot change it.  Two consequences:
+Kinds are inferred over dependency groups of `type`, `record`, `wrap`, `type alias` and
+`class` declarations (Haskell 2010 §4.6).  Each type parameter, alias parameter and class
+variable starts as an unknown kind.  Every constructor field, `wrap` body and method
+signature has kind `Type`; an existential constraint `C t`, a method-level `where C' u`
+and a superclass `S t` each require the variable's kind to equal the class's.  The
+constraints of one group are unified together, and only then is each kind still unknown
+defaulted to `Type`; a later group reads the defaulted kind and cannot change it.  Two
+consequences:
 
 - A phantom parameter is `Type`.  After `wrap Tagged u = Int`, `Tagged Maybe` is a kind
   error, because `Tagged` takes a type.
 - A class whose variable no method mentions has kind `Type`, so only saturated heads
   are instances of it.
 
-Each `fn` and `instance` is then checked alone: its type variables get
-fresh kinds from its signature, and each constraint `C t`, including one whose `t` is a
-variable, requires kind(`t`) = kind(`C`).  The constraints checked are those of a `fn`,
-a class method, an instance method, an instance context, a superclass, an existential
+An alias has a kind of its own: its parameters' kinds, then its body's, which need not be
+`Type`, so `type alias E = Result String` has kind `Type -> Type` and `type alias AtInt f
+= f Int` has kind `(Type -> Type) -> Type`.  An alias parameter its body never mentions is
+a phantom: after `type alias Const a = Int`, `Const Maybe` is a kind error.  A written type
+is kinded before alias expansion, so a use of an alias is checked against the alias's kind
+and a message names the alias as written.  An alias that declares parameters must be given
+all of them wherever it is written: in a signature, a `let` annotation, a lambda parameter
+annotation and a `where` constraint (a zero-parameter alias is exempt, and may be applied
+further).  An alias in a `where` constraint or an instance head is expanded before the kind
+check, so a message there names the expansion.
+
+Each `fn`, `extern fn`, `instance` and top-level `let` is then checked alone: its type
+variables get fresh kinds from its signature, and each constraint `C t`, including one whose
+`t` is a variable, requires kind(`t`) = kind(`C`).  The constraints checked are those of a
+`fn`, a class method, an instance method, an instance context, a superclass, an existential
 (`exists … where`, `any C`) and a derived instance; an instance head `C H` requires
-kind(`H`) = kind(`C`).  A `fn` or instance method that has no `where` has nothing to
-check.  An alias counts as its expansion, so `type alias E = Result String` has kind
-`Type -> Type`.  The built-in kinds are `Type` for `Int`, `Double`, `Bool`, `String`,
-`Char`, `Unit`, `Bytes` and `Builder`, `Type -> Type` for `Vector`, `Map` and `Ref`,
-and `Type` for the function, thunk and tuple types and their arguments.
+kind(`H`) = kind(`C`).  The signature is read first, and a clash among its parameters and
+return type is reported as the signature's own; then the `where`, which may fix the kind of
+a variable the signature leaves open, is checked.  The built-in
+kinds are `Type` for `Int`, `Double`, `Bool`, `String`, `Char`, `Unit`, `Bytes` and
+`Builder`, `Type -> Type` for `Vector`, `Map` and `Ref`, and `Type` for the function,
+thunk and tuple types and their arguments.
 
 A `deriving` clause forwards the derived class over each type parameter a field stores
 (§5.8), so a stored parameter of kind other than `Type` cannot be derived over (`type Wrap f a deriving
 (Eq) = Wrap(f a)` would need `Eq f`); the declaration is rejected at the type.
 
-A constructor field, a record field, a `wrap` body and a class method signature are
-judged: each must have kind `Type`, and a variable used at two kinds in one of them is an
-error.  The types written in a `fn` or instance-method signature are read but not judged:
-`fn f(x: Int Bool)` is accepted by this pass, as are alias declarations and annotations
-(`docs/kind-inference-v0.md`).
+Every type the program writes is judged.  A constructor field, a record field, a `wrap`
+body, a class method signature, each parameter and the return type of a `fn`, `extern fn`
+or instance method, a top-level `let` annotation and a lambda parameter annotation must
+have kind `Type`, and a variable used at two kinds in one of them is an error, whatever
+order the parameters come in.  An alias body must be well-kinded and need not have kind
+`Type`.  Rationale and the compatibility census: `docs/kind-inference-v0.md`.
 
 | declaration | rejected because |
 |---|---|
@@ -3915,6 +3929,11 @@ error.  The types written in a `fn` or instance-method signature are read but no
 | `type T = T(Maybe)` | a field must have kind `Type`; `Maybe` takes a type |
 | `fn g(…) where ToString (Box, Int)` | a tuple part must have kind `Type`; `Box` takes a type |
 | `type Wrap f a deriving (Eq) = Wrap(f a)` | a derived instance constrains only parameters of kind `Type` |
+| `fn f(x: Int Bool)` | `Int` takes no argument |
+| `fn f(x: t Int, y: t) where Functor t` | `t` is used at two kinds |
+| `type alias Const a = Int`, then `fn f(x: Const Maybe)` | `Const` takes a type, `Maybe` is a type constructor |
+| `type alias Bad = Int Bool` | an alias body must be well-kinded |
+| `type alias Pair a b = (a, b)`, then `let p: Pair Int = …` | an alias must be given all its arguments |
 
 ```
 class `Boxed` takes a type of kind `Type -> Type` (a type constructor that takes one type), but the instance head `Tagged k v` has kind `Type`
@@ -3924,15 +3943,24 @@ class `Mixed` uses its variable at kind `Type` in one place and `Type -> Type` (
 class `Wrapper` uses its variable at kind `Type`, but its superclass `Functor` takes `Type -> Type`
 in the constraint `Foo (Tagged Maybe)` the type `Maybe` has kind `Type -> Type` (a type constructor that takes one type), but `Tagged` takes a type of kind `Type`
 in constructor `T` the type `Maybe` has kind `Type -> Type` (a type constructor that takes one type), but it is used where a type of kind `Type` is needed
-in the constraint `ToString (f f)` the type `f` is applied to `f`, so its kind would have to contain itself
+in the signature of `g` the type `f` is applied to `f`, so its kind would have to contain itself
 cannot derive `Eq` for `Wrap`: its parameter `f` has kind `Type -> Type` (a type constructor that takes one type), and a derived instance can constrain only parameters of kind `Type`
+in the signature of `f` the type `Int` has kind `Type` and takes no argument, but it is applied to `Bool`
+in the signature of `f` the type `Maybe` has kind `Type -> Type` (a type constructor that takes one type), but `Const` takes a type of kind `Type`
+in the alias `Bad` the type `Int` has kind `Type` and takes no argument, but it is applied to `Bool`
+in the alias `A` the type `Box T` has kind `Type`, but the alias is used at kind `Type -> Type` (a type constructor that takes one type)
+type alias `Pair` takes 2 type arguments, given 1
 ```
 
 A constraint in a class method's `where` is reported with the prefix ``in method `m` of
 class `C`:``, and one in an instance method's with ``in method `m`:``.  A clash in a
 class method's signature is reported as ``in the signature of method `m` of class `C` …``,
-one in a record field as ``in the field `f` of `R` …`` and one in a `wrap` body as ``in
-the body of `W` …``.  The error is at the declaration, since type expressions carry no position.
+in a `fn` or `extern fn` signature as ``in the signature of `f` …``, in an instance
+method's as ``in the signature of method `m` …``, one in a record field as ``in the field
+`f` of `R` …``, one in a `wrap` body as ``in the body of `W` …``, one in an alias body as
+``in the alias `A` …``, one in a `let` annotation as ``in the annotation of `x` …`` and one
+in a lambda parameter annotation as ``in a lambda parameter annotation …``.  The error is at the
+declaration, since type expressions carry no position.
 
 Type application is curried, so a head whose kind differs from the class's would leave
 a different number of arguments than the dispatch type and their spines would misalign
@@ -3985,9 +4013,9 @@ The head is expanded before selection, kind checking and the overlap check all
 read it, so a local alias of a foreign type is not a distinct head.  `wrap` is
 **not** an alias — it declares a distinct nominal type, and `instance C Tag` on
 `wrap Tag = String` stays separate from `instance C String`.  An alias applied to
-fewer arguments than it declares is left unexpanded, and the kind check does not judge
-it.  A later check reports it: after `type alias Half a = Tagged a`, `instance Boxed Half`
-is rejected because its method's type does not match the class's for that head.
+fewer arguments than it declares is left unexpanded and is rejected where it is written:
+after `type alias Half a = Tagged a`, `instance Boxed Half` fails with ``type alias `Half`
+takes 1 type argument, given 0``.
 Rationale: `docs/alias-instance-heads-v0.md`.
 
 Admitting concrete type arguments (`instance C (List Int)`) is GHC's

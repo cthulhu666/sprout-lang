@@ -1,0 +1,7 @@
+# A lambda parameter annotation in a top-level `let` body is judged too.
+module main
+
+let k = \ (x: Int Bool) -> 1
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("unreachable")
