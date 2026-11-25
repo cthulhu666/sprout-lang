@@ -271,7 +271,7 @@ def mutate (info : Info) (decls : List Decl) : G (List Decl) := do
   let env : GEnv := { vars := info.letVars, fns := info.polyLets ++ info.sigs, canIO := true }
   let ioSigs := info.sigs.filter fun s => s.eff == .io && s.tvs.isEmpty
   let monoSigs := info.sigs.filter fun s => s.tvs.isEmpty
-  let k ← below 23
+  let k ← below 24
   let m ← freshName "m"
   let adts := (← get).adts
   match k with
@@ -438,6 +438,23 @@ def mutate (info : Info) (decls : List Decl) : G (List Decl) := do
         let args ← fs.mapM (genExpr { env with canIO := false } 1)
         let args := if ← chance 50 then args ++ [.int 1] else args.dropLast
         pure (decls ++ [.fn m [] (some (t, .pure)) (.app (.ctor kc) args)]))]
+  | 23 =>
+    -- a declared type applied to too many or too few arguments in a signature, a top-level `let`
+    -- annotation or a lambda parameter annotation (spec §8.5); the rest of the program types
+    if adts.isEmpty then pure decls else
+    let ad ← elem adts
+    let n := ad.params.length
+    let args ← if n == 0 then pure (List.replicate (n + 1) Ty.int) else
+      elem [List.replicate (n + 1) Ty.int, List.replicate (n - 1) Ty.int]
+    let bad := Ty.adt ad.name args
+    let t ← elem [bad, .tup [.int, bad], .arr [.int] bad .pure]
+    let y ← freshName "y"
+    let g ← freshName "g"
+    elem [
+      decls ++ [.fn m [(y, some t)] (some (.int, .pure)) (.int 1)],
+      decls ++ [.fn m [(y, some t)] (some (t, .pure)) (.var y)],
+      decls ++ [.letD m (some (.arr [t] t .pure)) (.lam y none (.var y))],
+      decls ++ [.fn m [] (some (.int, .pure)) (.letIn g (.lam y (some t) (.int 1)) (.int 2))]]
   | _ =>
     -- a zero-parameter function used as a function of one argument (spec §7 rule 9): bound to a
     -- local and called with an argument, or passed to a unary slot
