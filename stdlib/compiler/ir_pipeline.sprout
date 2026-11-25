@@ -9,6 +9,7 @@ import stdlib.compiler.source as source
 import stdlib.compiler.dce as dce
 import stdlib.compiler.bce as bce
 import stdlib.compiler.wsi as wsi
+import stdlib.compiler.rec_inline as rec_inline
 import stdlib.compiler.opt_config as opt_config
 import stdlib.compiler.switches as switches
 
@@ -321,8 +322,9 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
   # about to be discarded.
   do
     wsi_on <- opt_config.pass_enabled(opt_config.Wsi)
+    rec_on <- opt_config.pass_enabled(opt_config.RecInline)
     bce_on <- opt_config.pass_enabled(opt_config.Bce)
-    versioned <- version_if(bce_on, dce.elim_unreachable(inline_stores_if(wsi_on, prog)))
+    versioned <- version_if(bce_on, split_records_if(rec_on, dce.elim_unreachable(inline_stores_if(wsi_on, prog))))
     compile_reachable(versioned)
 
 # Wrapper store inline runs on the whole program, before reachability: a wrapper with no calls
@@ -332,6 +334,12 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
 # (docs/scalar-store-inline-v0.md §4.4).
 fn inline_stores_if(on: Bool, prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
   if on then wsi.expand_program(prog) else prog
+
+# Record let splitting runs on the reachable program, after DCE, so it walks only the code that
+# is emitted; and before BCE and Phase B, which see its scalar lets as ordinary ones
+# (docs/record-sra-v0.md).
+fn split_records_if(on: Bool, prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
+  if on then rec_inline.expand_program(prog) else prog
 
 # Bounds-check elimination runs on the reachable program, before Phase B: the
 # clones it adds are ordinary self-tail-recursive functions to everything below.

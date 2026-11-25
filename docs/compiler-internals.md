@@ -280,6 +280,17 @@ run ahead of a later argument's effect. A local binder cannot shadow a wrapper: 
 `vector_mutset` still lowers inline. IR shape is checked by `scripts/b1_gate.sh`; design:
 [scalar-store-inline-v0.md](scalar-store-inline-v0.md).
 
+### Record let splitting — `stdlib/compiler/rec_inline.sprout`
+
+A typed-AST pass in `ir_pipeline.compile_program_streaming`, after `dce.elim_unreachable` and
+before BCE. `let x = R(..) in b`, with `R` a non-linear record and every free `x` in `b` the base of
+a `.field` read, becomes one `let x$f$N = e_f` per field in declaration order (the order a literal
+lowers in), and each `x.f` reads its let: no record is built. Any bare use keeps the let. The
+occurrence check stops below a pattern, lambda parameter or `do` step that rebinds `x`; `N` is a
+program-wide counter and `$` is not an identifier character, so the new names are fresh.
+`SPROUT_OPT_OFF=rec_inline` disables it. IR shape and trap order are checked by
+`scripts/b1_gate.sh`; design: [record-sra-v0.md](record-sra-v0.md).
+
 ### GC safety linter
 
 `just gc-safety-check` lints `runtime/sprout_runtime.c` for `const char*`/`char*` parameters live across `sprout_gc_maybe_collect_threshold()` calls. Run after editing any C builtin that allocates heap strings. Use `just gc-safety-check --strict` to fail on any finding; the default mode warns only. It finds function bodies by counting braces outside literals and comments, and exits 2 if that count drifts ([gates.md §GC safety linter](gates.md)).

@@ -1,0 +1,318 @@
+module stdlib.compiler.rec_inline
+import stdlib.compiler.ast as ast
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.compiler.source as source
+
+# Record scalar replacement. Design: docs/record-sra-v0.md. Stage 1 only: a record let split.
+#
+#   let x = R(f1 = e1, f2 = e2) in b      (R a non-linear record, x read only as `x.f`)
+#
+# becomes one scalar let per field, in declaration order, with each `x.f` in `b` read from its
+# let. The record is never built. A bare use of `x` (passed on, returned, stored, updated)
+# keeps the let as it is.
+#
+# Fields are bound in DECLARATION order, which is the order lowering evaluates a literal in, not
+# the order the source wrote them, so traps and effects happen in the same order. A field no one
+# reads is still bound, so its trap still fires.
+#
+# Scope: the occurrence check and the substitution both stop below a binder that rebinds `x`: a
+# match-arm pattern, a lambda parameter, a do step. `$` cannot appear in a user identifier, so
+# `x$f$N` cannot clash with a name the program wrote. `N` counts splits across the whole program,
+# so two splits of one name never share a suffix.
+
+# `recs` below: the field names of every non-linear record, in declaration order, by record name.
+export fn expand_program(prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
+  match prog with
+  | typed_ast.TypedProgram decls ->
+      match list_filter_map(record_entry, decls) with
+      | [] -> prog
+      | entries -> expand_decls(prog, decls, dict_from_list(entries))
+
+fn expand_decls(prog: typed_ast.TypedProgram, decls: List typed_ast.TypedDecl,
+                recs: Dict (List String)) -> typed_ast.TypedProgram =
+  match walk_seq(\ (d, n) -> walk_decl(d, recs, n), decls, 0) with
+  | (rewritten, true, _) -> typed_ast.TypedProgram(rewritten)
+  | (_, false, _) -> prog
+
+# A linear record is never split: the checker counts its uses, and a split would change them.
+fn record_entry(d: typed_ast.TypedDecl) -> Maybe (String, List String) =
+  match d with
+  | typed_ast.TPassThrough (ast.RecordDecl name _ fields _ mult _ _) ->
+      match mult with
+      | ast.Unrestricted -> Just((name, list_map(field_decl_name, fields)))
+      | ast.Linear -> Nothing
+  | _ -> Nothing
+
+fn field_decl_name(f: ast.RecordFieldDecl) -> String =
+  match f with
+  | ast.RecordFieldDecl name _ -> name
+
+# ---------------------------------------------------------------------------
+# The walk. Bottom-up, so a record let nested in another splits too. Every step returns the
+# rewritten node, whether anything below it changed, and the next free suffix; a node with no
+# change below it comes back as the same node, which `expand_program` uses to share the program.
+# ---------------------------------------------------------------------------
+
+fn walk_decl(d: typed_ast.TypedDecl, recs: Dict (List String), n: Int) -> (typed_ast.TypedDecl, Bool, Int) =
+  match d with
+  | typed_ast.TFnDecl name params ret eff cs body ->
+      let (b, changed, n1) = walk(body, recs, n)
+      in if changed then (typed_ast.TFnDecl(name, params, ret, eff, cs, b), true, n1) else (d, false, n1)
+  | typed_ast.TLetDecl name value ->
+      let (v, changed, n1) = walk(value, recs, n)
+      in if changed then (typed_ast.TLetDecl(name, v), true, n1) else (d, false, n1)
+  | typed_ast.TInstanceDecl c cs methods ->
+      let (ms, changed, n1) = walk_seq(\ (m, k) -> walk_method(m, recs, k), methods, n)
+      in if changed then (typed_ast.TInstanceDecl(c, cs, ms), true, n1) else (d, false, n1)
+  | typed_ast.TExternFnDecl _ _ _ _ -> (d, false, n)
+  | typed_ast.TPassThrough _ -> (d, false, n)
+
+fn walk_method(m: typed_ast.TypedInstanceMethod, recs: Dict (List String), n: Int) ->
+    (typed_ast.TypedInstanceMethod, Bool, Int) =
+  match m with
+  | typed_ast.TypedInstanceMethod name params ret eff cs body ->
+      let (b, changed, n1) = walk(body, recs, n)
+      in if changed then (typed_ast.TypedInstanceMethod(name, params, ret, eff, cs, b), true, n1)
+         else (m, false, n1)
+
+fn walk(e: typed_ast.TypedExpr, recs: Dict (List String), n: Int) -> (typed_ast.TypedExpr, Bool, Int) =
+  let (rebuilt, changed, n1) = walk_children(e, recs, n)
+  in match split_let(rebuilt, recs, n1) with
+     | Just (split, n2) -> (split, true, n2)
+     | Nothing -> (rebuilt, changed, n1)
+
+# `e` with each child walked, left to right. Exhaustive with no wildcard, as `typed_ast.children`
+# is, so a new expression form stops the build here.
+fn walk_children(e: typed_ast.TypedExpr, recs: Dict (List String), n: Int) -> (typed_ast.TypedExpr, Bool, Int) =
+  match e with
+  | typed_ast.TVar _ _ _ -> (e, false, n)
+  | typed_ast.TInt _ _ _ -> (e, false, n)
+  | typed_ast.TFloat _ _ _ -> (e, false, n)
+  | typed_ast.TBool _ _ _ -> (e, false, n)
+  | typed_ast.TString _ _ _ -> (e, false, n)
+  | typed_ast.TChar _ _ _ -> (e, false, n)
+  | typed_ast.TUnit _ _ -> (e, false, n)
+  | typed_ast.TDict _ _ _ _ -> (e, false, n)
+  | typed_ast.TMethodRef _ _ _ _ _ -> (e, false, n)
+  | typed_ast.TTuple items t p ->
+      let (xs, changed, n1) = walk_exprs(items, recs, n)
+      in if changed then (typed_ast.TTuple(xs, t, p), true, n1) else (e, false, n1)
+  | typed_ast.TIf cond then_e else_e t p ->
+      let (c, ch1, n1) = walk(cond, recs, n)
+          (a, ch2, n2) = walk(then_e, recs, n1)
+          (b, ch3, n3) = walk(else_e, recs, n2)
+      in if ch1 || ch2 || ch3 then (typed_ast.TIf(c, a, b, t, p), true, n3) else (e, false, n3)
+  | typed_ast.TMatch scrut branches t p ->
+      let (s, ch1, n1) = walk(scrut, recs, n)
+          (bs, ch2, n2) = walk_seq(\ (b, k) -> walk_branch(b, recs, k), branches, n1)
+      in if ch1 || ch2 then (typed_ast.TMatch(s, bs, t, p), true, n2) else (e, false, n2)
+  | typed_ast.TCall callee args t p ->
+      let (f, ch1, n1) = walk(callee, recs, n)
+          (xs, ch2, n2) = walk_exprs(args, recs, n1)
+      in if ch1 || ch2 then (typed_ast.TCall(f, xs, t, p), true, n2) else (e, false, n2)
+  | typed_ast.TLambda params body t p ->
+      let (b, changed, n1) = walk(body, recs, n)
+      in if changed then (typed_ast.TLambda(params, b, t, p), true, n1) else (e, false, n1)
+  | typed_ast.TBinary op left right t p ->
+      let (l, ch1, n1) = walk(left, recs, n)
+          (r, ch2, n2) = walk(right, recs, n1)
+      in if ch1 || ch2 then (typed_ast.TBinary(op, l, r, t, p), true, n2) else (e, false, n2)
+  | typed_ast.TUnary op operand t p ->
+      let (x, changed, n1) = walk(operand, recs, n)
+      in if changed then (typed_ast.TUnary(op, x, t, p), true, n1) else (e, false, n1)
+  | typed_ast.TRange lo hi t p ->
+      let (a, ch1, n1) = walk(lo, recs, n)
+          (b, ch2, n2) = walk(hi, recs, n1)
+      in if ch1 || ch2 then (typed_ast.TRange(a, b, t, p), true, n2) else (e, false, n2)
+  | typed_ast.TDo steps t p ->
+      let (ss, changed, n1) = walk_seq(\ (s, k) -> walk_step(s, recs, k), steps, n)
+      in if changed then (typed_ast.TDo(ss, t, p), true, n1) else (e, false, n1)
+  | typed_ast.TRecord name fields t p ->
+      let (fs, changed, n1) = walk_seq(\ (f, k) -> walk_field(f, recs, k), fields, n)
+      in if changed then (typed_ast.TRecord(name, fs, t, p), true, n1) else (e, false, n1)
+  | typed_ast.TGetField base fld t p ->
+      let (b, changed, n1) = walk(base, recs, n)
+      in if changed then (typed_ast.TGetField(b, fld, t, p), true, n1) else (e, false, n1)
+  | typed_ast.TRecordUpdate base fields t p ->
+      let (b, ch1, n1) = walk(base, recs, n)
+          (fs, ch2, n2) = walk_seq(\ (f, k) -> walk_field(f, recs, k), fields, n1)
+      in if ch1 || ch2 then (typed_ast.TRecordUpdate(b, fs, t, p), true, n2) else (e, false, n2)
+
+fn walk_exprs(es: List typed_ast.TypedExpr, recs: Dict (List String), n: Int) ->
+    (List typed_ast.TypedExpr, Bool, Int) =
+  walk_seq(\ (x, k) -> walk(x, recs, k), es, n)
+
+fn walk_branch(b: typed_ast.TypedMatchBranch, recs: Dict (List String), n: Int) ->
+    (typed_ast.TypedMatchBranch, Bool, Int) =
+  match b with
+  | typed_ast.TypedMatchBranch pat body ->
+      let (x, changed, n1) = walk(body, recs, n)
+      in if changed then (typed_ast.TypedMatchBranch(pat, x), true, n1) else (b, false, n1)
+
+fn walk_step(s: typed_ast.TypedDoStep, recs: Dict (List String), n: Int) -> (typed_ast.TypedDoStep, Bool, Int) =
+  match s with
+  | typed_ast.TDoBindStep pat value mode ->
+      let (v, changed, n1) = walk(value, recs, n)
+      in if changed then (typed_ast.TDoBindStep(pat, v, mode), true, n1) else (s, false, n1)
+  | typed_ast.TDoLetStep name value ->
+      let (v, changed, n1) = walk(value, recs, n)
+      in if changed then (typed_ast.TDoLetStep(name, v), true, n1) else (s, false, n1)
+  | typed_ast.TDoExprStep value ->
+      let (v, changed, n1) = walk(value, recs, n)
+      in if changed then (typed_ast.TDoExprStep(v), true, n1) else (s, false, n1)
+
+fn walk_field(f: typed_ast.TypedRecordField, recs: Dict (List String), n: Int) ->
+    (typed_ast.TypedRecordField, Bool, Int) =
+  match f with
+  | typed_ast.TypedRecordField name value ->
+      let (v, changed, n1) = walk(value, recs, n)
+      in if changed then (typed_ast.TypedRecordField(name, v), true, n1) else (f, false, n1)
+
+# `g` over a list, left to right, threading the suffix counter. Tail recursive.
+fn walk_seq(g: a -> Int -> (a, Bool, Int), xs: List a, n: Int) -> (List a, Bool, Int) =
+  walk_seq_go(g, xs, n, [], false)
+
+fn walk_seq_go(g: a -> Int -> (a, Bool, Int), xs: List a, n: Int, acc: List a, changed: Bool) ->
+    (List a, Bool, Int) =
+  match xs with
+  | [] -> (list_reverse(acc), changed, n)
+  | [x | rest] ->
+      let (y, ch, n1) = g(x, n)
+      in walk_seq_go(g, rest, n1, Cons(y, acc), changed || ch)
+
+# ---------------------------------------------------------------------------
+# The split.
+# ---------------------------------------------------------------------------
+
+# A `let x = R(..) in b` is a one-arm match on a variable pattern (`ast.let_bind_match`; `where`
+# is the same construct). Splits it when `R` is a splittable record, the literal names every field
+# once, and every free occurrence of `x` in `b` is the base of a field read.
+fn split_let(e: typed_ast.TypedExpr, recs: Dict (List String), n: Int) -> Maybe(typed_ast.TypedExpr, Int) =
+  match e with
+  | typed_ast.TMatch (typed_ast.TRecord rname fields _ _)
+      [typed_ast.TypedMatchBranch(ast.VarPattern x vp) body] t p ->
+      let Just decl_names = dict_get(rname, recs) else Nothing
+          Just values = in_decl_order(decl_names, fields) else Nothing
+          fresh = list_map(fresh_name(x, n, _), decl_names)
+          Ok body1 = subst(x, dict_from_list(zip(decl_names, fresh)), body) else Nothing
+      in Just((bind_fields(zip(fresh, values), body1, vp, t, p), n + 1))
+  | _ -> Nothing
+
+fn fresh_name(x: String, n: Int, field: String) -> String =
+  x ++ "$" ++ field ++ "$" ++ int_to_string(n)
+
+# The literal's field values in declaration order. `Nothing` when a declared field is missing or
+# the literal carries more fields than the record declares.
+fn in_decl_order(names: List String, fields: List typed_ast.TypedRecordField) ->
+    Maybe(List typed_ast.TypedExpr) =
+  if list_length(names) == list_length(fields)
+  then traverse(field_expr(_, fields), names)
+  else Nothing
+
+fn field_expr(name: String, fields: List typed_ast.TypedRecordField) -> Maybe typed_ast.TypedExpr =
+  match fields with
+  | [] -> Nothing
+  | [typed_ast.TypedRecordField f v | rest] -> if f == name then Just(v) else field_expr(name, rest)
+
+# `let n1 = v1 in let n2 = v2 in ... body`, the first binding outermost so it runs first. Each
+# let has the original let's type and position.
+fn bind_fields(bindings: List (String, typed_ast.TypedExpr), body: typed_ast.TypedExpr,
+               vp: source.SourcePos, t: types.Type, p: source.SourcePos) -> typed_ast.TypedExpr =
+  match bindings with
+  | [] -> body
+  | [(name, value) | rest] ->
+      typed_ast.TMatch(value,
+                       [typed_ast.TypedMatchBranch(ast.VarPattern(name, vp), bind_fields(rest, body, vp, t, p))],
+                       t, p)
+
+# `e` with each `x.f` read replaced by the variable `names` gives `f`; `Err` when `x` occurs any
+# other way. Below a binder that rebinds `x`, `x` is a different variable: left alone. A
+# scrutinee, a do-step value and a let's own value are outside the binder they feed.
+# Exhaustive with no wildcard: a new expression form may bind names, and a scope-blind default
+# would substitute below its binder.
+fn subst(x: String, names: Dict String, e: typed_ast.TypedExpr) -> Result Unit typed_ast.TypedExpr =
+  match e with
+  | typed_ast.TVar v _ _ -> if v == x then Err(()) else Ok(e)
+  | typed_ast.TInt _ _ _ -> Ok(e)
+  | typed_ast.TFloat _ _ _ -> Ok(e)
+  | typed_ast.TBool _ _ _ -> Ok(e)
+  | typed_ast.TString _ _ _ -> Ok(e)
+  | typed_ast.TChar _ _ _ -> Ok(e)
+  | typed_ast.TUnit _ _ -> Ok(e)
+  | typed_ast.TDict _ _ _ _ -> Ok(e)
+  | typed_ast.TMethodRef _ _ _ _ _ -> Ok(e)
+  | typed_ast.TTuple _ _ _ -> typed_ast.traverse_children(subst(x, names, _), e)
+  | typed_ast.TIf _ _ _ _ _ -> typed_ast.traverse_children(subst(x, names, _), e)
+  | typed_ast.TCall _ _ _ _ -> typed_ast.traverse_children(subst(x, names, _), e)
+  | typed_ast.TBinary _ _ _ _ _ -> typed_ast.traverse_children(subst(x, names, _), e)
+  | typed_ast.TUnary _ _ _ _ -> typed_ast.traverse_children(subst(x, names, _), e)
+  | typed_ast.TRange _ _ _ _ -> typed_ast.traverse_children(subst(x, names, _), e)
+  | typed_ast.TRecord _ _ _ _ -> typed_ast.traverse_children(subst(x, names, _), e)
+  | typed_ast.TRecordUpdate _ _ _ _ -> typed_ast.traverse_children(subst(x, names, _), e)
+  | typed_ast.TGetField base fld t p -> subst_field(x, names, base, fld, t, p, e)
+  | typed_ast.TMatch scrut branches t p ->
+      let s = try subst(x, names, scrut)
+          bs = try traverse(subst_branch(x, names, _), branches)
+      in Ok(typed_ast.TMatch(s, bs, t, p))
+  | typed_ast.TLambda params body t p ->
+      if list_member(x, list_map(param_name, params))
+      then Ok(e)
+      else
+        let b = try subst(x, names, body)
+        in Ok(typed_ast.TLambda(params, b, t, p))
+  | typed_ast.TDo steps t p ->
+      let ss = try subst_steps(x, names, steps)
+      in Ok(typed_ast.TDo(ss, t, p))
+
+# `x.f` becomes the variable bound for `f`; a read of anything else recurses into its base.
+fn subst_field(x: String, names: Dict String, base: typed_ast.TypedExpr, fld: String, t: types.Type,
+               p: source.SourcePos, e: typed_ast.TypedExpr) -> Result Unit typed_ast.TypedExpr =
+  match base with
+  | typed_ast.TVar v _ _ ->
+      if v != x then Ok(e)
+      else
+        match dict_get(fld, names) with
+        | Just name -> Ok(typed_ast.TVar(name, t, p))
+        | Nothing -> Err(())
+  | _ -> typed_ast.traverse_children(subst(x, names, _), e)
+
+fn param_name(p: ast.Param) -> String =
+  match p with
+  | ast.Param name _ _ -> name
+
+fn subst_branch(x: String, names: Dict String, b: typed_ast.TypedMatchBranch) ->
+    Result Unit typed_ast.TypedMatchBranch =
+  match b with
+  | typed_ast.TypedMatchBranch pat body ->
+      if list_member(x, ast.pattern_names(pat))
+      then Ok(b)
+      else
+        let body1 = try subst(x, names, body)
+        in Ok(typed_ast.TypedMatchBranch(pat, body1))
+
+# A step's value sees the `x` of the steps before it; its binder covers only the steps after it.
+fn subst_steps(x: String, names: Dict String, steps: List typed_ast.TypedDoStep) ->
+    Result Unit (List typed_ast.TypedDoStep) =
+  match steps with
+  | [] -> Ok([])
+  | [s | rest] ->
+      match s with
+      | typed_ast.TDoBindStep pat value mode ->
+          let v = try subst(x, names, value)
+          in subst_rest(typed_ast.TDoBindStep(pat, v, mode), list_member(x, ast.pattern_names(pat)),
+                        x, names, rest)
+      | typed_ast.TDoLetStep name value ->
+          let v = try subst(x, names, value)
+          in subst_rest(typed_ast.TDoLetStep(name, v), name == x, x, names, rest)
+      | typed_ast.TDoExprStep value ->
+          let v = try subst(x, names, value)
+          in subst_rest(typed_ast.TDoExprStep(v), false, x, names, rest)
+
+fn subst_rest(done: typed_ast.TypedDoStep, rebinds: Bool, x: String, names: Dict String,
+              rest: List typed_ast.TypedDoStep) -> Result Unit (List typed_ast.TypedDoStep) =
+  if rebinds
+  then Ok(Cons(done, rest))
+  else
+    let more = try subst_steps(x, names, rest)
+    in Ok(Cons(done, more))

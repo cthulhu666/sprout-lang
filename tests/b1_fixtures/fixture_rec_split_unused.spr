@@ -1,0 +1,13 @@
+module main
+
+# Record let splitting keeps a field nothing reads: the literal evaluated it, so its trap must
+# still fire. The b1-gate runs this and expects "unused field".
+type R = (a: Int, b: Int)
+
+fn fail(msg: String) -> Int = panic(msg)
+
+fn pick(n: Int) -> Int =
+  let r = R(a = n, b = fail("unused field"))
+  in r.a
+
+fn main() -> Unit !{IO} = print(int_to_string(pick(1)))

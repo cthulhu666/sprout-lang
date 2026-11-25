@@ -1,0 +1,14 @@
+module main
+
+# Record let splitting keeps declaration order: the literal is written `b` first, but `a` is
+# declared first, so lowering evaluates `a` first and its trap is the one that fires. The
+# b1-gate runs this and expects "a first".
+type R = (a: Int, b: Int)
+
+fn fail(msg: String) -> Int = panic(msg)
+
+fn pick(n: Int) -> Int =
+  let r = R(b = fail("b second"), a = fail("a first"))
+  in r.a + r.b + n
+
+fn main() -> Unit !{IO} = print(int_to_string(pick(1)))
