@@ -1,6 +1,6 @@
 # Record scalar replacement: inline record builders, split record lets (v0)
 
-Status: approved 2026-11-25; stage 2 implemented. Issue #913. A compiler optimisation: no syntax, semantics, typing or diagnostic change, so
+Status: stages 1 and 2 landed (PR #915); follow-ups in §8. Issue #913. A compiler optimisation: no syntax, semantics, typing or diagnostic change, so
 nothing here is normative and `docs/spec-v0.md` is untouched.
 
 ## 1. Problem
@@ -110,7 +110,7 @@ set of *flat* variables: those bound by a let that is about to split.
   flat in `b`.
 - `f(args)` under `OnlyFields`, `f` a builder: inline.
 - `f(args)`, `f` eligible, under either demand: inline if some field-only parameter `k` gets a
-  *flat argument*: a builder call, or a flat variable.
+  *flat argument*: a builder call, a literal of a non-linear record, or a flat variable.
 - Either way the inline needs the budget (§4.5).
 - When `f` inlines, each argument that is not a variable or literal is let-bound first (§4.3).
   That let is an ordinary let: the walk decides its demand by the first rule, so a builder-call
@@ -238,11 +238,14 @@ Then smoke shape, golden IR (read the diff), GC stress, reseed, `just dod`, benc
 
 ## 8. Stages
 
-1. **Split only** (§4.4 without inlining): user `let`s bound to a record literal. Small, testable
-   alone: shadowing, order, lambda capture.
-2. **Inliner** (§4.1–4.3, 4.5) on top: reaches `q_mul`, `q_rot`, `distance`. Bench here.
+1. ~~**Split only** (§4.4 without inlining): user `let`s bound to a record literal.~~ Landed.
+2. ~~**Inliner** (§4.1–4.3, 4.5) on top: reaches `q_mul`, `q_rot`, `distance`.~~
    Landed. `q_mul`'s prepared body is over `K`, so it is not itself a callee. The bench ran
-   428 ms boxed, 131–139 ms inlined, 107–112 ms hand-expanded (stage 2 compiler). The gap is
+   (2M iterations of `q_mul` + `q_rot`, -O2, 9 interleaved runs, best/median) 374/383 ms with
+   `SPROUT_OPT_OFF=rec_inline`, 125/127 ms with the pass, 104/104 ms hand-expanded. The compiler's
+   self-compile time does not move outside noise (4.1–4.3 s either way; IR +0.15%). The gap is
    repeated `q.v` loads: `sprout_field` is declared without `readonly`, so LLVM cannot merge
    them. Declaring it `memory(read)` in the emitted IR gave 87.6 ms for both.
-3. Follow-ups: `do`-let, `if`-tailed builders.
+3. Follow-ups: `do`-let and `if`-tailed builders, now the BACKLOG entry **`rec_inline` gaps**;
+   the `sprout_field` load gap, BACKLOG **`sprout_field` is not declared read-only**; callees
+   compiled though every call inlined, BACKLOG **Fully inlined callees are still compiled**.

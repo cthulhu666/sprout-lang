@@ -293,8 +293,8 @@ The inliner (stage 2) copies the body of a small pure top-level function (at mos
 its own calls inline, closed annotated types, pure, no dictionary parameter, not in a
 recursive group and not calling itself, result a non-linear record or `Int`/`Double`/`Bool`/`Char`) when a record
 allocation goes away: a record builder read by a splitting let, or a call whose field-only
-parameter (read only by `.field` or passed to another field-only parameter) gets a builder call or
-a variable bound by a splitting let. Callees are prepared callee-first over the call graph and
+parameter (read only by `.field` or passed to another field-only parameter) gets a builder call, a
+record literal, or a variable bound by a splitting let. Callees are prepared callee-first over the call graph and
 cached; a non-variable, non-literal argument is let-bound to `p$N$ri` in call order, every binder in
 the copy is renamed to a fresh `$` name, and the copy is walked again so its own calls inline. That
 re-walk would grow without bound (`h1 = h0 + h0 + h0`, down to `h6`, is 3^6 copies), so each

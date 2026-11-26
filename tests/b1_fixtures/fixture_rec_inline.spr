@@ -19,6 +19,11 @@ fn q_rot(q: Quat, u: Vec3) -> Vec3 =
   let t = vec3.scale(2.0, vec3.cross(q.v, u))
   in vec3.add(vec3.add(u, vec3.scale(q.w, t)), vec3.cross(q.v, t))
 
+# A record literal at a field-only parameter: the literal is split, never built.
+fn ro(r: Vec3) -> Double = r.x + r.y
+
+fn use_ro(a: Double) -> Double = ro(Vec3(x = a, y = a, z = a))
+
 # No allocation: the intermediate `sub` is read by `length`, field by field.
 fn dist_len(a: Vec3, b: Vec3) -> Double = vec3.length(vec3.sub(a, b))
 
