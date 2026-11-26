@@ -311,7 +311,8 @@ fn alloc_summary_or_empty(decls: List typed_ast.TypedDecl, penv: ast_to_ir.ProgE
 
 export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
     Result String String !{IO} =
-  # Wrapper store inline, then reachability elimination, run before everything else. Both live
+  # Wrapper store inline, then reachability elimination, then record let splitting and inlining
+  # (`rec_inline`) and bounds-check elimination, run before everything else. They live
   # here rather than at either caller. Two entry points stream IR — `compiler.compile_full_ir` for the
   # analysis service and `compile_driver.run_file_use_ir_codegen` for
   # `--emit-ir` — and a pass applied at one of them silently does nothing for

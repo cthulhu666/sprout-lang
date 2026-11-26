@@ -7,12 +7,15 @@ import stdlib.compiler.typed_ast as typed_ast
 # out-edges. Edges to names outside `nodes` must not occur. O((V+E) log V):
 # each node and edge is visited once per pass, and Dict/Set are AVL trees.
 #
-# Two callers. infer's group_plan needs the dependency order, stable in source
-# order (sccs_in_source_order), so an instance is checked where it is written.
-# ast_to_ir's mutual-TCO Phase B needs only the partition, and puts it in
-# declaration order itself. Phase B once asked "does f reach g, and g reach f?" for every pair
-# instead, which was 55% of the compiler's self-compile allocation
-# (scripts/scc_cost_gate.sh).
+# Callers. infer (`group_plan`, and kind inference) needs the dependency order, stable in source
+# order (sccs_in_source_order), so an instance is checked where it is written. ast_to_ir's
+# mutual-TCO and Phase B passes and rec_inline's callee preparation take
+# sccs_in_dependency_order, and put the order they need in themselves. Phase B once asked "does
+# f reach g, and g reach f?" for every pair instead, which was 55% of the compiler's
+# self-compile allocation (scripts/scc_cost_gate.sh).
+#
+# The last section builds the call graph of a typed program (`fn_order`, `call_graph`,
+# `mentioned_fns`, `recursive_groups`), shared by ast_to_ir and rec_inline.
 #
 # It is ITERATIVE. Textbook Kosaraju is two recursive depth-first searches, and
 # the depth is set by user code, not by us: 551 frames for infer.sprout's largest

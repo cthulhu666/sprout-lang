@@ -70,12 +70,14 @@ Gated by `opt_config.Pass` `RecInline` (`rec_inline`, on by default), so
 ### 4.1 Eligible callee
 
 A top-level `TFnDecl f` is *eligible* when all hold:
-- the program is bundled. The bundler names every top-level declaration `module.name` (the
-  entry module `$entry.name`), so a program with such a name is bundled, and the pass does
-  nothing on one without. The callee's own name need not be dotted: a prelude callee inlines
-  too. The bundler renames every local that equals a top-level name to `$l_<name>`
-  (`docs/prelude-name-identity-v0.md` §5), so no local at the call site can capture a top-level
-  the copied body names;
+- the name need not be dotted: a prelude callee inlines too. The pass runs on any program,
+  bundled or not, and does not lean on the bundler's local rename
+  (`docs/prelude-name-identity-v0.md` §5): that rename leaves a `no_prelude` entry's own names
+  bare, and an unbundled program has none. Instead each callee records its *free names*, the
+  top-level names its prepared body reads (through the calls already inlined into it), and the
+  walk keeps `locals`, every name a binder above it binds (declaration parameters, lets, match
+  arms, lambda parameters, `do` steps). A call whose callee has a free name in `locals` stays a
+  call, since the copy would read the local. A let whose builder call stays is not flat (§4.2);
 - every parameter and the return are annotated, and the annotations name closed types (no type
   variable); no parameter is a lowered dictionary (`__tc_`);
 - pure: no effect row, or an empty one (`vec_wrappers.is_pure_decl`);
@@ -103,8 +105,10 @@ set of *flat* variables: those bound by a let that is about to split.
   `x` is flat. Splittable (`splittable`) is a syntactic check on `b` that allocates nothing and
   does not depend on what inlines: every occurrence of `x` is a `TGetField` base or an argument
   at a field-only parameter of an eligible callee that gets every parameter. Walk order: `e`
-  walks first, under `OnlyFields`; then `b`, with `x` flat; then the split (§4.4) runs on what the
-  walk produced. A call in `b` that takes the flat `x` at a field-only parameter inlines by the
+  walks first, under `OnlyFields`; then `b`, with `x` flat only if the walked `e` ends in a record
+  literal (past pass-made lets), since a builder call the budget kept from inlining leaves `x` an
+  allocated result and nothing may inline on it; then the split (§4.4) runs on what the walk
+  produced. A call in `b` that takes the flat `x` at a field-only parameter inlines by the
   next rule. This breaks the cycle "`t` splits iff `scale(q.w, t)` inlines iff `t` is flat"
   with one walk. A let that is not expected to split walks `e` under `AsValue`, and `x` is not
   flat in `b`.
@@ -165,6 +169,10 @@ call the remaining budget cannot cover does not inline and stays a call. A let t
 call to inline then keeps a bare use, so its record stays boxed: always correct, and the budget
 only costs the allocation it would have removed. `q_mul`, `q_rot` and `distance` fit.
 
+A callee whose raw body exceeds `2 * inline_limit` nodes is not prepared: the walk shrinks a body
+only a little (a split drops a record literal and its field reads), so it would stay over
+`inline_limit` and be refused anyway.
+
 ### 4.6 What it does to the targets
 
 `q_rot`: `t` is used as `scale(q.w, t)` and `cross(q.v, t)`, both field-only, so `t` is
@@ -211,8 +219,10 @@ builder: inlines, no allocation.
 
 ## 7. Tests (written first, confirmed failing)
 
-IR shape runs through the bundler (a fixture under `tests/`, `--emit-ir`), since the pass is
-inert unbundled.
+IR shape runs through the bundler (a fixture under `tests/`, `--emit-ir`). Capture by a local that
+shares a top-level's name: `tests/conformance/run/rec_inline_local_shadows_top_level.spr` (a
+`no_prelude` entry, where the names are bare) and, on typed ASTs of an unbundled program,
+`tests/stdlib/compiler/test_rec_inline_pass.spr`.
 - `q_mul`/`q_rot` copies: exactly one `sprout_alloc_obj(_, 3)` each, no call to
   `vec3.add/scale/cross`; `dot` still called. `distance`: no allocation.
 - No change: a builder whose result escapes (`let v = add(a, b) in [v]`), `add(a, b).x`,

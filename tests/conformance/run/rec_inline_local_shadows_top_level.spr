@@ -1,0 +1,49 @@
+no_prelude
+
+# `rec_inline` copies a callee's body into its caller. `f` reads the top-level `k`; every caller
+# below has a local `k`, so a copy placed there would read the local. The pass leaves such a call.
+# A `no_prelude` entry keeps its names bare, so the bundler's local rename does not protect it
+# (a normal entry is qualified to `$entry.k`). Each line is 3 + 2 + 100, or 3 * 2 + 100.
+
+type Pair = (x: Int, y: Int)
+type Box = Box Int
+
+let k: Int = 2
+
+fn f(v: Pair) -> Int = v.x + k
+
+# Reads nothing a caller could shadow: still inlined.
+fn twice(v: Pair) -> Int = v.x * 2
+
+fn by_let(z: Int) -> Int =
+  let k = 100
+  in f(Pair(x = z, y = z)) + k
+
+fn by_param(k: Int, z: Int) -> Int = f(Pair(x = z, y = z)) + k
+
+fn by_arm(b: Box, z: Int) -> Int =
+  match b with
+  | Box k -> f(Pair(x = z, y = z)) + k
+
+fn by_lambda(z: Int) -> Int =
+  let g = \k -> f(Pair(x = z, y = z)) + k
+  in g(100)
+
+fn by_do(z: Int) -> Int !{IO} =
+  do
+    let k = 100
+    f(Pair(x = z, y = z)) + k
+
+fn unrelated(z: Int) -> Int =
+  let k = 100
+  in twice(Pair(x = z, y = z)) + k
+
+fn main() -> Unit !{IO} =
+  do
+    n <- by_do(3)
+    print_str(int_to_string(by_let(3)))
+    print_str(int_to_string(by_param(100, 3)))
+    print_str(int_to_string(by_arm(Box(100), 3)))
+    print_str(int_to_string(by_lambda(3)))
+    print_str(int_to_string(n))
+    print_str(int_to_string(unrelated(3)))
