@@ -267,7 +267,7 @@ A candidate becomes an entry only after the check passes on Linux and macOS.
 | `unboxed_maybe_extern_name` | `runtime_facts.unboxed_symbol` |
 | `ir_header`'s eight `i128` `decl` lines | built from `runtime_facts.unboxed_symbols` |
 | `safe_io_externs` | `runtime_facts.keeps_vec_lengths` |
-| `op_triggers_gc`'s four arms | `runtime_facts.cannot_trigger_gc` on `str_eq`, `str_compare`, `sprout_tag`, `sprout_field` |
+| `op_triggers_gc`'s extern-backed arms | `runtime_facts.cannot_trigger_gc` on `str_eq`, `str_compare`, `sprout_tag` (`IRGetField` is an inline load) |
 
 Each consumer asks where it asks today: `ir_rooting` in `calls_nonallocating_extern`,
 `op_triggers_gc` and the noreturn-block check, `ast_to_ir` in the CPR routers beside

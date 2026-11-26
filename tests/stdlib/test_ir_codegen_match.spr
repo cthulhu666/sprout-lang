@@ -205,7 +205,7 @@ fn main() -> Unit !{IO} =
                          "%t0$fptr = inttoptr i64 %p$h to ptr"))
     assert_true(state, "IRGetField indexes with a getelementptr",
                 contains(ir_lowering.lower_program(field_program_scalar()),
-                         "%t0$fgep = getelementptr i64, ptr %t0$fptr, i64 0"))
+                         "%t0$fgep = getelementptr inbounds i64, ptr %t0$fptr, i64 0"))
     assert_true(state, "IRGetField loads the field word",
                 contains(ir_lowering.lower_program(field_program_scalar()),
                          "%t0 = load i64, ptr %t0$fgep"))
@@ -371,7 +371,7 @@ fn main() -> Unit !{IO} =
           assert_true(state, "T-match-4: emits @sprout_tag for ctor discrimination",
                       contains(ir_ctor_bind, "call i64 @sprout_tag"))
           assert_true(state, "T-match-4: emits an inline field load for binding extraction",
-                      contains(ir_ctor_bind, "$fgep = getelementptr i64"))
+                      contains(ir_ctor_bind, "$fgep = getelementptr inbounds i64"))
           clang_ok_4 <- clang_verifies_ir(ir_ctor_bind)
           assert_true(state, "T-match-4: lowered IR passes clang verifier", clang_ok_4)
 
