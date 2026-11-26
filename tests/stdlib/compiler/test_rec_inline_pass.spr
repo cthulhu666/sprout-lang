@@ -1,0 +1,147 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.rec_inline as rec_inline
+import stdlib.compiler.source as source
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.fs as fs
+import testsupport.envvar as envvar
+
+# The `rec_inline` pass on typed programs, inspected as typed ASTs (docs/record-sra-v0.md).
+# `tests/stdlib/test_rec_inline.spr` and `test_rec_split.spr` pin the results of the bundled
+# runs; this file pins when the pass runs and what stays a call.
+
+# A program the front end accepted, or not. Not a `Maybe`: `<-` would bind it as one.
+type Typed = Typed typed_ast.TypedProgram | Failed
+
+# The calls of top-level `name` in `e`.
+fn count_calls(name: String, e: typed_ast.TypedExpr) -> Int =
+  match e with
+  | typed_ast.TCall (typed_ast.TVar f _ _) _ _ _ ->
+      (if f == name then 1 else 0) + sum_calls(name, typed_ast.children(e))
+  | _ -> sum_calls(name, typed_ast.children(e))
+
+fn sum_calls(name: String, es: List typed_ast.TypedExpr) -> Int =
+  list_fold(\ (acc, x) -> acc + count_calls(name, x), 0, es)
+
+# The calls of `callee` in the body of `caller`; -1 when `caller` is not declared.
+fn calls_in(prog: typed_ast.TypedProgram, caller: String, callee: String) -> Int =
+  match prog with
+  | typed_ast.TypedProgram decls ->
+      match list_filter(is_fn_named(caller, _), decls) with
+      | [typed_ast.TFnDecl _ _ _ _ _ body] -> count_calls(callee, body)
+      | _ -> -1
+
+fn is_fn_named(name: String, d: typed_ast.TypedDecl) -> Bool =
+  match d with
+  | typed_ast.TFnDecl n _ _ _ _ _ -> n == name
+  | _ -> false
+
+# The unbundled front end, as `test_unbundled_main.spr` drives it, with no prelude: the source
+# may only use primitives.
+fn typed_unbundled(src: String) -> Typed !{IO} =
+  let Ok toks = lexer.tokenize(src) else Failed
+      Ok prog = parser.parse_program(toks) else Failed
+  in
+    do
+      tc <- checker.typecheck_typed(prog, Nil)
+      match tc with
+      | typed_ast.TypedErr _ _ -> Failed
+      | typed_ast.TypedOk typed_prog env -> Typed(lowering.lower_program(typed_prog, env))
+
+# A program nobody bundled, so no local was renamed. `f` reads the top-level `k` and each caller
+# has a local `k`: a copy of `f` there would read the local. `a.b` is a dotted top-level name,
+# which an earlier version of the pass took as a sign that the program was bundled.
+let unbundled_src =
+  "type Pair = (x: Int, y: Int)\n" ++
+  "type Box = Box Int\n" ++
+  "let k: Int = 2\n" ++
+  "fn a.b() -> Int = 1\n" ++
+  "fn f(v: Pair) -> Int = v.x + k\n" ++
+  "fn twice(v: Pair) -> Int = v.x * 2\n" ++
+  "fn by_let(z: Int) -> Int =\n" ++
+  "  let k = 100\n" ++
+  "  in f(Pair(x = z, y = z)) + k\n" ++
+  "fn by_param(k: Int, z: Int) -> Int = f(Pair(x = z, y = z)) + k\n" ++
+  "fn by_arm(b: Box, z: Int) -> Int =\n" ++
+  "  match b with\n" ++
+  "  | Box k -> f(Pair(x = z, y = z)) + k\n" ++
+  "fn by_lambda(z: Int) -> Int =\n" ++
+  "  let g = \\k -> f(Pair(x = z, y = z)) + k\n" ++
+  "  in g(100)\n" ++
+  "fn by_do(z: Int) -> Int !{IO} =\n" ++
+  "  do\n" ++
+  "    let k = 100\n" ++
+  "    f(Pair(x = z, y = z)) + k\n" ++
+  "fn unrelated(z: Int) -> Int =\n" ++
+  "  let k = 100\n" ++
+  "  in twice(Pair(x = z, y = z)) + k\n" ++
+  "fn main() -> Unit !{IO} =\n" ++
+  "  let r = by_let(3) + a.b()\n" ++
+  "  in ()\n"
+
+# `big` is a builder of about 60 nodes, so a declaration's budget covers four copies and the
+# fifth call stays. `h` reads only fields, and could inline on `x` only if `x` split.
+let budget_src =
+  "type Pair = (x: Double, y: Double)\n" ++
+  "fn big(a: Double) -> Pair =\n" ++
+  "  Pair(x = a * a + a * a + a * a + a * a + a * a,\n" ++
+  "       y = a + a + a + a + a + a + a + a + a + a + a + a + a + a + a + a + a + a + a + a)\n" ++
+  "fn h(v: Pair) -> Double = v.x + v.y\n" ++
+  "fn burn(a: Double) -> Double =\n" ++
+  "  let p1 = big(a)\n" ++
+  "      p2 = big(a + 1.0)\n" ++
+  "      p3 = big(a + 2.0)\n" ++
+  "      p4 = big(a + 3.0)\n" ++
+  "      x = big(a + 4.0)\n" ++
+  "  in p1.x + p2.x + p3.x + p4.x + h(x)\n" ++
+  "fn main() -> Unit !{IO} = print(burn(1.5))\n"
+
+# A bundled program with the prelude, where the pass runs.
+fn typed_bundled(src: String, stdlib_root: String) -> Typed !{IO} =
+  do
+    let path = "/tmp/sprout_test_rec_inline_pass.sprout"
+    fs.write_text(path, src)
+    r <- compiler.compile_phase_lower_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), Nil)
+    match r with
+    | typed_ast.TypedErr _ _ -> Failed
+    | typed_ast.TypedOk prog _ -> Typed(prog)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    let stdlib_root = maybe_with_default("stdlib", envvar.read("SPROUT_STDLIB_ROOT"))
+
+    # Not bundled: a callee that names a top-level a caller has as a local stays a call.
+    unbundled <- typed_unbundled(unbundled_src)
+    match unbundled with
+    | Failed -> assert_true(state, "the unbundled source compiles", false)
+    | Typed prog0 ->
+        do
+          let prog = rec_inline.expand_program(prog0)
+          assert_eq(state, "before the pass: by_let calls f", calls_in(prog0, "by_let", "f"), 1)
+          assert_eq(state, "a local `let` shadows the top-level: f stays", calls_in(prog, "by_let", "f"), 1)
+          assert_eq(state, "a parameter shadows: f stays", calls_in(prog, "by_param", "f"), 1)
+          assert_eq(state, "a match arm shadows: f stays", calls_in(prog, "by_arm", "f"), 1)
+          assert_eq(state, "a lambda parameter shadows: f stays", calls_in(prog, "by_lambda", "f"), 1)
+          assert_eq(state, "a do step shadows: f stays", calls_in(prog, "by_do", "f"), 1)
+          assert_eq(state, "a local the callee does not name does not block: twice inlines",
+                    calls_in(prog, "unrelated", "twice"), 0)
+
+    # Bundled: the pass runs, and a field-only callee follows its argument.
+    bundled <- typed_bundled(budget_src, stdlib_root)
+    match bundled with
+    | Failed -> assert_true(state, "the bundled source compiles", false)
+    | Typed prog0 ->
+        do
+          let prog = rec_inline.expand_program(prog0)
+          let big_calls = calls_in(prog, "$entry.burn", "$entry.big")
+          assert_true(state, "bundled: the budget inlines some builder calls", big_calls < 5)
+          assert_true(state, "bundled: the budget leaves a builder call", big_calls >= 1)
+          assert_eq(state, "bundled: h stays a call while its argument stays boxed",
+                    calls_in(prog, "$entry.burn", "$entry.h"), 1)
+    summary(state)

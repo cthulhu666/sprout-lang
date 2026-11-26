@@ -37,7 +37,10 @@ import stdlib.string as string
 # appear in a user identifier, so every name this pass makes (`x$f$N$ri` for a field, `p$N$ri`
 # for an argument, `y$N$ri` for a binder of an inlined body) cannot clash with a name the program
 # wrote. `N` counts across the whole program, so no two share it. Every binder in an inlined body
-# is renamed, so a copy neither captures nor is captured. Only lets named so float (`peel_lets`).
+# is renamed, so a copy's own names neither capture nor are captured. Its free names are another
+# matter: a callee that reads a top-level `k` must not be copied below a binder of a local `k`.
+# The walk keeps the names bound above it (`Ctx.locals`) and leaves such a call, so the pass does
+# not depend on the bundler having renamed that local. Only lets named so float (`peel_lets`).
 
 # The most nodes a callee body may have, once its own calls are prepared.
 let inline_limit: Int = 64
@@ -45,24 +48,19 @@ let inline_limit: Int = 64
 # The most nodes of callee body one declaration may inline, and one callee's preparation.
 let inline_budget: Int = 256
 
-# The pass runs on a bundled program only: the bundler names every top-level declaration
-# `module.name` (the entry module `$entry.name`), and a program that was not bundled has no such
-# name. `recs` below: the field names of every non-linear record, in declaration order, by name.
+# Runs on any program, bundled or not: capture safety is the walk's own (`captures`), not the
+# bundler's local rename. `recs` below: the field names of every non-linear record, in
+# declaration order, by name.
 export fn expand_program(prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
   match prog with
   | typed_ast.TypedProgram decls ->
-      if !is_bundled(decls) then prog
-      else
-        match list_filter_map(record_entry, decls) with
-        | [] -> prog
-        | entries ->
-            let recs = dict_from_list(entries)
-                (callees, n) = prepare_callees(decls, recs)
-            in expand_decls(prog, decls, Ctx(recs = recs, callees = callees, flat = []),
-                            Gen(n = n, budget = inline_budget))
-
-fn is_bundled(decls: List typed_ast.TypedDecl) -> Bool =
-  any(\name -> string.contains(name, "."), list_filter_map(top_level_name, decls))
+      match list_filter_map(record_entry, decls) with
+      | [] -> prog
+      | entries ->
+          let recs = dict_from_list(entries)
+              (callees, n) = prepare_callees(decls, recs)
+          in expand_decls(prog, decls, Ctx(recs = recs, callees = callees, flat = [], locals = set_empty()),
+                          Gen(n = n, budget = inline_budget))
 
 fn expand_decls(prog: typed_ast.TypedProgram, decls: List typed_ast.TypedDecl, cx: Ctx, g: Gen) ->
     typed_ast.TypedProgram =
@@ -89,13 +87,16 @@ fn field_decl_name(f: ast.RecordFieldDecl) -> String =
 
 # A callee that may inline: its parameter names, which of them are field-only (parallel to
 # `params`), its body with its own calls already prepared, the record its body builds when the
-# tail is a record literal (a builder), and the body's node count.
+# tail is a record literal (a builder), the body's node count, and its free names: the top-level
+# names the body reads, through the calls already inlined into it as well.
 type Callee = (params: List String, field_only: List Bool, body: typed_ast.TypedExpr, builder: Maybe String,
-               size: Int)
+               size: Int, free: List String)
 
 # `flat` lists the variables bound by a let that is about to split. A binder that rebinds one of
-# them removes it, so a name in `flat` is always the let's own.
-type Ctx = (recs: Dict (List String), callees: Dict Callee, flat: List String)
+# them removes it, so a name in `flat` is always the let's own. `locals` is every name a binder
+# above the current point binds: a copy of a callee that reads a top-level of such a name would
+# read the local instead, so that call stays (`captures`).
+type Ctx = (recs: Dict (List String), callees: Dict Callee, flat: List String, locals: Set)
 
 # What the context does with a value: `OnlyFields` reads it by field, `AsValue` takes it whole.
 type Demand = OnlyFields | AsValue
@@ -111,18 +112,21 @@ fn wants_fields(dm: Demand) -> Bool =
 
 fn fresh_budget(g: Gen) -> Gen = g with (budget = inline_budget)
 
-# `cx` without the variables `names` bind.
-fn cx_without_names(cx: Ctx, names: List String) -> Ctx =
-  match cx.flat with
-  | [] -> cx
-  | flat -> cx with (flat = list_filter(\v -> !list_member(v, names), flat))
+# `cx` under a binder of `names`: they leave `flat` (they rebind a flat variable) and join `locals`.
+fn cx_bind_names(cx: Ctx, names: List String) -> Ctx =
+  cx with (flat = flat_without(cx.flat, names),
+           locals = list_fold(\ (acc, n) -> set_insert(n, acc), cx.locals, names))
 
-# `cx` without the variables `names_of(item)` binds. Nothing is flat in most code, so the names
-# are only built when something is.
-fn cx_without(cx: Ctx, names_of: a -> List String, item: a) -> Ctx =
-  match cx.flat with
-  | [] -> cx
-  | _ -> cx_without_names(cx, names_of(item))
+fn flat_without(flat: List String, names: List String) -> List String =
+  match flat with
+  | [] -> []
+  | _ -> list_filter(\v -> !list_member(v, names), flat)
+
+# `cx` under the binder of `item`, whose names are `names_of(item)`.
+fn cx_bind(cx: Ctx, names_of: a -> List String, item: a) -> Ctx = cx_bind_names(cx, names_of(item))
+
+# Whether a copy of `c` at this point would read a local in place of a top-level.
+fn captures(c: Callee, cx: Ctx) -> Bool = any(\n -> set_member(n, cx.locals), c.free)
 
 # ---------------------------------------------------------------------------
 # Eligible callees (docs/record-sra-v0.md §4.1, §4.5).
@@ -134,39 +138,16 @@ type PrepEnv = (recs: Dict (List String), fns: Dict typed_ast.TypedDecl, graph: 
 # is prepared with the calls to eligible callees below it already inlined, and its field-only
 # parameters read the callee's own flags.
 fn prepare_callees(decls: List typed_ast.TypedDecl, recs: Dict (List String)) -> (Dict Callee, Int) =
-  let fn_decls = list_filter(is_fn_decl, decls)
-      names = set_to_list(set_from_list(list_filter_map(fn_decl_name, fn_decls)))
-      graph = scc.call_graph(decls)
-      pe = PrepEnv(recs = recs, fns = dict_from_list(list_filter_map(fn_entry, fn_decls)), graph = graph,
-                   top = set_from_list(list_filter_map(top_level_name, decls)))
-  in list_fold(prepare_comp(pe, _, _), (dict_empty(), 0), scc.sccs_in_dependency_order(names, graph))
-
-fn is_fn_decl(d: typed_ast.TypedDecl) -> Bool =
-  match d with
-  | typed_ast.TFnDecl _ _ _ _ _ _ -> true
-  | typed_ast.TExternFnDecl _ _ _ _ -> false
-  | typed_ast.TLetDecl _ _ -> false
-  | typed_ast.TInstanceDecl _ _ _ -> false
-  | typed_ast.TPassThrough _ -> false
-
-fn fn_decl_name(d: typed_ast.TypedDecl) -> Maybe String =
-  match d with
-  | typed_ast.TFnDecl name _ _ _ _ _ -> Just(name)
-  | _ -> Nothing
+  let graph = scc.call_graph(decls)
+      pe = PrepEnv(recs = recs, fns = dict_from_list(list_filter_map(fn_entry, decls)), graph = graph,
+                   top = set_from_list(list_filter_map(typed_ast.decl_name, decls)))
+  in list_fold(prepare_comp(pe, _, _), (dict_empty(), 0),
+               scc.sccs_in_dependency_order(scc.fn_order(decls), graph))
 
 fn fn_entry(d: typed_ast.TypedDecl) -> Maybe (String, typed_ast.TypedDecl) =
   match d with
   | typed_ast.TFnDecl name _ _ _ _ _ -> Just((name, d))
   | _ -> Nothing
-
-# Every name a call can reach without a local binding: functions, externs and top-level lets.
-fn top_level_name(d: typed_ast.TypedDecl) -> Maybe String =
-  match d with
-  | typed_ast.TFnDecl name _ _ _ _ _ -> Just(name)
-  | typed_ast.TExternFnDecl name _ _ _ -> Just(name)
-  | typed_ast.TLetDecl name _ -> Just(name)
-  | typed_ast.TInstanceDecl _ _ _ -> Nothing
-  | typed_ast.TPassThrough _ -> Nothing
 
 # One strongly connected component of `scc.call_graph`. Only a lone function that does not call
 # itself can be a callee.
@@ -182,18 +163,25 @@ fn calls_itself(name: String, graph: Dict Set) -> Bool =
   | Just callees -> set_member(name, callees)
   | Nothing -> false
 
+# A body over `2 * inline_limit` nodes is not walked: the walk only shrinks a body a little (a
+# split drops a record literal and its field reads), so such a body stays over `inline_limit` and
+# `callee_of` would refuse it. The factor 2 is slack for that shrink, not a measured bound.
 fn prepare_fn(d: typed_ast.TypedDecl, pe: PrepEnv, st: (Dict Callee, Int)) -> (Dict Callee, Int) =
   let (callees, n) = st
       typed_ast.TFnDecl name params ret eff cs body = d else st
   in
-    if !header_eligible(name, params, ret, eff, cs, pe.recs) || !is_just(body_size(body, pe.top))
-    then st
+    if !header_eligible(name, params, ret, eff, cs, pe.recs) then st
     else
-      let cx = Ctx(recs = pe.recs, callees = callees, flat = [])
-          (b, _, g1) = walk(body, tail_demand(ret, pe.recs), cx, Gen(n = n, budget = inline_budget))
-      in match callee_of(params, b, callees, pe.top) with
-         | Just c -> (dict_set(name, c, callees), g1.n)
-         | Nothing -> (callees, g1.n)
+      let Just raw_size = body_size(body, pe.top) else st
+      in
+        if raw_size > 2 * inline_limit then st
+        else
+          let cx = cx_bind(Ctx(recs = pe.recs, callees = callees, flat = [], locals = set_empty()),
+                           ast.param_names, params)
+              (b, _, g1) = walk(body, tail_demand(ret, pe.recs), cx, Gen(n = n, budget = inline_budget))
+          in match callee_of(params, b, callees, pe.top) with
+             | Just c -> (dict_set(name, c, callees), g1.n)
+             | Nothing -> (callees, g1.n)
 
 # A callee that returns a record is read by field, so its tail builder calls inline.
 fn tail_demand(ret: Maybe ast.TypeExpr, recs: Dict (List String)) -> Demand =
@@ -201,17 +189,25 @@ fn tail_demand(ret: Maybe ast.TypeExpr, recs: Dict (List String)) -> Demand =
   | Just (ast.TypeName n) -> if dict_member(n, recs) then OnlyFields else AsValue
   | _ -> AsValue
 
+# A parameter is field-only when `splittable`: every use is a field read or an argument at a
+# field-only parameter.
 fn callee_of(params: List ast.Param, body: typed_ast.TypedExpr, callees: Dict Callee, top: Set) -> Maybe Callee =
   let Just size = body_size(body, top) else Nothing
       names = ast.param_names(params)
   in
     if size > inline_limit then Nothing
-    else Just(Callee(params = names, field_only = list_map(field_only_param(_, body, callees), names),
-                     body = body, builder = tail_record(body), size = size))
+    else Just(Callee(params = names, field_only = list_map(splittable(_, callees, body), names),
+                     body = body, builder = tail_record(body), size = size,
+                     free = set_to_list(free_names(body, set_from_list(names), set_empty()))))
 
-# Every use of `p` is a field read or an argument at a field-only parameter.
-fn field_only_param(p: String, body: typed_ast.TypedExpr, callees: Dict Callee) -> Bool =
-  splittable(p, callees, body)
+# The variables `e` reads that `bound` and the lets inside `e` do not bind, added to `acc`. The
+# only binder in a callee body is the one-arm variable let that `body_size` admits.
+fn free_names(e: typed_ast.TypedExpr, bound: Set, acc: Set) -> Set =
+  match e with
+  | typed_ast.TVar v _ _ -> if set_member(v, bound) then acc else set_insert(v, acc)
+  | typed_ast.TMatch scrut [typed_ast.TypedMatchBranch(ast.VarPattern y _) body] _ _ ->
+      free_names(body, set_insert(y, bound), free_names(scrut, bound, acc))
+  | _ -> list_fold(\ (a, c) -> free_names(c, bound, a), acc, typed_ast.children(e))
 
 fn tail_record(e: typed_ast.TypedExpr) -> Maybe String =
   match e with
@@ -223,10 +219,9 @@ fn tail_record(e: typed_ast.TypedExpr) -> Maybe String =
 # record or a primitive: never an ADT or tuple, which CPR routes by the shape of the call, and an
 # inlined call is no longer a call.
 #
-# The name need not be dotted: a prelude callee inlines too. That is capture-safe because the
-# bundler renames every local that equals a top-level name (`$l_<name>`,
-# docs/prelude-name-identity-v0.md §5), so no local at the call site can capture a top-level the
-# body names, and `inst` renames the body's own binders.
+# The name need not be dotted: a prelude callee inlines too. A copy cannot capture: `inst` renames
+# the body's own binders, and a call where a local has the name of a top-level the body reads
+# stays a call (`captures`), whether or not the bundler renamed that local.
 fn header_eligible(name: String, params: List ast.Param, ret: Maybe ast.TypeExpr, eff: Maybe (List String),
                    cs: List ast.TypeConstraint, recs: Dict (List String)) -> Bool =
   vec_wrappers.is_pure_decl(eff) && list_length(cs) == 0
@@ -279,7 +274,7 @@ fn body_size(e: typed_ast.TypedExpr, top: Set) -> Maybe Int =
   | typed_ast.TBinary _ l r _ _ -> sum_sizes([l, r], top, 1)
   | typed_ast.TUnary _ x _ _ -> sum_sizes([x], top, 1)
   | typed_ast.TGetField base _ _ _ -> sum_sizes([base], top, 1)
-  | typed_ast.TRecord _ fields _ _ -> sum_sizes(list_map(record_field_value, fields), top, 1)
+  | typed_ast.TRecord _ fields _ _ -> sum_sizes(list_map(typed_ast.field_value, fields), top, 1)
   | typed_ast.TCall callee args _ _ ->
       match callee with
       | typed_ast.TVar f _ _ -> if set_member(f, top) then sum_sizes(args, top, 2) else Nothing
@@ -305,10 +300,6 @@ fn sum_sizes(es: List typed_ast.TypedExpr, top: Set, acc: Int) -> Maybe Int =
       | Nothing -> Nothing
       | Just k -> sum_sizes(rest, top, acc + k)
 
-fn record_field_value(f: typed_ast.TypedRecordField) -> typed_ast.TypedExpr =
-  match f with
-  | typed_ast.TypedRecordField _ v -> v
-
 # ---------------------------------------------------------------------------
 # The walk. Bottom-up, so a record let nested in another splits too. Every step returns the
 # rewritten node, whether anything below it changed, and the state (next free suffix, budget
@@ -320,7 +311,7 @@ fn record_field_value(f: typed_ast.TypedRecordField) -> typed_ast.TypedExpr =
 fn walk_decl(d: typed_ast.TypedDecl, cx: Ctx, g: Gen) -> (typed_ast.TypedDecl, Bool, Gen) =
   match d with
   | typed_ast.TFnDecl name params ret eff cs body ->
-      let (b, changed, g1) = walk(body, AsValue, cx, fresh_budget(g))
+      let (b, changed, g1) = walk(body, AsValue, cx_bind(cx, ast.param_names, params), fresh_budget(g))
       in if changed then (typed_ast.TFnDecl(name, params, ret, eff, cs, b), true, g1) else (d, false, g1)
   | typed_ast.TLetDecl name value ->
       let (v, changed, g1) = walk(value, AsValue, cx, fresh_budget(g))
@@ -335,7 +326,7 @@ fn walk_method(m: typed_ast.TypedInstanceMethod, cx: Ctx, g: Gen) ->
     (typed_ast.TypedInstanceMethod, Bool, Gen) =
   match m with
   | typed_ast.TypedInstanceMethod name params ret eff cs body ->
-      let (b, changed, g1) = walk(body, AsValue, cx, fresh_budget(g))
+      let (b, changed, g1) = walk(body, AsValue, cx_bind(cx, ast.param_names, params), fresh_budget(g))
       in if changed then (typed_ast.TypedInstanceMethod(name, params, ret, eff, cs, b), true, g1)
          else (m, false, g1)
 
@@ -347,14 +338,14 @@ fn walk(e: typed_ast.TypedExpr, dm: Demand, cx: Ctx, g: Gen) -> (typed_ast.Typed
       walk_let(e, scrut, x, vp, body, t, p, dm, cx, g)
   | _ -> walk_children(e, cx, g)
 
-# `f(args)`, when `f` is a callee, a record allocation goes away and the budget covers the body:
-# copy its body in and walk the copy, whose calls may now inline in turn. Otherwise the arguments
-# walk as values.
+# `f(args)`, when `f` is a callee, a record allocation goes away, the budget covers the body and
+# the copy would not read a local in place of a top-level (`captures`): copy its body in and walk
+# the copy, whose calls may now inline in turn. Otherwise the arguments walk as values.
 fn walk_call(e: typed_ast.TypedExpr, f: String, args: List typed_ast.TypedExpr, t: types.Type,
              p: source.SourcePos, dm: Demand, cx: Ctx, g: Gen) -> (typed_ast.TypedExpr, Bool, Gen) =
   match dict_get(f, cx.callees) with
   | Just c ->
-      if inlines(c, args, dm, cx) && c.size <= g.budget
+      if inlines(c, args, dm, cx) && c.size <= g.budget && !captures(c, cx)
       then
         let (copy, n1) = instantiate(c, args, t, p, g.n)
             (r, _, g2) = walk(copy, dm, cx, Gen(n = n1, budget = g.budget - c.size))
@@ -515,17 +506,20 @@ fn inst_let(scrut: typed_ast.TypedExpr, branches: List typed_ast.TypedMatchBranc
 # ---------------------------------------------------------------------------
 
 # `let x = scrut in body`. When `scrut` is a record literal or a builder call and `body` only reads
-# `x` by field or hands it to a field-only parameter, `x` will split: `scrut` walks as read by
-# field, and `body` walks with `x` flat, so the calls that take `x` inline. That is one walk for
-# a cycle ("`x` splits iff the call inlines iff `x` is flat"). The split runs only when `x` was
-# flat (a let that does not expect to split cannot: the check with callees is the looser one) and
-# on what the walk produced; when the budget kept a call from inlining, `x` has a bare use left,
-# `subst` refuses, and the let stays.
+# `x` by field or hands it to a field-only parameter, `x` is expected to split: `scrut` walks as
+# read by field. `x` is flat in `body` only if the walked `scrut` then ends in a record literal. A
+# builder call the budget kept from inlining is still a call, so `x` stays an allocated result and
+# a callee that takes it must not inline. With `x` flat, the calls in `body` that take it inline:
+# one walk for a cycle ("`x` splits iff the call inlines iff `x` is flat"). The split runs only
+# when `x` was flat (a let that does not expect to split cannot: the check with callees is the
+# looser one) and on what the walk produced; when the budget kept a call in `body` from inlining,
+# `x` has a bare use left, `subst` refuses, and the let stays.
 fn walk_let(e: typed_ast.TypedExpr, scrut: typed_ast.TypedExpr, x: String, vp: source.SourcePos,
             body: typed_ast.TypedExpr, t: types.Type, p: source.SourcePos, dm: Demand, cx: Ctx, g: Gen) ->
     (typed_ast.TypedExpr, Bool, Gen) =
-  let flat_x = split_expected(scrut, x, body, cx)
-      (s, ch1, g1) = walk(scrut, if flat_x then OnlyFields else AsValue, cx, g)
+  let expected = split_expected(scrut, x, body, cx)
+      (s, ch1, g1) = walk(scrut, if expected then OnlyFields else AsValue, cx, g)
+      flat_x = expected && ends_in_record(s, cx.recs)
       cx_body = bind_flat(cx, x, flat_x)
       (b, ch2, g2) = walk(body, dm, cx_body, g1)
       rebuilt = if ch1 || ch2
@@ -537,10 +531,17 @@ fn walk_let(e: typed_ast.TypedExpr, scrut: typed_ast.TypedExpr, x: String, vp: s
        | Just (split, n3) -> (split, true, g2 with (n = n3))
        | Nothing -> (rebuilt, ch1 || ch2, g2)
 
+# Whether `e`, past its leading pass-made lets, is a literal of a non-linear record: what
+# `split_let` takes apart.
+fn ends_in_record(e: typed_ast.TypedExpr, recs: Dict (List String)) -> Bool =
+  match peel_lets(e, []) with
+  | (_, typed_ast.TRecord rname _ _ _) -> dict_member(rname, recs)
+  | _ -> false
+
 # `cx` for the body of `let x`: `x` flat when it will split, and not flat otherwise, since it
 # shadows an outer variable of the same name.
 fn bind_flat(cx: Ctx, x: String, is_flat: Bool) -> Ctx =
-  let outer = cx_without_names(cx, [x])
+  let outer = cx_bind_names(cx, [x])
   in if is_flat then outer with (flat = Cons(x, outer.flat)) else outer
 
 # Whether the let will split: its value is a record literal or a builder call, and every use of
@@ -587,7 +588,7 @@ fn walk_children(e: typed_ast.TypedExpr, cx: Ctx, g: Gen) -> (typed_ast.TypedExp
           (xs, ch2, g2) = walk_exprs(args, cx, g1)
       in if ch1 || ch2 then (typed_ast.TCall(f, xs, t, p), true, g2) else (e, false, g2)
   | typed_ast.TLambda params body t p ->
-      let (b, changed, g1) = walk(body, AsValue, cx_without(cx, ast.param_names, params), g)
+      let (b, changed, g1) = walk(body, AsValue, cx_bind(cx, ast.param_names, params), g)
       in if changed then (typed_ast.TLambda(params, b, t, p), true, g1) else (e, false, g1)
   | typed_ast.TBinary op left right t p ->
       let (l, ch1, g1) = walk(left, AsValue, cx, g)
@@ -620,7 +621,7 @@ fn walk_exprs(es: List typed_ast.TypedExpr, cx: Ctx, g: Gen) -> (List typed_ast.
 fn walk_branch(b: typed_ast.TypedMatchBranch, cx: Ctx, g: Gen) -> (typed_ast.TypedMatchBranch, Bool, Gen) =
   match b with
   | typed_ast.TypedMatchBranch pat body ->
-      let (x, changed, g1) = walk(body, AsValue, cx_without(cx, ast.pattern_names, pat), g)
+      let (x, changed, g1) = walk(body, AsValue, cx_bind(cx, ast.pattern_names, pat), g)
       in if changed then (typed_ast.TypedMatchBranch(pat, x), true, g1) else (b, false, g1)
 
 fn step_binders(s: typed_ast.TypedDoStep) -> List String =
@@ -637,7 +638,7 @@ fn walk_steps(steps: List typed_ast.TypedDoStep, cx: Ctx, g: Gen, acc: List type
   | [] -> (list_reverse(acc), changed, g)
   | [s | rest] ->
       let (s1, ch, g1) = walk_step(s, cx, g)
-      in walk_steps(rest, cx_without(cx, step_binders, s), g1, Cons(s1, acc), changed || ch)
+      in walk_steps(rest, cx_bind(cx, step_binders, s), g1, Cons(s1, acc), changed || ch)
 
 fn walk_step(s: typed_ast.TypedDoStep, cx: Ctx, g: Gen) -> (typed_ast.TypedDoStep, Bool, Gen) =
   match s with

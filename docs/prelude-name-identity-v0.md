@@ -142,6 +142,11 @@ the render-boundary strip, also removes `$l_`, so no diagnostic shows it.
   function captured comprehensions and `try`. Lifted by `docs/qualified-class-methods-v0.md`;
   `tests/conformance/run/class_method_captures_*.spr` pin it.
 
+A `no_prelude` entry's own names also stay bare, so a local of that name is not renamed. A pass
+that copies code across scopes cannot lean on the rename there: `rec_inline` checks the names bound
+above each call itself (`Ctx.locals`), pinned by
+`tests/conformance/run/rec_inline_local_shadows_top_level.spr`.
+
 ## 6. Impact
 
 - **Syntax.** `prelude` becomes a reserved qualifier, not a keyword: `prelude` is still a legal
