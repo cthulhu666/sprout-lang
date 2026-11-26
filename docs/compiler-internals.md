@@ -300,9 +300,10 @@ the copy is renamed to a fresh `$` name, and the copy is walked again so its own
 re-walk would grow without bound (`h1 = h0 + h0 + h0`, down to `h6`, is 3^6 copies), so each
 declaration, instance method and callee preparation has an `inline_budget` of 256 nodes: an inline
 spends the callee's body size, a call the budget cannot cover stays a call, and its record stays
-boxed. A call stays when the callee reads a top-level whose name a local at the call site has
-(`Ctx.locals`, the callee's free names), so the pass needs no bundler rename and runs on any
-program. Leading
+boxed. The walk keeps every name a binder above it binds (`Ctx.locals`) and checks it
+in one lookup, `callee_at`: a call stays when its target is itself a local name, or when the
+callee's free names (the top-levels its prepared body reads, call targets included) include a
+local name at the call site. So the pass needs no bundler rename and runs on any program. Leading
 pass-made lets (names ending `$ri`, never a bundler `$l_` local) float out of a split let's value.
 `SPROUT_OPT_OFF=rec_inline` disables both. IR shape
 and trap order are checked by `scripts/b1_gate.sh`; design: [record-sra-v0.md](record-sra-v0.md).

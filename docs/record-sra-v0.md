@@ -73,11 +73,16 @@ A top-level `TFnDecl f` is *eligible* when all hold:
 - the name need not be dotted: a prelude callee inlines too. The pass runs on any program,
   bundled or not, and does not lean on the bundler's local rename
   (`docs/prelude-name-identity-v0.md` §5): that rename leaves a `no_prelude` entry's own names
-  bare, and an unbundled program has none. Instead each callee records its *free names*, the
-  top-level names its prepared body reads (through the calls already inlined into it), and the
-  walk keeps `locals`, every name a binder above it binds (declaration parameters, lets, match
-  arms, lambda parameters, `do` steps). A call whose callee has a free name in `locals` stays a
-  call, since the copy would read the local. A let whose builder call stays is not flat (§4.2);
+  bare, and an unbundled program has none. The walk keeps `locals`, every name a binder above
+  the current point binds (declaration parameters, lets, match arms, lambda parameters, `do`
+  steps), and every inlining decision goes through one lookup, `callee_at`, which checks two
+  things against it. (1) The call target: a call of `f` where a local binds `f` is not a call
+  of the top-level `f`, so it never inlines. (2) The copy's free names: each callee records the
+  top-level names its prepared body reads, the call targets included and the calls already
+  inlined into it too, and the call stays when any of them is in `locals`, since the copy would
+  read the local. `splittable`, `builder_call` and `flat_arg` use the same lookup, so a let is
+  expected to split only if its calls would be allowed. A let whose builder call stays is not
+  flat (§4.2);
 - every parameter and the return are annotated, and the annotations name closed types (no type
   variable); no parameter is a lowered dictionary (`__tc_`);
 - pure: no effect row, or an empty one (`vec_wrappers.is_pure_decl`);

@@ -1341,6 +1341,12 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   qualified. Pre-existing, verified against builds either side of the `no_prelude` floor with
   byte-identical outcomes: the hazard is the bare namespace a `no_prelude` file already has, and it
   applies to any top-level name colliding with a runtime symbol.
+- [ ] `P3` **`no_prelude` entries keep colliding locals unrenamed.** The bundler's `$l_` rename
+  (`docs/prelude-name-identity-v0.md` §5) skips a `no_prelude` entry, whose own names stay bare, so
+  a local named like one of its top-levels captures it. Any pass that copies code across scopes
+  must then track scope itself: `rec_inline` does, through `Ctx.locals`
+  (`tests/conformance/run/rec_inline_local_shadows_top_level.spr`). Renaming those locals in the
+  bundler too would cover every pass and let `rec_inline` drop its own check.
 - [ ] `P3` **A module sees a `no_prelude` entry's types bare, unimported.** A module imported by a
   `no_prelude` entry that declares `type Token` can write `fn tok_value(t: Token)` with no import,
   and `Token` resolves to the entry's type. The entry keeps the empty module name, so its types are

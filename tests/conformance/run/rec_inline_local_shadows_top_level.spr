@@ -7,6 +7,7 @@ no_prelude
 
 type Pair = (x: Int, y: Int)
 type Box = Box Int
+type Fun = Fun(Pair -> Int)
 
 let k: Int = 2
 
@@ -38,12 +39,57 @@ fn unrelated(z: Int) -> Int =
   let k = 100
   in twice(Pair(x = z, y = z)) + k
 
+# The other direction: the local has the name of the callee. `f(..)` below is the local `f`, which
+# is `twice`: 2 * 3, not the top-level `f` (3 + 2).
+fn name_by_let(z: Int) -> Int =
+  let f = twice
+  in f(Pair(x = z, y = z))
+
+fn name_by_param(f: Pair -> Int, z: Int) -> Int = f(Pair(x = z, y = z))
+
+fn name_by_arm(u: Fun, z: Int) -> Int =
+  match u with
+  | Fun f -> f(Pair(x = z, y = z))
+
+fn name_by_lambda(z: Int) -> Int =
+  let h = \f -> f(Pair(x = z, y = z))
+  in h(twice)
+
+fn name_by_do(z: Int) -> Int !{IO} =
+  do
+    let f = twice
+    f(Pair(x = z, y = z))
+
+# A callee whose own body has a local `f`: copied into a caller, it still calls its local.
+fn body_local(v: Pair) -> Int =
+  let f = twice
+  in f(v)
+
+# `g(x)` calls the local `g`, so it uses `x` whole: `x` does not split, and the field-only `twice`
+# is not inlined on it either.
+fn g(v: Pair) -> Int = v.x
+
+fn whole_use(z: Int) -> Int =
+  let x = Pair(x = z, y = z)
+  in let g = twice
+     in g(x) + twice(x)
+
+fn name_in_body(z: Int) -> Int = body_local(Pair(x = z, y = z))
+
 fn main() -> Unit !{IO} =
   do
     n <- by_do(3)
+    m <- name_by_do(3)
     print_str(int_to_string(by_let(3)))
     print_str(int_to_string(by_param(100, 3)))
     print_str(int_to_string(by_arm(Box(100), 3)))
     print_str(int_to_string(by_lambda(3)))
     print_str(int_to_string(n))
     print_str(int_to_string(unrelated(3)))
+    print_str(int_to_string(name_by_let(3)))
+    print_str(int_to_string(name_by_param(twice, 3)))
+    print_str(int_to_string(name_by_arm(Fun(twice), 3)))
+    print_str(int_to_string(name_by_lambda(3)))
+    print_str(int_to_string(m))
+    print_str(int_to_string(name_in_body(3)))
+    print_str(int_to_string(whole_use(3)))
