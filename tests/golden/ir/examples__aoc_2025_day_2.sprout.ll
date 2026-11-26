@@ -17,7 +17,6 @@ declare void @sprout_gc_write_barrier(ptr)
 declare i64 @sprout_alloc_tuple_blob(i64)
 declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)
 declare i64 @sprout_tag(i64)
-declare i64 @sprout_field(i64, i64)
 declare void @sprout_abort_match() noreturn
 declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
@@ -177,7 +176,9 @@ define i64 @range_start(i64 %p$value) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$value, i64 0)
+  %t$2$fptr = inttoptr i64 %p$value to ptr
+  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2 = load i64, ptr %t$2$fgep
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
@@ -191,7 +192,9 @@ define i64 @range_end(i64 %p$value) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$value, i64 1)
+  %t$2$fptr = inttoptr i64 %p$value to ptr
+  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 1
+  %t$2 = load i64, ptr %t$2$fgep
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
@@ -205,7 +208,9 @@ define i64 @range_step(i64 %p$value) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$value, i64 2)
+  %t$2$fptr = inttoptr i64 %p$value to ptr
+  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 2
+  %t$2 = load i64, ptr %t$2$fgep
   %t$3 = add i64 0, 0
   %t$4 = icmp slt i64 %t$2, %t$3
   %t$5 = zext i1 %t$4 to i64
@@ -379,8 +384,12 @@ arm_1_1:
   %t$6 = icmp eq i64 %t$0, %t$5
   br i1 %t$6, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$7 = call i64 @sprout_field(i64 %p$xs, i64 0)
-  %t$8 = call i64 @sprout_field(i64 %p$xs, i64 1)
+  %t$7$fptr = inttoptr i64 %p$xs to ptr
+  %t$7$fgep = getelementptr i64, ptr %t$7$fptr, i64 0
+  %t$7 = load i64, ptr %t$7$fgep
+  %t$8$fptr = inttoptr i64 %p$xs to ptr
+  %t$8$fgep = getelementptr i64, ptr %t$8$fptr, i64 1
+  %t$8 = load i64, ptr %t$8$fgep
   %t$17 = alloca i64
   store i64 %t$8, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
@@ -463,8 +472,12 @@ arm_1_5:
   %t$10 = icmp eq i64 %t$4, %t$9
   br i1 %t$10, label %body_1_5, label %arm_2_5
 body_1_5:
-  %t$11 = call i64 @sprout_field(i64 %p$xs, i64 0)
-  %t$12 = call i64 @sprout_field(i64 %p$xs, i64 1)
+  %t$11$fptr = inttoptr i64 %p$xs to ptr
+  %t$11$fgep = getelementptr i64, ptr %t$11$fptr, i64 0
+  %t$11 = load i64, ptr %t$11$fgep
+  %t$12$fptr = inttoptr i64 %p$xs to ptr
+  %t$12$fgep = getelementptr i64, ptr %t$12$fptr, i64 1
+  %t$12 = load i64, ptr %t$12$fgep
   %t$23 = alloca i64
   store i64 %t$12, ptr %t$23
   %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
@@ -515,8 +528,12 @@ arm_1_1:
   %t$6 = icmp eq i64 %t$0, %t$5
   br i1 %t$6, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$7 = call i64 @sprout_field(i64 %p$xs, i64 0)
-  %t$8 = call i64 @sprout_field(i64 %p$xs, i64 1)
+  %t$7$fptr = inttoptr i64 %p$xs to ptr
+  %t$7$fgep = getelementptr i64, ptr %t$7$fptr, i64 0
+  %t$7 = load i64, ptr %t$7$fgep
+  %t$8$fptr = inttoptr i64 %p$xs to ptr
+  %t$8$fgep = getelementptr i64, ptr %t$8$fptr, i64 1
+  %t$8 = load i64, ptr %t$8$fgep
   %t$14 = alloca i64
   store i64 %p$acc, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
@@ -1420,8 +1437,12 @@ define i64 @__tc_ToString_examples_aoc_2025_day_2_Answers_to_string(i64 %p$value
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$value, i64 0)
-  %t$3 = call i64 @sprout_field(i64 %p$value, i64 1)
+  %t$2$fptr = inttoptr i64 %p$value to ptr
+  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2 = load i64, ptr %t$2$fgep
+  %t$3$fptr = inttoptr i64 %p$value to ptr
+  %t$3$fgep = getelementptr i64, ptr %t$3$fptr, i64 1
+  %t$3 = load i64, ptr %t$3$fgep
   %t$4 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.20, i64 0, i32 1, i64 0
   %t$5 = ptrtoint ptr %t$4 to i64
   %t$16 = alloca i64

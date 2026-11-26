@@ -17,7 +17,6 @@ declare void @sprout_gc_write_barrier(ptr)
 declare i64 @sprout_alloc_tuple_blob(i64)
 declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)
 declare i64 @sprout_tag(i64)
-declare i64 @sprout_field(i64, i64)
 declare void @sprout_abort_match() noreturn
 declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
@@ -176,7 +175,9 @@ define i64 @stdlib.mutable.mutvec_raw(i64 %p$v) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$v, i64 0)
+  %t$2$fptr = inttoptr i64 %p$v to ptr
+  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2 = load i64, ptr %t$2$fgep
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()

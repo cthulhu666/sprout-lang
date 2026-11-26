@@ -17,7 +17,6 @@ declare void @sprout_gc_write_barrier(ptr)
 declare i64 @sprout_alloc_tuple_blob(i64)
 declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)
 declare i64 @sprout_tag(i64)
-declare i64 @sprout_field(i64, i64)
 declare void @sprout_abort_match() noreturn
 declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
@@ -193,7 +192,9 @@ define i64 @range_start(i64 %p$value) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$value, i64 0)
+  %t$2$fptr = inttoptr i64 %p$value to ptr
+  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2 = load i64, ptr %t$2$fgep
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
@@ -207,7 +208,9 @@ define i64 @range_end(i64 %p$value) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$value, i64 1)
+  %t$2$fptr = inttoptr i64 %p$value to ptr
+  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 1
+  %t$2 = load i64, ptr %t$2$fgep
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
@@ -221,7 +224,9 @@ define i64 @range_step(i64 %p$value) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$value, i64 2)
+  %t$2$fptr = inttoptr i64 %p$value to ptr
+  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 2
+  %t$2 = load i64, ptr %t$2$fgep
   %t$3 = add i64 0, 0
   %t$4 = icmp slt i64 %t$2, %t$3
   %t$5 = zext i1 %t$4 to i64

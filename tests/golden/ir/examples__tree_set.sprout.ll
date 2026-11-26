@@ -17,7 +17,6 @@ declare void @sprout_gc_write_barrier(ptr)
 declare i64 @sprout_alloc_tuple_blob(i64)
 declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)
 declare i64 @sprout_tag(i64)
-declare i64 @sprout_field(i64, i64)
 declare void @sprout_abort_match() noreturn
 declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
@@ -212,8 +211,12 @@ arm_1_1:
   %t$8 = icmp eq i64 %t$0, %t$7
   br i1 %t$8, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$9 = call i64 @sprout_field(i64 %p$xs, i64 0)
-  %t$10 = call i64 @sprout_field(i64 %p$xs, i64 1)
+  %t$9$fptr = inttoptr i64 %p$xs to ptr
+  %t$9$fgep = getelementptr i64, ptr %t$9$fptr, i64 0
+  %t$9 = load i64, ptr %t$9$fgep
+  %t$10$fptr = inttoptr i64 %p$xs to ptr
+  %t$10$fgep = getelementptr i64, ptr %t$10$fptr, i64 1
+  %t$10 = load i64, ptr %t$10$fgep
   %t$23 = alloca i64
   store i64 %t$10, ptr %t$23
   %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
@@ -277,8 +280,12 @@ arm_1_1:
   %t$6 = icmp eq i64 %t$0, %t$5
   br i1 %t$6, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$7 = call i64 @sprout_field(i64 %p$xs, i64 0)
-  %t$8 = call i64 @sprout_field(i64 %p$xs, i64 1)
+  %t$7$fptr = inttoptr i64 %p$xs to ptr
+  %t$7$fgep = getelementptr i64, ptr %t$7$fptr, i64 0
+  %t$7 = load i64, ptr %t$7$fgep
+  %t$8$fptr = inttoptr i64 %p$xs to ptr
+  %t$8$fgep = getelementptr i64, ptr %t$8$fptr, i64 1
+  %t$8 = load i64, ptr %t$8$fgep
   %t$17 = alloca i64
   store i64 %t$8, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
@@ -358,8 +365,12 @@ arm_1_1:
   %t$6 = icmp eq i64 %t$0, %t$5
   br i1 %t$6, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$7 = call i64 @sprout_field(i64 %p$xs, i64 0)
-  %t$8 = call i64 @sprout_field(i64 %p$xs, i64 1)
+  %t$7$fptr = inttoptr i64 %p$xs to ptr
+  %t$7$fgep = getelementptr i64, ptr %t$7$fptr, i64 0
+  %t$7 = load i64, ptr %t$7$fgep
+  %t$8$fptr = inttoptr i64 %p$xs to ptr
+  %t$8$fgep = getelementptr i64, ptr %t$8$fptr, i64 1
+  %t$8 = load i64, ptr %t$8$fgep
   %t$14 = alloca i64
   store i64 %p$acc, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
@@ -425,7 +436,9 @@ arm_1_1:
   %t$6 = icmp eq i64 %t$0, %t$5
   br i1 %t$6, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$7 = call i64 @sprout_field(i64 %p$xs, i64 1)
+  %t$7$fptr = inttoptr i64 %p$xs to ptr
+  %t$7$fgep = getelementptr i64, ptr %t$7$fptr, i64 1
+  %t$7 = load i64, ptr %t$7$fgep
   %t$8 = add i64 0, 1
   %t$9$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$acc, i64 %t$8)
   %t$9 = extractvalue { i64, i1 } %t$9$agg, 0
@@ -552,11 +565,17 @@ arm_1_1:
   %t$9 = icmp eq i64 %t$0, %t$8
   br i1 %t$9, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$10 = call i64 @sprout_field(i64 %p$t, i64 0)
+  %t$10$fptr = inttoptr i64 %p$t to ptr
+  %t$10$fgep = getelementptr i64, ptr %t$10$fptr, i64 0
+  %t$10 = load i64, ptr %t$10$fgep
   %t$28$1 = getelementptr i64, ptr %t$28, i64 1
   store i64 %t$10, ptr %t$28$1
-  %t$11 = call i64 @sprout_field(i64 %p$t, i64 1)
-  %t$12 = call i64 @sprout_field(i64 %p$t, i64 2)
+  %t$11$fptr = inttoptr i64 %p$t to ptr
+  %t$11$fgep = getelementptr i64, ptr %t$11$fptr, i64 1
+  %t$11 = load i64, ptr %t$11$fgep
+  %t$12$fptr = inttoptr i64 %p$t to ptr
+  %t$12$fgep = getelementptr i64, ptr %t$12$fptr, i64 2
+  %t$12 = load i64, ptr %t$12$fgep
   %t$28$2 = getelementptr i64, ptr %t$28, i64 2
   store i64 %t$12, ptr %t$28$2
   %t$13 = icmp slt i64 %p$k, %t$11
@@ -652,9 +671,15 @@ arm_1_1:
   %t$6 = icmp eq i64 %t$0, %t$5
   br i1 %t$6, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$7 = call i64 @sprout_field(i64 %p$t, i64 0)
-  %t$8 = call i64 @sprout_field(i64 %p$t, i64 1)
-  %t$9 = call i64 @sprout_field(i64 %p$t, i64 2)
+  %t$7$fptr = inttoptr i64 %p$t to ptr
+  %t$7$fgep = getelementptr i64, ptr %t$7$fptr, i64 0
+  %t$7 = load i64, ptr %t$7$fgep
+  %t$8$fptr = inttoptr i64 %p$t to ptr
+  %t$8$fgep = getelementptr i64, ptr %t$8$fptr, i64 1
+  %t$8 = load i64, ptr %t$8$fgep
+  %t$9$fptr = inttoptr i64 %p$t to ptr
+  %t$9$fgep = getelementptr i64, ptr %t$9$fptr, i64 2
+  %t$9 = load i64, ptr %t$9$fgep
   %t$16 = alloca i64
   store i64 %p$acc, ptr %t$16
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)

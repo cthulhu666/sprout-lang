@@ -17,7 +17,6 @@ declare void @sprout_gc_write_barrier(ptr)
 declare i64 @sprout_alloc_tuple_blob(i64)
 declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)
 declare i64 @sprout_tag(i64)
-declare i64 @sprout_field(i64, i64)
 declare void @sprout_abort_match() noreturn
 declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
@@ -229,7 +228,9 @@ define i64 @stdlib.task.task_spawn(i64 %p$scope, i64 %p$work) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$scope, i64 0)
+  %t$2$fptr = inttoptr i64 %p$scope to ptr
+  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2 = load i64, ptr %t$2$fgep
   %t$4 = alloca i64
   store i64 %p$work, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)

@@ -215,10 +215,10 @@ grep -q '^\[bce\] ' "$TMPD/bce_test_linvec.err" || bad "the bce trace printed no
 # A store is judged by what it writes to, a call by its target, so a store that the compiler
 # lowers inline (`vector_mutset` on a scalar) or a wrapper (`linvec.set`, `linvec.push`) shows.
 #
-# Allowed callees of a copy: the creating externs, the rooting helpers, `sprout_field`, the
+# Allowed callees of a copy: the creating externs, the rooting helpers, the
 # match abort, intrinsics and the vector externs that build a new vector. A new entry needs
 # judging (can it write into a vector it was handed?), not appending to make the check pass.
-CALL_OK='^(vector_empty|vector_from_list|vec_make_filled|vector_concat|sprout_gc_push_[a-z0-9_]+_root|sprout_gc_pop_roots|sprout_field|sprout_abort_match|llvm\..*)$'
+CALL_OK='^(vector_empty|vector_from_list|vec_make_filled|vector_concat|sprout_gc_push_[a-z0-9_]+_root|sprout_gc_pop_roots|sprout_abort_match|llvm\..*)$'
 
 # <body file> -> one line per instruction a copy may not contain. A `store` must target a stack
 # slot (an `alloca`, or a `getelementptr` off one) or be the NOSCAN flag write: the store of

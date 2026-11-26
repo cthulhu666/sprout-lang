@@ -114,7 +114,6 @@ sprout_alloc_closure  # closure-env allocation carrying the closure's parameter 
 sprout_closure_arity_check  # guards every application of a closure VALUE, whose arity a Sprout function type does not determine (`\(x, y) -> …` and `\x -> \y -> …` share one type). Reads the GC header word, which Sprout cannot address, and must abort without returning, which no Sprout expression can do
 sprout_gc_write_barrier  # emitted after a linear in-place reuse stores into a cell that may be old (docs/gc-generational-v0.md §14.4). The remembered set is collector state Sprout code cannot reach; skipping reuse for old cells would need the same header test and give up reuse for the long-lived cells
 sprout_alloc_tuple_blob
-sprout_field
 sprout_gc_pop_roots
 sprout_gc_push_i64_root
 sprout_gc_push_scan_root

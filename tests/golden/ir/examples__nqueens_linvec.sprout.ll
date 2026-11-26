@@ -17,7 +17,6 @@ declare void @sprout_gc_write_barrier(ptr)
 declare i64 @sprout_alloc_tuple_blob(i64)
 declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)
 declare i64 @sprout_tag(i64)
-declare i64 @sprout_field(i64, i64)
 declare void @sprout_abort_match() noreturn
 declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
@@ -287,10 +286,18 @@ define i64 @examples.nqueens_linvec.mark(i64 %p$c, i64 %p$pd, i64 %p$nd, i64 %p$
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$b, i64 0)
-  %t$3 = call i64 @sprout_field(i64 %p$b, i64 1)
-  %t$4 = call i64 @sprout_field(i64 %p$b, i64 2)
-  %t$5 = call i64 @sprout_field(i64 %p$b, i64 3)
+  %t$2$fptr = inttoptr i64 %p$b to ptr
+  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2 = load i64, ptr %t$2$fgep
+  %t$3$fptr = inttoptr i64 %p$b to ptr
+  %t$3$fgep = getelementptr i64, ptr %t$3$fptr, i64 1
+  %t$3 = load i64, ptr %t$3$fgep
+  %t$4$fptr = inttoptr i64 %p$b to ptr
+  %t$4$fgep = getelementptr i64, ptr %t$4$fptr, i64 2
+  %t$4 = load i64, ptr %t$4$fgep
+  %t$5$fptr = inttoptr i64 %p$b to ptr
+  %t$5$fgep = getelementptr i64, ptr %t$5$fptr, i64 3
+  %t$5 = load i64, ptr %t$5$fgep
   %t$6 = call i64 @stdlib.linvec.set(i64 %p$c, i64 %p$x, i64 %t$3)
   %t$7 = call i64 @stdlib.linvec.set(i64 %p$pd, i64 %p$x, i64 %t$4)
   %t$8 = call i64 @stdlib.linvec.set(i64 %p$nd, i64 %p$x, i64 %t$5)
@@ -318,10 +325,18 @@ define i64 @examples.nqueens_linvec.found(i64 %p$b) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$b, i64 0)
-  %t$3 = call i64 @sprout_field(i64 %p$b, i64 1)
-  %t$4 = call i64 @sprout_field(i64 %p$b, i64 2)
-  %t$5 = call i64 @sprout_field(i64 %p$b, i64 3)
+  %t$2$fptr = inttoptr i64 %p$b to ptr
+  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2 = load i64, ptr %t$2$fgep
+  %t$3$fptr = inttoptr i64 %p$b to ptr
+  %t$3$fgep = getelementptr i64, ptr %t$3$fptr, i64 1
+  %t$3 = load i64, ptr %t$3$fgep
+  %t$4$fptr = inttoptr i64 %p$b to ptr
+  %t$4$fgep = getelementptr i64, ptr %t$4$fptr, i64 2
+  %t$4 = load i64, ptr %t$4$fgep
+  %t$5$fptr = inttoptr i64 %p$b to ptr
+  %t$5$fgep = getelementptr i64, ptr %t$5$fptr, i64 3
+  %t$5 = load i64, ptr %t$5$fgep
   %t$6 = add i64 0, 1
   %t$7$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %t$2, i64 %t$6)
   %t$7 = extractvalue { i64, i1 } %t$7$agg, 0
@@ -357,10 +372,18 @@ define i64 @examples.nqueens_linvec.try_col(i64 %p$n, i64 %p$row, i64 %p$col, i6
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$b, i64 0)
-  %t$3 = call i64 @sprout_field(i64 %p$b, i64 1)
-  %t$4 = call i64 @sprout_field(i64 %p$b, i64 2)
-  %t$5 = call i64 @sprout_field(i64 %p$b, i64 3)
+  %t$2$fptr = inttoptr i64 %p$b to ptr
+  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2 = load i64, ptr %t$2$fgep
+  %t$3$fptr = inttoptr i64 %p$b to ptr
+  %t$3$fgep = getelementptr i64, ptr %t$3$fptr, i64 1
+  %t$3 = load i64, ptr %t$3$fgep
+  %t$4$fptr = inttoptr i64 %p$b to ptr
+  %t$4$fgep = getelementptr i64, ptr %t$4$fptr, i64 2
+  %t$4 = load i64, ptr %t$4$fgep
+  %t$5$fptr = inttoptr i64 %p$b to ptr
+  %t$5$fgep = getelementptr i64, ptr %t$5$fptr, i64 3
+  %t$5 = load i64, ptr %t$5$fgep
   %t$6$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$row, i64 %p$col)
   %t$6 = extractvalue { i64, i1 } %t$6$agg, 0
   %t$6$ovf = extractvalue { i64, i1 } %t$6$agg, 1
@@ -546,12 +569,20 @@ entry:
   %t$16 = call i64 @sprout_gc_push_scan_root(ptr %t$15, i64 16)
   br label %arm_0_0
 arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$b, i64 0)
-  %t$3 = call i64 @sprout_field(i64 %p$b, i64 1)
-  %t$4 = call i64 @sprout_field(i64 %p$b, i64 2)
+  %t$2$fptr = inttoptr i64 %p$b to ptr
+  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2 = load i64, ptr %t$2$fgep
+  %t$3$fptr = inttoptr i64 %p$b to ptr
+  %t$3$fgep = getelementptr i64, ptr %t$3$fptr, i64 1
+  %t$3 = load i64, ptr %t$3$fgep
+  %t$4$fptr = inttoptr i64 %p$b to ptr
+  %t$4$fgep = getelementptr i64, ptr %t$4$fptr, i64 2
+  %t$4 = load i64, ptr %t$4$fgep
   %t$15$0 = getelementptr i64, ptr %t$15, i64 0
   store i64 %t$4, ptr %t$15$0
-  %t$5 = call i64 @sprout_field(i64 %p$b, i64 3)
+  %t$5$fptr = inttoptr i64 %p$b to ptr
+  %t$5$fgep = getelementptr i64, ptr %t$5$fptr, i64 3
+  %t$5 = load i64, ptr %t$5$fgep
   %t$15$1 = getelementptr i64, ptr %t$15, i64 1
   store i64 %t$5, ptr %t$15$1
   %t$17 = alloca i64

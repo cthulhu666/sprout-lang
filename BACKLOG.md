@@ -315,11 +315,6 @@ Legend:
   through `translate_do_bind_*` instead of resetting it); **heap-field tuples**
   (`IRCallUnboxed{2,3}` slots holding heap values must be rooted at the call site, and `op_heap_def`
   must report multiple slots).
-- [ ] `P2` **`sprout_field` is not declared read-only, so repeated field loads are not merged.**
-  `ir_lowering` declares it with no memory attribute, so LLVM keeps every `q.v` reload. After
-  `rec_inline`, the `q_mul`+`q_rot` bench runs 125 ms against 104 ms hand-expanded (best of 9); with
-  the declaration edited to `memory(read) nounwind willreturn`, both ran 87.6 ms
-  (`docs/record-sra-v0.md` §8). Needs a check that no store path writes a field LLVM could miss.
 - [ ] `P3` **`rec_inline` gaps.** A `do`-block `let` (`TDoLetStep`) bound to a record literal does
   not split, and a builder whose tail is an `if` does not inline (`docs/record-sra-v0.md` §2).
 - [ ] `P3` **Fully inlined callees are still compiled.** `rec_inline` runs after

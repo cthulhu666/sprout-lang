@@ -17,7 +17,6 @@ declare void @sprout_gc_write_barrier(ptr)
 declare i64 @sprout_alloc_tuple_blob(i64)
 declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)
 declare i64 @sprout_tag(i64)
-declare i64 @sprout_field(i64, i64)
 declare void @sprout_abort_match() noreturn
 declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
@@ -214,8 +213,12 @@ arm_1_1:
   %t$7 = icmp eq i64 %t$0, %t$6
   br i1 %t$7, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$8 = call i64 @sprout_field(i64 %p$xs, i64 0)
-  %t$9 = call i64 @sprout_field(i64 %p$xs, i64 1)
+  %t$8$fptr = inttoptr i64 %p$xs to ptr
+  %t$8$fgep = getelementptr i64, ptr %t$8$fptr, i64 0
+  %t$8 = load i64, ptr %t$8$fgep
+  %t$9$fptr = inttoptr i64 %p$xs to ptr
+  %t$9$fgep = getelementptr i64, ptr %t$9$fptr, i64 1
+  %t$9 = load i64, ptr %t$9$fgep
   %t$17 = alloca i64
   store i64 %t$9, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
@@ -464,8 +467,12 @@ join_1:
 
 define i64 @examples.records_of_functions.roundtrip(i64 %p$c, i64 %p$text) {
 entry:
-  %t$0 = call i64 @sprout_field(i64 %p$c, i64 1)
-  %t$1 = call i64 @sprout_field(i64 %p$c, i64 0)
+  %t$0$fptr = inttoptr i64 %p$c to ptr
+  %t$0$fgep = getelementptr i64, ptr %t$0$fptr, i64 1
+  %t$0 = load i64, ptr %t$0$fgep
+  %t$1$fptr = inttoptr i64 %p$c to ptr
+  %t$1$fgep = getelementptr i64, ptr %t$1$fptr, i64 0
+  %t$1 = load i64, ptr %t$1$fgep
   %t$5 = alloca i64
   store i64 %p$text, ptr %t$5
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
@@ -666,8 +673,12 @@ entry:
   %t$1$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$1$slot_ptr = getelementptr i64, ptr %t$1$env_ptr, i64 2
   %t$1 = load i64, ptr %t$1$slot_ptr
-  %t$2 = call i64 @sprout_field(i64 %t$1, i64 0)
-  %t$3 = call i64 @sprout_field(i64 %t$0, i64 0)
+  %t$2$fptr = inttoptr i64 %t$1 to ptr
+  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2 = load i64, ptr %t$2$fgep
+  %t$3$fptr = inttoptr i64 %t$0 to ptr
+  %t$3$fgep = getelementptr i64, ptr %t$3$fptr, i64 0
+  %t$3 = load i64, ptr %t$3$fgep
   %t$6 = alloca i64
   store i64 %t$2, ptr %t$6
   %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
@@ -691,8 +702,12 @@ entry:
   %t$1$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$1$slot_ptr = getelementptr i64, ptr %t$1$env_ptr, i64 2
   %t$1 = load i64, ptr %t$1$slot_ptr
-  %t$2 = call i64 @sprout_field(i64 %t$0, i64 1)
-  %t$3 = call i64 @sprout_field(i64 %t$1, i64 1)
+  %t$2$fptr = inttoptr i64 %t$0 to ptr
+  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 1
+  %t$2 = load i64, ptr %t$2$fgep
+  %t$3$fptr = inttoptr i64 %t$1 to ptr
+  %t$3$fgep = getelementptr i64, ptr %t$3$fptr, i64 1
+  %t$3 = load i64, ptr %t$3$fgep
   %t$6 = alloca i64
   store i64 %t$2, ptr %t$6
   %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
@@ -940,7 +955,9 @@ arm_0_0:
   %t$4 = call i64 @__tc_ToString_String_to_string(i64 %t$2)
   %t$5 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.17, i64 0, i32 1, i64 0
   %t$6 = ptrtoint ptr %t$5 to i64
-  %t$7 = call i64 @sprout_field(i64 %t$3, i64 0)
+  %t$7$fptr = inttoptr i64 %t$3 to ptr
+  %t$7$fgep = getelementptr i64, ptr %t$7$fptr, i64 0
+  %t$7 = load i64, ptr %t$7$fgep
   %t$28 = alloca i64
   store i64 %t$3, ptr %t$28
   %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)

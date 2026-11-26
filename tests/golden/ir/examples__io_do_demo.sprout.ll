@@ -17,7 +17,6 @@ declare void @sprout_gc_write_barrier(ptr)
 declare i64 @sprout_alloc_tuple_blob(i64)
 declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)
 declare i64 @sprout_tag(i64)
-declare i64 @sprout_field(i64, i64)
 declare void @sprout_abort_match() noreturn
 declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
@@ -190,7 +189,9 @@ arm_0_1:
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$r, i64 0)
+  %t$5$fptr = inttoptr i64 %p$r to ptr
+  %t$5$fgep = getelementptr i64, ptr %t$5$fptr, i64 0
+  %t$5 = load i64, ptr %t$5$fgep
   call void @sprout_closure_arity_check(i64 %p$f, i64 1)
   %t$6$env_ptr = inttoptr i64 %p$f to ptr
   %t$6$code = load ptr, ptr %t$6$env_ptr
@@ -209,7 +210,9 @@ arm_1_1:
   %t$9 = icmp eq i64 %t$0, %t$8
   br i1 %t$9, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$10 = call i64 @sprout_field(i64 %p$r, i64 0)
+  %t$10$fptr = inttoptr i64 %p$r to ptr
+  %t$10$fgep = getelementptr i64, ptr %t$10$fptr, i64 0
+  %t$10 = load i64, ptr %t$10$fgep
   %t$15 = alloca i64
   store i64 %t$10, ptr %t$15
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
@@ -236,7 +239,9 @@ arm_0_1:
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$r, i64 0)
+  %t$5$fptr = inttoptr i64 %p$r to ptr
+  %t$5$fgep = getelementptr i64, ptr %t$5$fptr, i64 0
+  %t$5 = load i64, ptr %t$5$fgep
   br label %join_1
 arm_1_1:
   %t$6 = add i64 0, 8
@@ -406,7 +411,9 @@ arm_1_1:
   %t$8 = icmp eq i64 %t$0, %t$7
   br i1 %t$8, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$9 = call i64 @sprout_field(i64 %p$value, i64 0)
+  %t$9$fptr = inttoptr i64 %p$value to ptr
+  %t$9$fgep = getelementptr i64, ptr %t$9$fptr, i64 0
+  %t$9 = load i64, ptr %t$9$fgep
   %t$10 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_0, i64 8) to i64
   %t$17 = alloca i64
   store i64 %t$9, ptr %t$17
@@ -867,7 +874,9 @@ wrepack_next_2:
   %t$7 = icmp eq i64 %t$1, %t$6
   br i1 %t$7, label %wrepack_hit_6, label %wrepack_next_6
 wrepack_hit_6:
-  %t$8 = call i64 @sprout_field(i64 %t$0, i64 0)
+  %t$8$fptr = inttoptr i64 %t$0 to ptr
+  %t$8$fgep = getelementptr i64, ptr %t$8$fptr, i64 0
+  %t$8 = load i64, ptr %t$8$fgep
   %t$9$lo = zext i64 %t$1 to i128
   %t$9$hw = zext i64 %t$8 to i128
   %t$9$hi = shl i128 %t$9$hw, 64
@@ -928,7 +937,9 @@ wrepack_next_16:
   %t$21 = icmp eq i64 %t$15, %t$20
   br i1 %t$21, label %wrepack_hit_20, label %wrepack_next_20
 wrepack_hit_20:
-  %t$22 = call i64 @sprout_field(i64 %t$14, i64 0)
+  %t$22$fptr = inttoptr i64 %t$14 to ptr
+  %t$22$fgep = getelementptr i64, ptr %t$22$fptr, i64 0
+  %t$22 = load i64, ptr %t$22$fgep
   %t$23$lo = zext i64 %t$15 to i128
   %t$23$hw = zext i64 %t$22 to i128
   %t$23$hi = shl i128 %t$23$hw, 64
@@ -972,7 +983,9 @@ wrepack_next_7:
   %t$12 = icmp eq i64 %t$6, %t$11
   br i1 %t$12, label %wrepack_hit_11, label %wrepack_next_11
 wrepack_hit_11:
-  %t$13 = call i64 @sprout_field(i64 %t$5, i64 0)
+  %t$13$fptr = inttoptr i64 %t$5 to ptr
+  %t$13$fgep = getelementptr i64, ptr %t$13$fptr, i64 0
+  %t$13 = load i64, ptr %t$13$fgep
   %t$14$lo = zext i64 %t$6 to i128
   %t$14$hw = zext i64 %t$13 to i128
   %t$14$hi = shl i128 %t$14$hw, 64
@@ -1034,7 +1047,9 @@ entry:
   %t$3 = icmp eq i64 %t$1, %t$2
   br i1 %t$3, label %wrepack_hit_2, label %wrepack_next_2
 wrepack_hit_2:
-  %t$4 = call i64 @sprout_field(i64 %t$0, i64 0)
+  %t$4$fptr = inttoptr i64 %t$0 to ptr
+  %t$4$fgep = getelementptr i64, ptr %t$4$fptr, i64 0
+  %t$4 = load i64, ptr %t$4$fgep
   %t$5$lo = zext i64 %t$1 to i128
   %t$5$hw = zext i64 %t$4 to i128
   %t$5$hi = shl i128 %t$5$hw, 64
@@ -1045,7 +1060,9 @@ wrepack_next_2:
   %t$7 = icmp eq i64 %t$1, %t$6
   br i1 %t$7, label %wrepack_hit_6, label %wrepack_next_6
 wrepack_hit_6:
-  %t$8 = call i64 @sprout_field(i64 %t$0, i64 0)
+  %t$8$fptr = inttoptr i64 %t$0 to ptr
+  %t$8$fgep = getelementptr i64, ptr %t$8$fptr, i64 0
+  %t$8 = load i64, ptr %t$8$fgep
   %t$9$lo = zext i64 %t$1 to i128
   %t$9$hw = zext i64 %t$8 to i128
   %t$9$hi = shl i128 %t$9$hw, 64
@@ -1076,7 +1093,9 @@ entry:
   %t$5 = icmp eq i64 %t$3, %t$4
   br i1 %t$5, label %wrepack_hit_4, label %wrepack_next_4
 wrepack_hit_4:
-  %t$6 = call i64 @sprout_field(i64 %t$2, i64 0)
+  %t$6$fptr = inttoptr i64 %t$2 to ptr
+  %t$6$fgep = getelementptr i64, ptr %t$6$fptr, i64 0
+  %t$6 = load i64, ptr %t$6$fgep
   %t$7$lo = zext i64 %t$3 to i128
   %t$7$hw = zext i64 %t$6 to i128
   %t$7$hi = shl i128 %t$7$hw, 64
@@ -1087,7 +1106,9 @@ wrepack_next_4:
   %t$9 = icmp eq i64 %t$3, %t$8
   br i1 %t$9, label %wrepack_hit_8, label %wrepack_next_8
 wrepack_hit_8:
-  %t$10 = call i64 @sprout_field(i64 %t$2, i64 0)
+  %t$10$fptr = inttoptr i64 %t$2 to ptr
+  %t$10$fgep = getelementptr i64, ptr %t$10$fptr, i64 0
+  %t$10 = load i64, ptr %t$10$fgep
   %t$11$lo = zext i64 %t$3 to i128
   %t$11$hw = zext i64 %t$10 to i128
   %t$11$hi = shl i128 %t$11$hw, 64

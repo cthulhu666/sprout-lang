@@ -30,8 +30,9 @@ for one type. This roadmap aims at the class.
 Measured 2026-10-31:
 - Sprout IR carries no `sanitize_address`, so ASan instruments none of it. A function given the
   attribute is instrumented when clang compiles the `.ll` (a load gains `__asan_report_load_n`).
-- Most heap reads from compiled code still run in C: ADT access is a call to `sprout_tag` /
-  `sprout_field`, as are `str_eq` and the `*_unboxed` reads. Those are instrumented today.
+- Some heap reads from compiled code still run in C: `sprout_tag`, `str_eq` and the `*_unboxed`
+  reads. Those are instrumented today. ADT field reads are inline IR loads, like tuple reads; ADT
+  objects live in arena chunks, which ASan does not track either way.
 - The arena is reserved with `mmap(PROT_NONE)` (`arena_init_once`) and committed per chunk
   (`arena_chunk_alloc`). ASan tracks no allocation there, and nothing poisons it. An overflow
   region (`open_new_region`'s `malloc` fallback) is one block of many slots, so it has redzones

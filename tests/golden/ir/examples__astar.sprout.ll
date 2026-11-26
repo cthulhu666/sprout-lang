@@ -17,7 +17,6 @@ declare void @sprout_gc_write_barrier(ptr)
 declare i64 @sprout_alloc_tuple_blob(i64)
 declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)
 declare i64 @sprout_tag(i64)
-declare i64 @sprout_field(i64, i64)
 declare void @sprout_abort_match() noreturn
 declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
@@ -232,7 +231,9 @@ define i64 @stdlib.mutable.mutvec_raw(i64 %p$v) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$v, i64 0)
+  %t$2$fptr = inttoptr i64 %p$v to ptr
+  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2 = load i64, ptr %t$2$fgep
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
@@ -543,10 +544,14 @@ arm_1_1:
   %t$9 = icmp eq i64 %t$0, %t$8
   br i1 %t$9, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$10 = call i64 @sprout_field(i64 %p$open, i64 0)
+  %t$10$fptr = inttoptr i64 %p$open to ptr
+  %t$10$fgep = getelementptr i64, ptr %t$10$fptr, i64 0
+  %t$10 = load i64, ptr %t$10$fgep
   %t$24$1 = getelementptr i64, ptr %t$24, i64 1
   store i64 %t$10, ptr %t$24$1
-  %t$11 = call i64 @sprout_field(i64 %p$open, i64 1)
+  %t$11$fptr = inttoptr i64 %p$open to ptr
+  %t$11$fgep = getelementptr i64, ptr %t$11$fptr, i64 1
+  %t$11 = load i64, ptr %t$11$fgep
   br label %arm_0_12
 arm_0_12:
   %t$14$ptr = inttoptr i64 %t$10 to ptr
@@ -941,8 +946,12 @@ arm_1_1:
   %t$7 = icmp eq i64 %t$0, %t$6
   br i1 %t$7, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$8 = call i64 @sprout_field(i64 %p$open, i64 0)
-  %t$9 = call i64 @sprout_field(i64 %p$open, i64 1)
+  %t$8$fptr = inttoptr i64 %p$open to ptr
+  %t$8$fgep = getelementptr i64, ptr %t$8$fptr, i64 0
+  %t$8 = load i64, ptr %t$8$fgep
+  %t$9$fptr = inttoptr i64 %p$open to ptr
+  %t$9$fgep = getelementptr i64, ptr %t$9$fptr, i64 1
+  %t$9 = load i64, ptr %t$9$fgep
   br label %arm_0_10
 arm_0_10:
   %t$12$ptr = inttoptr i64 %t$8 to ptr
@@ -1682,7 +1691,9 @@ wrepack_next_28:
   %t$33 = icmp eq i64 %t$27, %t$32
   br i1 %t$33, label %wrepack_hit_32, label %wrepack_next_32
 wrepack_hit_32:
-  %t$34 = call i64 @sprout_field(i64 %t$26, i64 0)
+  %t$34$fptr = inttoptr i64 %t$26 to ptr
+  %t$34$fgep = getelementptr i64, ptr %t$34$fptr, i64 0
+  %t$34 = load i64, ptr %t$34$fgep
   %t$47 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$35$lo = zext i64 %t$27 to i128
   %t$35$hw = zext i64 %t$34 to i128

@@ -17,7 +17,6 @@ declare void @sprout_gc_write_barrier(ptr)
 declare i64 @sprout_alloc_tuple_blob(i64)
 declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)
 declare i64 @sprout_tag(i64)
-declare i64 @sprout_field(i64, i64)
 declare void @sprout_abort_match() noreturn
 declare i64 @panic(i64)
 declare ptr @llvm.stacksave()
@@ -184,8 +183,12 @@ arm_1_1:
   %t$7 = icmp eq i64 %t$0, %t$6
   br i1 %t$7, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$8 = call i64 @sprout_field(i64 %p$xs, i64 0)
-  %t$9 = call i64 @sprout_field(i64 %p$xs, i64 1)
+  %t$8$fptr = inttoptr i64 %p$xs to ptr
+  %t$8$fgep = getelementptr i64, ptr %t$8$fptr, i64 0
+  %t$8 = load i64, ptr %t$8$fgep
+  %t$9$fptr = inttoptr i64 %p$xs to ptr
+  %t$9$fgep = getelementptr i64, ptr %t$9$fptr, i64 1
+  %t$9 = load i64, ptr %t$9$fgep
   %t$17 = alloca i64
   store i64 %t$9, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
@@ -224,9 +227,15 @@ define i64 @examples.existential_shapes.describe(i64 %p$d) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$d, i64 0)
-  %t$3 = call i64 @sprout_field(i64 %p$d, i64 1)
-  %t$4 = call i64 @sprout_field(i64 %p$d, i64 2)
+  %t$2$fptr = inttoptr i64 %p$d to ptr
+  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2 = load i64, ptr %t$2$fgep
+  %t$3$fptr = inttoptr i64 %p$d to ptr
+  %t$3$fgep = getelementptr i64, ptr %t$3$fptr, i64 1
+  %t$3 = load i64, ptr %t$3$fgep
+  %t$4$fptr = inttoptr i64 %p$d to ptr
+  %t$4$fgep = getelementptr i64, ptr %t$4$fptr, i64 2
+  %t$4 = load i64, ptr %t$4$fgep
   %t$17 = alloca i64
   store i64 %t$2, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
@@ -356,7 +365,9 @@ define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_C
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$s, i64 0)
+  %t$2$fptr = inttoptr i64 %p$s to ptr
+  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2 = load i64, ptr %t$2$fgep
   %t$3 = load i64, ptr @examples.existential_shapes.pi
   %t$4$fr = sitofp i64 %t$2 to double
   %t$4 = bitcast double %t$4$fr to i64
@@ -390,8 +401,12 @@ define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_R
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$s, i64 0)
-  %t$3 = call i64 @sprout_field(i64 %p$s, i64 1)
+  %t$2$fptr = inttoptr i64 %p$s to ptr
+  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2 = load i64, ptr %t$2$fgep
+  %t$3$fptr = inttoptr i64 %p$s to ptr
+  %t$3$fgep = getelementptr i64, ptr %t$3$fptr, i64 1
+  %t$3 = load i64, ptr %t$3$fgep
   %t$4$fr = sitofp i64 %t$2 to double
   %t$4 = bitcast double %t$4$fr to i64
   %t$5$fr = sitofp i64 %t$3 to double
@@ -420,7 +435,9 @@ define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_S
 entry:
   br label %arm_0_0
 arm_0_0:
-  %t$2 = call i64 @sprout_field(i64 %p$s, i64 0)
+  %t$2$fptr = inttoptr i64 %p$s to ptr
+  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2 = load i64, ptr %t$2$fgep
   %t$3$fr = sitofp i64 %t$2 to double
   %t$3 = bitcast double %t$3$fr to i64
   %t$4$fr = sitofp i64 %t$2 to double

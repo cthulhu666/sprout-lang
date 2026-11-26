@@ -363,7 +363,7 @@ go wrong, so `scripts/linvec_smoke.sh` checks, in `just ci-fast-gates`:
   from `tests/linvec_smoke/creators.spr`, which calls each creator at `Int` and `Double`) is read
   against an allowlist. Each `store` must target a stack slot (an `alloca`, or a `getelementptr`
   off one) or be the NOSCAN flag write itself (the `or` with bit 63 stored back to the header).
-  Each `call` must name a creating extern, a rooting helper, `sprout_field`, `sprout_abort_match`,
+  Each `call` must name a creating extern, a rooting helper, `sprout_abort_match`,
   `llvm.*` or `vector_concat` (`CALL_OK` in the script; a new entry needs judging, not appending).
   A blocklist of `vector_mutset`/`vector_push`/`linvec_set` calls missed a store lowered inline
   (`vector_mutset` on a scalar becomes a bare `store`) and the wrappers `linvec.set` and

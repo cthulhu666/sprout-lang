@@ -11,7 +11,7 @@ import testsupport.envvar as envvar
 # A wrap type must NOT emit a construction or extraction call at the LLVM IR
 # level — both are identity.  Contrast a regular single-constructor ADT which:
 #   - construction: emits  call i64 @sprout_alloc_obj(...)
-#   - extraction:   emits  call i64 @sprout_field(...)
+#   - extraction:   emits  an inline load (`$fgep` getelementptr + load)
 
 fn contains(haystack: String, needle: String) -> Bool =
   str_find(haystack, needle) != -1
@@ -55,9 +55,9 @@ fn ir_text(r: compiler.IrFullResult) -> String =
 fn has_make_call(ir: String) -> Bool =
   contains(ir, "call i64 @sprout_alloc_obj")
 
-# Check for a CALL to sprout_field (extraction reads a field from the heap).
+# Check for an inline field load (extraction reads a field from the heap).
 fn has_field_call(ir: String) -> Bool =
-  contains(ir, "call i64 @sprout_field")
+  contains(ir, "$fgep = getelementptr")
 
 fn main() -> Unit !{IO} =
   do
@@ -86,7 +86,7 @@ fn main() -> Unit !{IO} =
           # Baseline: regular ADT boxes values and reads via heap field access
           assert_true(state, "regular ADT emits call to @sprout_alloc_obj (baseline)",
             has_make_call(adt_ir))
-          assert_true(state, "regular ADT emits call to @sprout_field (baseline)",
+          assert_true(state, "regular ADT emits an inline field load (baseline)",
             has_field_call(adt_ir))
 
           # Structural sanity: if wrap_ir is empty (compilation failed above),
@@ -98,7 +98,7 @@ fn main() -> Unit !{IO} =
           # Zero-cost guarantee: wrap emits neither
           assert_false(state, "wrap construction emits no call to @sprout_alloc_obj",
             has_make_call(wrap_ir))
-          assert_false(state, "wrap extraction emits no call to @sprout_field",
+          assert_false(state, "wrap extraction emits no inline field load",
             has_field_call(wrap_ir))
 
     summary(state)
