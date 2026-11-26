@@ -431,6 +431,30 @@ export fn field_value(f: TypedRecordField) -> TypedExpr =
   match f with
   | TypedRecordField _ value -> value
 
+# The value expression bound to `name` in a source-order record literal.
+export fn typed_field_expr_for(name: String, fields: List TypedRecordField) -> Maybe TypedExpr =
+  match fields with
+  | Nil -> Nothing
+  | Cons f rest ->
+      match f with
+      | TypedRecordField fname fexpr ->
+          if fname == name then Just(fexpr) else typed_field_expr_for(name, rest)
+
+# Reorder a record literal's fields (source order) into declaration order so the
+# positional IRMakeCtor lays each value at its fixed offset.  Nothing if a
+# declared field is absent (a missing-field literal — rejected upstream by
+# inference, but guarded here too).
+export fn record_exprs_in_decl_order(decl_names: List String, fields: List TypedRecordField) -> Maybe (List TypedExpr) =
+  match decl_names with
+  | Nil -> Just(Nil)
+  | Cons nm rest ->
+      match typed_field_expr_for(nm, fields) with
+      | Nothing -> Nothing
+      | Just e ->
+          match record_exprs_in_decl_order(rest, fields) with
+          | Nothing -> Nothing
+          | Just es -> Just(Cons(e, es))
+
 # The name a decl defines; an instance or a pass-through has none.
 export fn decl_name(d: TypedDecl) -> Maybe String =
   match d with

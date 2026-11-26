@@ -20,8 +20,8 @@ import stdlib.string as string
 # Stage 2, the inliner. A call to a small, pure, non-recursive top-level function inlines when a
 # record allocation goes away by it: a record builder (one whose body ends in a record literal)
 # whose result a split let reads, or a call that has a field-only parameter (one only read by
-# `.field` or passed to another such parameter) fed by a builder call or a variable bound by a
-# let that splits. Nothing else inlines. The inlined body is walked again in the caller's
+# `.field` or passed to another such parameter) fed by a builder call, a record literal or a
+# variable bound by a let that splits. Nothing else inlines. The inlined body is walked again in the caller's
 # context, so the builders it calls inline in turn and its record lets split. That re-walk can
 # nest without end, so each top-level declaration (and each instance method) has a budget of
 # `inline_budget` nodes: an inline spends the size of the callee's prepared body, and a call the
@@ -376,10 +376,12 @@ fn has_flat_arg(flags: List Bool, args: List typed_ast.TypedExpr, cx: Ctx) -> Bo
       | [] -> false
       | [a | more] -> (fo && flat_arg(a, cx)) || has_flat_arg(rest, more, cx)
 
-# A builder call, or a variable bound by a let that will split.
+# A builder call, a literal of a non-linear record (`recs` holds no other), or a variable bound by
+# a let that will split. Inlining let-binds a literal, which `walk_let` then splits.
 fn flat_arg(a: typed_ast.TypedExpr, cx: Ctx) -> Bool =
   match a with
   | typed_ast.TVar v _ _ -> list_member(v, cx.flat)
+  | typed_ast.TRecord rname _ _ _ -> dict_member(rname, cx.recs)
   | typed_ast.TCall (typed_ast.TVar g _ _) gargs _ _ -> is_just(builder_call(g, gargs, cx))
   | _ -> false
 
@@ -515,8 +517,10 @@ fn inst_let(scrut: typed_ast.TypedExpr, branches: List typed_ast.TypedMatchBranc
 # `let x = scrut in body`. When `scrut` is a record literal or a builder call and `body` only reads
 # `x` by field or hands it to a field-only parameter, `x` will split: `scrut` walks as read by
 # field, and `body` walks with `x` flat, so the calls that take `x` inline. That is one walk for
-# a cycle ("`x` splits iff the call inlines iff `x` is flat"). The split itself then runs on what
-# the walk produced; when the budget kept a call from inlining, `x` has a bare use left and stays.
+# a cycle ("`x` splits iff the call inlines iff `x` is flat"). The split runs only when `x` was
+# flat (a let that does not expect to split cannot: the check with callees is the looser one) and
+# on what the walk produced; when the budget kept a call from inlining, `x` has a bare use left,
+# `subst` refuses, and the let stays.
 fn walk_let(e: typed_ast.TypedExpr, scrut: typed_ast.TypedExpr, x: String, vp: source.SourcePos,
             body: typed_ast.TypedExpr, t: types.Type, p: source.SourcePos, dm: Demand, cx: Ctx, g: Gen) ->
     (typed_ast.TypedExpr, Bool, Gen) =
@@ -527,9 +531,11 @@ fn walk_let(e: typed_ast.TypedExpr, scrut: typed_ast.TypedExpr, x: String, vp: s
       rebuilt = if ch1 || ch2
                 then typed_ast.TMatch(s, [typed_ast.TypedMatchBranch(ast.VarPattern(x, vp), b)], t, p)
                 else e
-  in match split_let(rebuilt, cx.recs, g2.n) with
-     | Just (split, n3) -> (split, true, g2 with (n = n3))
-     | Nothing -> (rebuilt, ch1 || ch2, g2)
+  in if !flat_x then (rebuilt, ch1 || ch2, g2)
+     else
+       match split_let(rebuilt, cx.recs, g2.n) with
+       | Just (split, n3) -> (split, true, g2 with (n = n3))
+       | Nothing -> (rebuilt, ch1 || ch2, g2)
 
 # `cx` for the body of `let x`: `x` flat when it will split, and not flat otherwise, since it
 # shadows an outer variable of the same name.
@@ -669,7 +675,8 @@ fn walk_seq_go(step: a -> Gen -> (a, Bool, Gen), xs: List a, g: Gen, acc: List a
 
 # A `let x = R(..) in b` is a one-arm match on a variable pattern (`ast.let_bind_match`; `where`
 # is the same construct). Splits it when `R` is a splittable record, the literal names every field
-# once, and every free occurrence of `x` in `b` is the base of a field read. Lets leading the value
+# once, and every free occurrence of `x` in `b` is the base of a field read, which `subst` checks
+# as it rewrites: `Err` for a bare use, so the let stays. Lets leading the value
 # float out first, when the pass made them (`is_pass_name`):
 #
 #   let x = (let y = e0 in r) in b   ->   let y = e0 in let x = r in b
@@ -683,13 +690,10 @@ fn split_let(e: typed_ast.TypedExpr, recs: Dict (List String), n: Int) -> Maybe(
           typed_ast.TRecord rname fields _ _ = tail else Nothing
           Just decl_names = dict_get(rname, recs) else Nothing
           Just values = in_decl_order(decl_names, fields) else Nothing
-      in
-        if !splittable(x, dict_empty(), body) then Nothing
-        else
-          let fresh = list_map(fresh_name(x, n, _), decl_names)
-              Ok body1 = subst(x, dict_from_list(zip(decl_names, fresh)), body) else Nothing
-              fields_lets = list_map(field_binding(vp, p, _), zip(fresh, values))
-          in Just((let_chain(floated, let_chain(fields_lets, body1, t), t), n + 1))
+          fresh = list_map(fresh_name(x, n, _), decl_names)
+          Ok body1 = subst(x, dict_from_list(zip(decl_names, fresh)), body) else Nothing
+          fields_lets = list_map(field_binding(vp, p, _), zip(fresh, values))
+      in Just((let_chain(floated, let_chain(fields_lets, body1, t), t), n + 1))
   | _ -> Nothing
 
 # A field's let: the original let's pattern and position.
@@ -718,18 +722,14 @@ fn pass_name(base: String, n: Int) -> String =
 
 fn is_pass_name(name: String) -> Bool = string.ends_with(name, "$ri")
 
-# The literal's field values in declaration order. `Nothing` when a declared field is missing or
-# the literal carries more fields than the record declares.
+# The literal's field values in declaration order, the order lowering evaluates a literal in.
+# `Nothing` when a declared field is missing or the literal carries more fields than the record
+# declares.
 fn in_decl_order(names: List String, fields: List typed_ast.TypedRecordField) ->
     Maybe(List typed_ast.TypedExpr) =
   if list_length(names) == list_length(fields)
-  then traverse(field_expr(_, fields), names)
+  then typed_ast.record_exprs_in_decl_order(names, fields)
   else Nothing
-
-fn field_expr(name: String, fields: List typed_ast.TypedRecordField) -> Maybe typed_ast.TypedExpr =
-  match fields with
-  | [] -> Nothing
-  | [typed_ast.TypedRecordField f v | rest] -> if f == name then Just(v) else field_expr(name, rest)
 
 # ---------------------------------------------------------------------------
 # Uses of the variable: may it split (`splittable`), and the rewrite (`subst`). Both stop below a

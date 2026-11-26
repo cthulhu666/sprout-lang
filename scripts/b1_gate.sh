@@ -262,6 +262,12 @@ if [ -n "$body" ] && [ "$(count_alloc <<<"$body")" -eq 1 ] && [ "$(count_alloc 3
 else
   echo "  FAIL: q_rot does not build exactly one Vec3 without add/scale/cross calls"; fail=1
 fi
+body="$(fn_body 'main\.use_ro' <<<"$inl_ir")"
+if [ -n "$body" ] && [ "$(count_alloc <<<"$body")" -eq 0 ] && ! has_call main.ro <<<"$body"; then
+  echo "  ok: a record literal at a field-only parameter is split, no allocation or call"
+else
+  echo "  FAIL: use_ro still builds the literal or calls main.ro (or has no body)"; fail=1
+fi
 for fn in main.dist_len stdlib.linalg.vec3.distance; do
   body="$(fn_body "${fn//./\\.}" <<<"$inl_ir")"
   if [ -n "$body" ] && [ "$(count_alloc <<<"$body")" -eq 0 ] && ! has_call stdlib.linalg.vec3.sub <<<"$body"; then

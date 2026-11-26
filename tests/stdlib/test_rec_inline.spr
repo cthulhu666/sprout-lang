@@ -84,6 +84,10 @@ fn shadow_lambda(a: Vec3, b: Vec3) -> Double =
      in get(a) + t.z
 
 # A field-only parameter the callee never reads, and one read as a bare argument and by field.
+fn ro(r: Vec3) -> Double = r.x + r.y
+
+fn use_ro(a: Double) -> Double = ro(Vec3(x = a, y = a * 2.0, z = a))
+
 fn second(v: Vec3, k: Double) -> Double = k
 
 fn unused_param(a: Vec3, b: Vec3) -> Double = second(vec3.add(a, b), 3.0)
@@ -164,5 +168,6 @@ fn main() -> Unit !{IO} =
       check_eq("renamed local does not float", renamed_local_shadow(p), 3.0),
       check_eq("nested inlining stays exact", blow(1.5), 2187.0),
       check_eq("do step rebinds after a read", w, vec3.length(vec3.new(2.0, 4.0, 6.0))),
+      check_eq("record literal at a field-only parameter", use_ro(2.0), 6.0),
       check_eq("empty effect row builder", empty_effect(2.5), 5.0)
     ])

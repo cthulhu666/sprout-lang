@@ -1139,7 +1139,7 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
       match dict_get(type_name, env.prog.ctors) with
       | Nothing -> Err("ast_to_ir: unknown record type '" ++ type_name ++ "'")
       | Just entry ->
-          match record_exprs_in_decl_order(entry.field_names, fields) with
+          match typed_ast.record_exprs_in_decl_order(entry.field_names, fields) with
           | Nothing -> Err("ast_to_ir: record '" ++ type_name ++ "' literal is missing a declared field")
           | Just ordered_exprs ->
               do
@@ -1198,30 +1198,6 @@ fn field_index(names: List String, field: String, i: Int) -> Maybe Int =
   match names with
   | Nil -> Nothing
   | Cons nm rest -> if nm == field then Just(i) else field_index(rest, field, i + 1)
-
-# The value expression bound to `name` in a source-order record literal.
-fn typed_field_expr_for(name: String, fields: List typed_ast.TypedRecordField) -> Maybe typed_ast.TypedExpr =
-  match fields with
-  | Nil -> Nothing
-  | Cons f rest ->
-      match f with
-      | typed_ast.TypedRecordField fname fexpr ->
-          if fname == name then Just(fexpr) else typed_field_expr_for(name, rest)
-
-# Reorder a record literal's fields (source order) into declaration order so the
-# positional IRMakeCtor lays each value at its fixed offset.  Nothing if a
-# declared field is absent (a missing-field literal — rejected upstream by
-# inference, but guarded here too).
-fn record_exprs_in_decl_order(decl_names: List String, fields: List typed_ast.TypedRecordField) -> Maybe (List typed_ast.TypedExpr) =
-  match decl_names with
-  | Nil -> Just(Nil)
-  | Cons nm rest ->
-      match typed_field_expr_for(nm, fields) with
-      | Nothing -> Nothing
-      | Just e ->
-          match record_exprs_in_decl_order(rest, fields) with
-          | Nothing -> Nothing
-          | Just es -> Just(Cons(e, es))
 
 # ---------------------------------------------------------------------------
 # translate_do — M3 PR 11
@@ -4926,7 +4902,7 @@ fn build_update_args(decl_names: List String, field_pos: Int,
       finish_make_ctor(env, "record", rname, tag, list_reverse(acc_names),
                        acc_blocks, cur_label, cur_ops, idx)
   | Cons nm rest ->
-      match typed_field_expr_for(nm, update_fields) with
+      match typed_ast.typed_field_expr_for(nm, update_fields) with
       | Just fexpr ->
           do
             (iblocks, icur_lbl, icur_ops, i_name, idx1) <-

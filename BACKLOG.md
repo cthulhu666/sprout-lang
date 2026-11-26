@@ -317,11 +317,15 @@ Legend:
   must report multiple slots).
 - [ ] `P2` **`sprout_field` is not declared read-only, so repeated field loads are not merged.**
   `ir_lowering` declares it with no memory attribute, so LLVM keeps every `q.v` reload. After
-  `rec_inline`, the `q_mul`+`q_rot` bench runs 131–139 ms against 107–112 ms hand-expanded; with
+  `rec_inline`, the `q_mul`+`q_rot` bench runs 125 ms against 104 ms hand-expanded (best of 9); with
   the declaration edited to `memory(read) nounwind willreturn`, both ran 87.6 ms
   (`docs/record-sra-v0.md` §8). Needs a check that no store path writes a field LLVM could miss.
 - [ ] `P3` **`rec_inline` gaps.** A `do`-block `let` (`TDoLetStep`) bound to a record literal does
   not split, and a builder whose tail is an `if` does not inline (`docs/record-sra-v0.md` §2).
+- [ ] `P3` **Fully inlined callees are still compiled.** `rec_inline` runs after
+  `dce.elim_unreachable`, so a callee inlined at every call site (`vec3.scale`, `zipper_open`)
+  still goes through Phase B, the alloc summary, rooting and LLVM. Measure the self-compile cost
+  first; the fix is a reachability re-check over callees that lost every caller.
 - [ ] `P2` **A literal inside a `Maybe` pattern loses CPR, so every read allocates.**
   `ast_to_ir.is_simple_width2_arm` admits only a variable or `_` under the constructor, so
   `match mutvec_get(c, p) with | Just false -> …` builds a `Just` per call, while `| Just b -> …`
