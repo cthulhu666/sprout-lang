@@ -37,10 +37,14 @@ import stdlib.string as string
 # appear in a user identifier, so every name this pass makes (`x$f$N$ri` for a field, `p$N$ri`
 # for an argument, `y$N$ri` for a binder of an inlined body) cannot clash with a name the program
 # wrote. `N` counts across the whole program, so no two share it. Every binder in an inlined body
-# is renamed, so a copy's own names neither capture nor are captured. Its free names are another
-# matter: a callee that reads a top-level `k` must not be copied below a binder of a local `k`.
-# The walk keeps the names bound above it (`Ctx.locals`) and leaves such a call, so the pass does
-# not depend on the bundler having renamed that local. Only lets named so float (`peel_lets`).
+# is renamed, so a copy's own names neither capture nor are captured. Two things are left to the
+# walk, which keeps the names bound above it in `Ctx.locals` and checks both against it
+# (`callee_at`), so the pass does not depend on the bundler having renamed a local:
+#   - the copy's free names: a callee that reads a top-level `k` is not copied below a binder
+#     of a local `k`;
+#   - the call target's own name: `f(..)` where a local binds `f` is not a call of the top-level
+#     `f`, whatever it looks like.
+# Only lets named so float (`peel_lets`).
 
 # The most nodes a callee body may have, once its own calls are prepared.
 let inline_limit: Int = 64
@@ -128,6 +132,16 @@ fn cx_bind(cx: Ctx, names_of: a -> List String, item: a) -> Ctx = cx_bind_names(
 # Whether a copy of `c` at this point would read a local in place of a top-level.
 fn captures(c: Callee, cx: Ctx) -> Bool = any(\n -> set_member(n, cx.locals), c.free)
 
+# The callee a call of `f` here may inline, the one lookup every decision goes through. Two ways a
+# copy goes wrong, both read off `cx.locals`: `f` itself is a local (the call is not to the
+# top-level `f`), or the copy reads a top-level that a local has the name of (`captures`).
+fn callee_at(f: String, cx: Ctx) -> Maybe Callee =
+  if set_member(f, cx.locals) then Nothing
+  else
+    match dict_get(f, cx.callees) with
+    | Just c -> if captures(c, cx) then Nothing else Just(c)
+    | Nothing -> Nothing
+
 # ---------------------------------------------------------------------------
 # Eligible callees (docs/record-sra-v0.md §4.1, §4.5).
 # ---------------------------------------------------------------------------
@@ -179,7 +193,7 @@ fn prepare_fn(d: typed_ast.TypedDecl, pe: PrepEnv, st: (Dict Callee, Int)) -> (D
           let cx = cx_bind(Ctx(recs = pe.recs, callees = callees, flat = [], locals = set_empty()),
                            ast.param_names, params)
               (b, _, g1) = walk(body, tail_demand(ret, pe.recs), cx, Gen(n = n, budget = inline_budget))
-          in match callee_of(params, b, callees, pe.top) with
+          in match callee_of(params, b, cx, pe.top) with
              | Just c -> (dict_set(name, c, callees), g1.n)
              | Nothing -> (callees, g1.n)
 
@@ -191,12 +205,12 @@ fn tail_demand(ret: Maybe ast.TypeExpr, recs: Dict (List String)) -> Demand =
 
 # A parameter is field-only when `splittable`: every use is a field read or an argument at a
 # field-only parameter.
-fn callee_of(params: List ast.Param, body: typed_ast.TypedExpr, callees: Dict Callee, top: Set) -> Maybe Callee =
+fn callee_of(params: List ast.Param, body: typed_ast.TypedExpr, cx: Ctx, top: Set) -> Maybe Callee =
   let Just size = body_size(body, top) else Nothing
       names = ast.param_names(params)
   in
     if size > inline_limit then Nothing
-    else Just(Callee(params = names, field_only = list_map(splittable(_, callees, body), names),
+    else Just(Callee(params = names, field_only = list_map(splittable(_, cx, body), names),
                      body = body, builder = tail_record(body), size = size,
                      free = set_to_list(free_names(body, set_from_list(names), set_empty()))))
 
@@ -343,9 +357,9 @@ fn walk(e: typed_ast.TypedExpr, dm: Demand, cx: Ctx, g: Gen) -> (typed_ast.Typed
 # the copy, whose calls may now inline in turn. Otherwise the arguments walk as values.
 fn walk_call(e: typed_ast.TypedExpr, f: String, args: List typed_ast.TypedExpr, t: types.Type,
              p: source.SourcePos, dm: Demand, cx: Ctx, g: Gen) -> (typed_ast.TypedExpr, Bool, Gen) =
-  match dict_get(f, cx.callees) with
+  match callee_at(f, cx) with
   | Just c ->
-      if inlines(c, args, dm, cx) && c.size <= g.budget && !captures(c, cx)
+      if inlines(c, args, dm, cx) && c.size <= g.budget
       then
         let (copy, n1) = instantiate(c, args, t, p, g.n)
             (r, _, g2) = walk(copy, dm, cx, Gen(n = n1, budget = g.budget - c.size))
@@ -378,7 +392,7 @@ fn flat_arg(a: typed_ast.TypedExpr, cx: Ctx) -> Bool =
 
 # The record `g(gargs)` builds, when `g` is a builder and the call passes every parameter.
 fn builder_call(g: String, gargs: List typed_ast.TypedExpr, cx: Ctx) -> Maybe String =
-  let Just c = dict_get(g, cx.callees) else Nothing
+  let Just c = callee_at(g, cx) else Nothing
   in if list_length(gargs) == list_length(c.params) then c.builder else Nothing
 
 # ---------------------------------------------------------------------------
@@ -549,7 +563,7 @@ fn bind_flat(cx: Ctx, x: String, is_flat: Bool) -> Ctx =
 fn split_expected(scrut: typed_ast.TypedExpr, x: String, body: typed_ast.TypedExpr, cx: Ctx) -> Bool =
   let Just rname = record_source(scrut, cx) else false
       Just _ = dict_get(rname, cx.recs) else false
-  in splittable(x, cx.callees, body)
+  in splittable(x, cx, body)
 
 fn record_source(scrut: typed_ast.TypedExpr, cx: Ctx) -> Maybe String =
   match scrut with
@@ -740,9 +754,10 @@ fn in_decl_order(names: List String, fields: List typed_ast.TypedRecordField) ->
 # ---------------------------------------------------------------------------
 
 # Whether every use of `x` in `e` allows the split: a field read, or an argument at a field-only
-# parameter of a call to a callee in `callees` that passes every parameter (the call will inline,
-# so the argument becomes field reads). Allocates nothing.
-fn splittable(x: String, callees: Dict Callee, e: typed_ast.TypedExpr) -> Bool =
+# parameter of a call to a callee (`callee_at`) that passes every parameter (the call will inline,
+# so the argument becomes field reads). It tracks the binders below `e` in `cx.locals`, so a call
+# `walk_call` would refuse is not counted. Allocates no nodes.
+fn splittable(x: String, cx: Ctx, e: typed_ast.TypedExpr) -> Bool =
   match e with
   | typed_ast.TVar v _ _ -> v != x
   | typed_ast.TInt _ _ _ -> true
@@ -753,56 +768,56 @@ fn splittable(x: String, callees: Dict Callee, e: typed_ast.TypedExpr) -> Bool =
   | typed_ast.TUnit _ _ -> true
   | typed_ast.TDict _ _ _ _ -> true
   | typed_ast.TMethodRef _ _ _ _ _ -> true
-  | typed_ast.TTuple _ _ _ -> children_splittable(x, callees, e)
-  | typed_ast.TIf _ _ _ _ _ -> children_splittable(x, callees, e)
-  | typed_ast.TBinary _ _ _ _ _ -> children_splittable(x, callees, e)
-  | typed_ast.TUnary _ _ _ _ -> children_splittable(x, callees, e)
-  | typed_ast.TRange _ _ _ _ -> children_splittable(x, callees, e)
-  | typed_ast.TRecord _ _ _ _ -> children_splittable(x, callees, e)
-  | typed_ast.TRecordUpdate _ _ _ _ -> children_splittable(x, callees, e)
+  | typed_ast.TTuple _ _ _ -> children_splittable(x, cx, e)
+  | typed_ast.TIf _ _ _ _ _ -> children_splittable(x, cx, e)
+  | typed_ast.TBinary _ _ _ _ _ -> children_splittable(x, cx, e)
+  | typed_ast.TUnary _ _ _ _ -> children_splittable(x, cx, e)
+  | typed_ast.TRange _ _ _ _ -> children_splittable(x, cx, e)
+  | typed_ast.TRecord _ _ _ _ -> children_splittable(x, cx, e)
+  | typed_ast.TRecordUpdate _ _ _ _ -> children_splittable(x, cx, e)
   | typed_ast.TCall callee args _ _ ->
-      match inlinable_callee(callee, args, callees) with
-      | Just c -> all(arg_splittable(x, callees, _), zip(args, c.field_only))
-      | Nothing -> children_splittable(x, callees, e)
+      match inlinable_callee(callee, args, cx) with
+      | Just c -> all(arg_splittable(x, cx, _), zip(args, c.field_only))
+      | Nothing -> children_splittable(x, cx, e)
   | typed_ast.TGetField base _ _ _ ->
       match base with
       | typed_ast.TVar _ _ _ -> true
-      | _ -> children_splittable(x, callees, e)
+      | _ -> children_splittable(x, cx, e)
   | typed_ast.TMatch scrut branches _ _ ->
-      splittable(x, callees, scrut) && all(branch_splittable(x, callees, _), branches)
+      splittable(x, cx, scrut) && all(branch_splittable(x, cx, _), branches)
   | typed_ast.TLambda params body _ _ ->
-      list_member(x, ast.param_names(params)) || splittable(x, callees, body)
-  | typed_ast.TDo steps _ _ -> steps_splittable(x, callees, steps)
+      list_member(x, ast.param_names(params)) || splittable(x, cx_bind(cx, ast.param_names, params), body)
+  | typed_ast.TDo steps _ _ -> steps_splittable(x, cx, steps)
 
-fn children_splittable(x: String, callees: Dict Callee, e: typed_ast.TypedExpr) -> Bool =
-  all(splittable(x, callees, _), typed_ast.children(e))
+fn children_splittable(x: String, cx: Ctx, e: typed_ast.TypedExpr) -> Bool =
+  all(splittable(x, cx, _), typed_ast.children(e))
 
 # The callee of a call to a top-level callee that passes every parameter.
-fn inlinable_callee(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, callees: Dict Callee) ->
+fn inlinable_callee(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, cx: Ctx) ->
     Maybe Callee =
   let typed_ast.TVar f _ _ = callee else Nothing
-      Just c = dict_get(f, callees) else Nothing
+      Just c = callee_at(f, cx) else Nothing
   in if list_length(args) == list_length(c.params) then Just(c) else Nothing
 
 # `x` itself is fine at a field-only parameter; anything else is checked as an expression.
-fn arg_splittable(x: String, callees: Dict Callee, arg: (typed_ast.TypedExpr, Bool)) -> Bool =
+fn arg_splittable(x: String, cx: Ctx, arg: (typed_ast.TypedExpr, Bool)) -> Bool =
   let (a, field_only) = arg
   in match a with
-     | typed_ast.TVar v _ _ -> (v == x && field_only) || splittable(x, callees, a)
-     | _ -> splittable(x, callees, a)
+     | typed_ast.TVar v _ _ -> (v == x && field_only) || splittable(x, cx, a)
+     | _ -> splittable(x, cx, a)
 
-fn branch_splittable(x: String, callees: Dict Callee, b: typed_ast.TypedMatchBranch) -> Bool =
+fn branch_splittable(x: String, cx: Ctx, b: typed_ast.TypedMatchBranch) -> Bool =
   match b with
   | typed_ast.TypedMatchBranch pat body ->
-      list_member(x, ast.pattern_names(pat)) || splittable(x, callees, body)
+      list_member(x, ast.pattern_names(pat)) || splittable(x, cx_bind(cx, ast.pattern_names, pat), body)
 
 # A step's value sees the `x` of the steps before it; its binder covers only the steps after it.
-fn steps_splittable(x: String, callees: Dict Callee, steps: List typed_ast.TypedDoStep) -> Bool =
+fn steps_splittable(x: String, cx: Ctx, steps: List typed_ast.TypedDoStep) -> Bool =
   match steps with
   | [] -> true
   | [s | rest] ->
-      splittable(x, callees, typed_ast.step_value(s))
-      && (list_member(x, step_binders(s)) || steps_splittable(x, callees, rest))
+      splittable(x, cx, typed_ast.step_value(s))
+      && (list_member(x, step_binders(s)) || steps_splittable(x, cx_bind(cx, step_binders, s), rest))
 
 # `e` with each `x.f` read replaced by the variable `names` binds for `f`. `Err` when `x` occurs any
 # other way, which `splittable` rules out first. Below a binder that rebinds `x`, `x` is a

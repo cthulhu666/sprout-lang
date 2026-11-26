@@ -59,6 +59,7 @@ fn typed_unbundled(src: String) -> Typed !{IO} =
 let unbundled_src =
   "type Pair = (x: Int, y: Int)\n" ++
   "type Box = Box Int\n" ++
+  "type Fun = Fun (Pair -> Int)\n" ++
   "let k: Int = 2\n" ++
   "fn a.b() -> Int = 1\n" ++
   "fn f(v: Pair) -> Int = v.x + k\n" ++
@@ -80,6 +81,25 @@ let unbundled_src =
   "fn unrelated(z: Int) -> Int =\n" ++
   "  let k = 100\n" ++
   "  in twice(Pair(x = z, y = z)) + k\n" ++
+  "fn name_by_let(z: Int) -> Int =\n" ++
+  "  let f = twice\n" ++
+  "  in f(Pair(x = z, y = z))\n" ++
+  "fn name_by_param(f: Pair -> Int, z: Int) -> Int = f(Pair(x = z, y = z))\n" ++
+  "fn name_by_arm(u: Fun, z: Int) -> Int =\n" ++
+  "  match u with\n" ++
+  "  | Fun f -> f(Pair(x = z, y = z))\n" ++
+  "fn name_by_lambda(z: Int) -> Int =\n" ++
+  "  let h = \\f -> f(Pair(x = z, y = z))\n" ++
+  "  in h(twice)\n" ++
+  "fn name_by_do(z: Int) -> Int !{IO} =\n" ++
+  "  do\n" ++
+  "    let f = twice\n" ++
+  "    f(Pair(x = z, y = z))\n" ++
+  "fn g(v: Pair) -> Int = v.x\n" ++
+  "fn whole_use(z: Int) -> Int =\n" ++
+  "  let x = Pair(x = z, y = z)\n" ++
+  "  in let g = twice\n" ++
+  "     in g(x) + twice(x)\n" ++
   "fn main() -> Unit !{IO} =\n" ++
   "  let r = by_let(3) + a.b()\n" ++
   "  in ()\n"
@@ -129,6 +149,14 @@ fn main() -> Unit !{IO} =
           assert_eq(state, "a match arm shadows: f stays", calls_in(prog, "by_arm", "f"), 1)
           assert_eq(state, "a lambda parameter shadows: f stays", calls_in(prog, "by_lambda", "f"), 1)
           assert_eq(state, "a do step shadows: f stays", calls_in(prog, "by_do", "f"), 1)
+          assert_eq(state, "a local `let` named like the callee: the call is the local's",
+                    calls_in(prog, "name_by_let", "f"), 1)
+          assert_eq(state, "a parameter named like the callee", calls_in(prog, "name_by_param", "f"), 1)
+          assert_eq(state, "a match arm named like the callee", calls_in(prog, "name_by_arm", "f"), 1)
+          assert_eq(state, "a lambda parameter named like the callee", calls_in(prog, "name_by_lambda", "f"), 1)
+          assert_eq(state, "a do step named like the callee", calls_in(prog, "name_by_do", "f"), 1)
+          assert_eq(state, "a call to a local `g` uses `x` whole: twice does not inline on it",
+                    calls_in(prog, "whole_use", "twice"), 1)
           assert_eq(state, "a local the callee does not name does not block: twice inlines",
                     calls_in(prog, "unrelated", "twice"), 0)
 
