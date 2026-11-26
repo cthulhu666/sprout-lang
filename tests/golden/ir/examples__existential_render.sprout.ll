@@ -175,10 +175,10 @@ arm_1_1:
   br i1 %t$7, label %body_1_1, label %arm_2_1
 body_1_1:
   %t$8$fptr = inttoptr i64 %p$xs to ptr
-  %t$8$fgep = getelementptr i64, ptr %t$8$fptr, i64 0
+  %t$8$fgep = getelementptr inbounds i64, ptr %t$8$fptr, i64 0
   %t$8 = load i64, ptr %t$8$fgep
   %t$9$fptr = inttoptr i64 %p$xs to ptr
-  %t$9$fgep = getelementptr i64, ptr %t$9$fptr, i64 1
+  %t$9$fgep = getelementptr inbounds i64, ptr %t$9$fptr, i64 1
   %t$9 = load i64, ptr %t$9$fgep
   %t$17 = alloca i64
   store i64 %t$9, ptr %t$17
@@ -219,10 +219,10 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2$fptr = inttoptr i64 %p$cell to ptr
-  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2$fgep = getelementptr inbounds i64, ptr %t$2$fptr, i64 0
   %t$2 = load i64, ptr %t$2$fgep
   %t$3$fptr = inttoptr i64 %p$cell to ptr
-  %t$3$fgep = getelementptr i64, ptr %t$3$fptr, i64 1
+  %t$3$fgep = getelementptr inbounds i64, ptr %t$3$fptr, i64 1
   %t$3 = load i64, ptr %t$3$fgep
   %t$5 = alloca i64
   store i64 %t$2, ptr %t$5
@@ -309,7 +309,7 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2$fptr = inttoptr i64 %p$t to ptr
-  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2$fgep = getelementptr inbounds i64, ptr %t$2$fptr, i64 0
   %t$2 = load i64, ptr %t$2$fgep
   %t$3 = call i64 @int_to_string(i64 %t$2)
   %t$4 = call i64 @__tc_ToString_String_to_string(i64 %t$3)

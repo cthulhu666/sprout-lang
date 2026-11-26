@@ -628,7 +628,8 @@ available and is unrelated to this design.
 > `sprout_gc_push_i64_root` pairs** (895 removed, 72 added). The mechanism is
 > `ir_rooting.sprout:89`: every `IRCall` counts as possibly-allocating, so each
 > `int_range_start(r)` — a call to a C extern — forced a GC root around it. A pattern
-> match lowers to `sprout_field`, which is not a trigger, so the rooting analysis can
+> match lowers to a field read (then `sprout_field`, now an inline load), not a
+> trigger, so the rooting analysis can
 > now see that reading a range field allocates nothing.
 >
 > An earlier note in this document cited a ~12× read slowdown from a micro-benchmark.

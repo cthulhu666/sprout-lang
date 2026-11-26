@@ -151,7 +151,7 @@ arm_0_1:
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
   %t$5$fptr = inttoptr i64 %p$m to ptr
-  %t$5$fgep = getelementptr i64, ptr %t$5$fptr, i64 0
+  %t$5$fgep = getelementptr inbounds i64, ptr %t$5$fptr, i64 0
   %t$5 = load i64, ptr %t$5$fgep
   call void @sprout_closure_arity_check(i64 %p$f, i64 1)
   %t$6$env_ptr = inttoptr i64 %p$f to ptr
@@ -277,7 +277,7 @@ arm_0_1:
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
   %t$5$fptr = inttoptr i64 %p$value to ptr
-  %t$5$fgep = getelementptr i64, ptr %t$5$fptr, i64 0
+  %t$5$fgep = getelementptr inbounds i64, ptr %t$5$fptr, i64 0
   %t$5 = load i64, ptr %t$5$fgep
   %t$6 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
   %t$7 = ptrtoint ptr %t$6 to i64

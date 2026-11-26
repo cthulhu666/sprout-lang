@@ -232,7 +232,7 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2$fptr = inttoptr i64 %p$scope to ptr
-  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2$fgep = getelementptr inbounds i64, ptr %t$2$fptr, i64 0
   %t$2 = load i64, ptr %t$2$fgep
   %t$5 = alloca i64
   store i64 %p$work, ptr %t$5
@@ -257,7 +257,7 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2$fptr = inttoptr i64 %p$task to ptr
-  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2$fgep = getelementptr inbounds i64, ptr %t$2$fptr, i64 0
   %t$2 = load i64, ptr %t$2$fgep
   %t$3 = call i64 @__task_await(i64 %t$2)
   br label %join_0

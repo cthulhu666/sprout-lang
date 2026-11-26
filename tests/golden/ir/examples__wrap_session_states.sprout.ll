@@ -452,7 +452,7 @@ arm_0_1:
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
   %t$5$fptr = inttoptr i64 %p$s to ptr
-  %t$5$fgep = getelementptr i64, ptr %t$5$fptr, i64 0
+  %t$5$fgep = getelementptr inbounds i64, ptr %t$5$fptr, i64 0
   %t$5 = load i64, ptr %t$5$fgep
   %t$17 = alloca i64
   store i64 %t$5, ptr %t$17

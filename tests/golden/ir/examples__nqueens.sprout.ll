@@ -165,7 +165,7 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2$fptr = inttoptr i64 %p$vec to ptr
-  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2$fgep = getelementptr inbounds i64, ptr %t$2$fptr, i64 0
   %t$2 = load i64, ptr %t$2$fgep
   %t$5 = alloca i64
   store i64 %p$value, ptr %t$5
@@ -197,7 +197,7 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2$fptr = inttoptr i64 %p$vec to ptr
-  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2$fgep = getelementptr inbounds i64, ptr %t$2$fptr, i64 0
   %t$2 = load i64, ptr %t$2$fgep
   %t$4 = alloca i64
   store i64 %t$2, ptr %t$4
@@ -245,7 +245,7 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2$fptr = inttoptr i64 %p$vec to ptr
-  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2$fgep = getelementptr inbounds i64, ptr %t$2$fptr, i64 0
   %t$2 = load i64, ptr %t$2$fgep
   %t$5 = alloca i64
   store i64 %p$value, ptr %t$5
@@ -949,7 +949,7 @@ entry:
 define i128 @vec_get_worker(i64 %p$index, i64 %p$vec) {
 entry:
   %t$0$fptr = inttoptr i64 %p$vec to ptr
-  %t$0$fgep = getelementptr i64, ptr %t$0$fptr, i64 0
+  %t$0$fgep = getelementptr inbounds i64, ptr %t$0$fptr, i64 0
   %t$0 = load i64, ptr %t$0$fgep
   %t$1$st = call i128 @vector_get_unboxed(i64 %t$0, i64 %p$index)
   %t$1 = trunc i128 %t$1$st to i64

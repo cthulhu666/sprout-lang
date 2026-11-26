@@ -377,7 +377,7 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
       # Inline load, not a call: LLVM can merge repeated reads of one field. Safe because the
       # GC is non-moving and every field write is an IR `store` or an opaque call, both clobbers.
       "  " ++ r ++ "$fptr = inttoptr i64 " ++ s ++ " to ptr\n" ++
-      "  " ++ r ++ "$fgep = getelementptr i64, ptr " ++ r ++ "$fptr, i64 " ++ int_to_string(i) ++ "\n" ++
+      "  " ++ r ++ "$fgep = getelementptr inbounds i64, ptr " ++ r ++ "$fptr, i64 " ++ int_to_string(i) ++ "\n" ++
       "  " ++ r ++ " = load i64, ptr " ++ r ++ "$fgep"
   # B1 inline vector access (Double reads, non-heap-scalar stores).
   # VectorVal { i64 len@0, i64 cap@8, i64* data@16 }; data lives at i64-index 2. Unchecked: ast_to_ir has already emitted the null +

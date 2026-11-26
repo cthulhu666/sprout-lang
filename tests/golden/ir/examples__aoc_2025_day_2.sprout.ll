@@ -177,7 +177,7 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2$fptr = inttoptr i64 %p$value to ptr
-  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2$fgep = getelementptr inbounds i64, ptr %t$2$fptr, i64 0
   %t$2 = load i64, ptr %t$2$fgep
   br label %join_0
 arm_1_0:
@@ -193,7 +193,7 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2$fptr = inttoptr i64 %p$value to ptr
-  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 1
+  %t$2$fgep = getelementptr inbounds i64, ptr %t$2$fptr, i64 1
   %t$2 = load i64, ptr %t$2$fgep
   br label %join_0
 arm_1_0:
@@ -209,7 +209,7 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2$fptr = inttoptr i64 %p$value to ptr
-  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 2
+  %t$2$fgep = getelementptr inbounds i64, ptr %t$2$fptr, i64 2
   %t$2 = load i64, ptr %t$2$fgep
   %t$3 = add i64 0, 0
   %t$4 = icmp slt i64 %t$2, %t$3
@@ -385,10 +385,10 @@ arm_1_1:
   br i1 %t$6, label %body_1_1, label %arm_2_1
 body_1_1:
   %t$7$fptr = inttoptr i64 %p$xs to ptr
-  %t$7$fgep = getelementptr i64, ptr %t$7$fptr, i64 0
+  %t$7$fgep = getelementptr inbounds i64, ptr %t$7$fptr, i64 0
   %t$7 = load i64, ptr %t$7$fgep
   %t$8$fptr = inttoptr i64 %p$xs to ptr
-  %t$8$fgep = getelementptr i64, ptr %t$8$fptr, i64 1
+  %t$8$fgep = getelementptr inbounds i64, ptr %t$8$fptr, i64 1
   %t$8 = load i64, ptr %t$8$fgep
   %t$17 = alloca i64
   store i64 %t$8, ptr %t$17
@@ -473,10 +473,10 @@ arm_1_5:
   br i1 %t$10, label %body_1_5, label %arm_2_5
 body_1_5:
   %t$11$fptr = inttoptr i64 %p$xs to ptr
-  %t$11$fgep = getelementptr i64, ptr %t$11$fptr, i64 0
+  %t$11$fgep = getelementptr inbounds i64, ptr %t$11$fptr, i64 0
   %t$11 = load i64, ptr %t$11$fgep
   %t$12$fptr = inttoptr i64 %p$xs to ptr
-  %t$12$fgep = getelementptr i64, ptr %t$12$fptr, i64 1
+  %t$12$fgep = getelementptr inbounds i64, ptr %t$12$fptr, i64 1
   %t$12 = load i64, ptr %t$12$fgep
   %t$23 = alloca i64
   store i64 %t$12, ptr %t$23
@@ -529,10 +529,10 @@ arm_1_1:
   br i1 %t$6, label %body_1_1, label %arm_2_1
 body_1_1:
   %t$7$fptr = inttoptr i64 %p$xs to ptr
-  %t$7$fgep = getelementptr i64, ptr %t$7$fptr, i64 0
+  %t$7$fgep = getelementptr inbounds i64, ptr %t$7$fptr, i64 0
   %t$7 = load i64, ptr %t$7$fgep
   %t$8$fptr = inttoptr i64 %p$xs to ptr
-  %t$8$fgep = getelementptr i64, ptr %t$8$fptr, i64 1
+  %t$8$fgep = getelementptr inbounds i64, ptr %t$8$fptr, i64 1
   %t$8 = load i64, ptr %t$8$fgep
   %t$14 = alloca i64
   store i64 %p$acc, ptr %t$14
@@ -1438,10 +1438,10 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2$fptr = inttoptr i64 %p$value to ptr
-  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2$fgep = getelementptr inbounds i64, ptr %t$2$fptr, i64 0
   %t$2 = load i64, ptr %t$2$fgep
   %t$3$fptr = inttoptr i64 %p$value to ptr
-  %t$3$fgep = getelementptr i64, ptr %t$3$fptr, i64 1
+  %t$3$fgep = getelementptr inbounds i64, ptr %t$3$fptr, i64 1
   %t$3 = load i64, ptr %t$3$fgep
   %t$4 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.20, i64 0, i32 1, i64 0
   %t$5 = ptrtoint ptr %t$4 to i64

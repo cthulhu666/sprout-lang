@@ -231,7 +231,7 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2$fptr = inttoptr i64 %p$vec to ptr
-  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2$fgep = getelementptr inbounds i64, ptr %t$2$fptr, i64 0
   %t$2 = load i64, ptr %t$2$fgep
   %t$5 = alloca i64
   store i64 %p$value, ptr %t$5
@@ -263,7 +263,7 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2$fptr = inttoptr i64 %p$vec to ptr
-  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2$fgep = getelementptr inbounds i64, ptr %t$2$fptr, i64 0
   %t$2 = load i64, ptr %t$2$fgep
   %t$3 = call i64 @vector_length(i64 %t$2)
   br label %join_0
@@ -280,7 +280,7 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2$fptr = inttoptr i64 %p$vec to ptr
-  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2$fgep = getelementptr inbounds i64, ptr %t$2$fptr, i64 0
   %t$2 = load i64, ptr %t$2$fgep
   %t$4 = alloca i64
   store i64 %t$2, ptr %t$4
@@ -328,7 +328,7 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2$fptr = inttoptr i64 %p$vec to ptr
-  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2$fgep = getelementptr inbounds i64, ptr %t$2$fptr, i64 0
   %t$2 = load i64, ptr %t$2$fgep
   %t$5 = alloca i64
   store i64 %p$value, ptr %t$5
@@ -811,10 +811,10 @@ arm_1_1:
   br i1 %t$6, label %body_1_1, label %arm_2_1
 body_1_1:
   %t$7$fptr = inttoptr i64 %p$xs to ptr
-  %t$7$fgep = getelementptr i64, ptr %t$7$fptr, i64 0
+  %t$7$fgep = getelementptr inbounds i64, ptr %t$7$fptr, i64 0
   %t$7 = load i64, ptr %t$7$fgep
   %t$8$fptr = inttoptr i64 %p$xs to ptr
-  %t$8$fgep = getelementptr i64, ptr %t$8$fptr, i64 1
+  %t$8$fgep = getelementptr inbounds i64, ptr %t$8$fptr, i64 1
   %t$8 = load i64, ptr %t$8$fgep
   %t$14 = alloca i64
   store i64 %p$acc, ptr %t$14
@@ -886,7 +886,7 @@ arm_0_1:
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
   %t$5$fptr = inttoptr i64 %p$r to ptr
-  %t$5$fgep = getelementptr i64, ptr %t$5$fptr, i64 0
+  %t$5$fgep = getelementptr inbounds i64, ptr %t$5$fptr, i64 0
   %t$5 = load i64, ptr %t$5$fgep
   %t$12 = alloca i64
   store i64 %t$5, ptr %t$12
@@ -903,7 +903,7 @@ arm_1_1:
   br i1 %t$8, label %body_1_1, label %arm_2_1
 body_1_1:
   %t$9$fptr = inttoptr i64 %p$r to ptr
-  %t$9$fgep = getelementptr i64, ptr %t$9$fptr, i64 0
+  %t$9$fgep = getelementptr inbounds i64, ptr %t$9$fptr, i64 0
   %t$9 = load i64, ptr %t$9$fgep
   call void @sprout_closure_arity_check(i64 %p$f, i64 1)
   %t$10$env_ptr = inttoptr i64 %p$f to ptr
@@ -951,7 +951,7 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2$fptr = inttoptr i64 %p$err to ptr
-  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2$fgep = getelementptr inbounds i64, ptr %t$2$fptr, i64 0
   %t$2 = load i64, ptr %t$2$fgep
   br label %join_0
 arm_1_0:
@@ -1095,10 +1095,10 @@ arm_1_1:
   br i1 %t$7, label %body_1_1, label %arm_2_1
 body_1_1:
   %t$8$fptr = inttoptr i64 %p$parts to ptr
-  %t$8$fgep = getelementptr i64, ptr %t$8$fptr, i64 0
+  %t$8$fgep = getelementptr inbounds i64, ptr %t$8$fptr, i64 0
   %t$8 = load i64, ptr %t$8$fgep
   %t$9$fptr = inttoptr i64 %p$parts to ptr
-  %t$9$fgep = getelementptr i64, ptr %t$9$fptr, i64 1
+  %t$9$fgep = getelementptr inbounds i64, ptr %t$9$fptr, i64 1
   %t$9 = load i64, ptr %t$9$fgep
   %t$10 = call i64 @sprout_tag(i64 %t$9)
   %t$11 = add i64 0, 5
@@ -1148,10 +1148,10 @@ arm_0_1:
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
   %t$5$fptr = inttoptr i64 %p$parts to ptr
-  %t$5$fgep = getelementptr i64, ptr %t$5$fptr, i64 0
+  %t$5$fgep = getelementptr inbounds i64, ptr %t$5$fptr, i64 0
   %t$5 = load i64, ptr %t$5$fgep
   %t$6$fptr = inttoptr i64 %p$parts to ptr
-  %t$6$fgep = getelementptr i64, ptr %t$6$fptr, i64 1
+  %t$6$fgep = getelementptr inbounds i64, ptr %t$6$fptr, i64 1
   %t$6 = load i64, ptr %t$6$fgep
   %t$7 = call i64 @sprout_tag(i64 %t$6)
   %t$8 = add i64 0, 6
@@ -1159,10 +1159,10 @@ body_0_1:
   br i1 %t$9, label %ntest_6, label %arm_1_1
 ntest_6:
   %t$10$fptr = inttoptr i64 %t$6 to ptr
-  %t$10$fgep = getelementptr i64, ptr %t$10$fptr, i64 0
+  %t$10$fgep = getelementptr inbounds i64, ptr %t$10$fptr, i64 0
   %t$10 = load i64, ptr %t$10$fgep
   %t$11$fptr = inttoptr i64 %t$6 to ptr
-  %t$11$fgep = getelementptr i64, ptr %t$11$fptr, i64 1
+  %t$11$fgep = getelementptr inbounds i64, ptr %t$11$fptr, i64 1
   %t$11 = load i64, ptr %t$11$fgep
   %t$30 = alloca i64
   store i64 %t$5, ptr %t$30
@@ -1195,10 +1195,10 @@ arm_1_1:
   br i1 %t$16, label %body_1_1, label %arm_2_1
 body_1_1:
   %t$17$fptr = inttoptr i64 %p$parts to ptr
-  %t$17$fgep = getelementptr i64, ptr %t$17$fptr, i64 0
+  %t$17$fgep = getelementptr inbounds i64, ptr %t$17$fptr, i64 0
   %t$17 = load i64, ptr %t$17$fgep
   %t$18$fptr = inttoptr i64 %p$parts to ptr
-  %t$18$fgep = getelementptr i64, ptr %t$18$fptr, i64 1
+  %t$18$fgep = getelementptr inbounds i64, ptr %t$18$fptr, i64 1
   %t$18 = load i64, ptr %t$18$fgep
   %t$19 = call i64 @sprout_tag(i64 %t$18)
   %t$20 = add i64 0, 5
@@ -1398,10 +1398,10 @@ arm_1_1:
   br i1 %t$6, label %body_1_1, label %arm_2_1
 body_1_1:
   %t$7$fptr = inttoptr i64 %p$xs to ptr
-  %t$7$fgep = getelementptr i64, ptr %t$7$fptr, i64 0
+  %t$7$fgep = getelementptr inbounds i64, ptr %t$7$fptr, i64 0
   %t$7 = load i64, ptr %t$7$fgep
   %t$8$fptr = inttoptr i64 %p$xs to ptr
-  %t$8$fgep = getelementptr i64, ptr %t$8$fptr, i64 1
+  %t$8$fgep = getelementptr inbounds i64, ptr %t$8$fptr, i64 1
   %t$8 = load i64, ptr %t$8$fgep
   %t$9 = call i64 @sprout_tag(i64 %t$8)
   %t$10 = add i64 0, 5
@@ -1434,10 +1434,10 @@ arm_2_1:
   br i1 %t$18, label %body_2_1, label %arm_3_1
 body_2_1:
   %t$19$fptr = inttoptr i64 %p$xs to ptr
-  %t$19$fgep = getelementptr i64, ptr %t$19$fptr, i64 0
+  %t$19$fgep = getelementptr inbounds i64, ptr %t$19$fptr, i64 0
   %t$19 = load i64, ptr %t$19$fgep
   %t$20$fptr = inttoptr i64 %p$xs to ptr
-  %t$20$fgep = getelementptr i64, ptr %t$20$fptr, i64 1
+  %t$20$fgep = getelementptr inbounds i64, ptr %t$20$fptr, i64 1
   %t$20 = load i64, ptr %t$20$fgep
   %t$32 = alloca i64
   store i64 %t$19, ptr %t$32
@@ -1861,7 +1861,7 @@ tco_loop:
   %p$pick = load i64, ptr %t$41
   %p$digit = load i64, ptr %t$42
   %t$0$fptr = inttoptr i64 %p$pick to ptr
-  %t$0$fgep = getelementptr i64, ptr %t$0$fptr, i64 1
+  %t$0$fgep = getelementptr inbounds i64, ptr %t$0$fptr, i64 1
   %t$0 = load i64, ptr %t$0$fgep
   %t$1 = add i64 0, 0
   %t$2 = icmp sle i64 %t$0, %t$1
@@ -1873,7 +1873,7 @@ then_4:
   br label %join_4
 else_4:
   %t$7$fptr = inttoptr i64 %p$pick to ptr
-  %t$7$fgep = getelementptr i64, ptr %t$7$fptr, i64 2
+  %t$7$fgep = getelementptr inbounds i64, ptr %t$7$fptr, i64 2
   %t$7 = load i64, ptr %t$7$fgep
   %t$8 = add i64 0, 0
   %t$9 = icmp sle i64 %t$7, %t$8
@@ -1887,7 +1887,7 @@ then_12:
   br label %join_12
 else_12:
   %t$14$fptr = inttoptr i64 %p$pick to ptr
-  %t$14$fgep = getelementptr i64, ptr %t$14$fptr, i64 1
+  %t$14$fgep = getelementptr inbounds i64, ptr %t$14$fptr, i64 1
   %t$14 = load i64, ptr %t$14$fgep
   %t$15 = add i64 0, 1
   %t$16$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$14, i64 %t$15)
@@ -1902,7 +1902,7 @@ ovfpanic_16:
 ovfok_16:
   %t$19 = add i64 0, 0
   %t$20$fptr = inttoptr i64 %p$pick to ptr
-  %t$20$fgep = getelementptr i64, ptr %t$20$fptr, i64 0
+  %t$20$fgep = getelementptr inbounds i64, ptr %t$20$fptr, i64 0
   %t$20 = load i64, ptr %t$20$fgep
   %t$21 = call i64 @vec_get_or(i64 %t$16, i64 %t$19, i64 %t$20)
   %t$22 = icmp slt i64 %t$21, %p$digit
@@ -1911,10 +1911,10 @@ ovfok_16:
   br i1 %t$39, label %then_24, label %else_24
 then_24:
   %t$26$fptr = inttoptr i64 %p$pick to ptr
-  %t$26$fgep = getelementptr i64, ptr %t$26$fptr, i64 0
+  %t$26$fgep = getelementptr inbounds i64, ptr %t$26$fptr, i64 0
   %t$26 = load i64, ptr %t$26$fgep
   %t$27$fptr = inttoptr i64 %p$pick to ptr
-  %t$27$fgep = getelementptr i64, ptr %t$27$fptr, i64 1
+  %t$27$fgep = getelementptr inbounds i64, ptr %t$27$fptr, i64 1
   %t$27 = load i64, ptr %t$27$fgep
   %t$28 = add i64 0, 1
   %t$29$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$27, i64 %t$28)
@@ -1928,7 +1928,7 @@ ovfpanic_29:
   unreachable
 ovfok_29:
   %t$32$fptr = inttoptr i64 %p$pick to ptr
-  %t$32$fgep = getelementptr i64, ptr %t$32$fptr, i64 2
+  %t$32$fgep = getelementptr inbounds i64, ptr %t$32$fptr, i64 2
   %t$32 = load i64, ptr %t$32$fgep
   %t$33 = add i64 0, 1
   %t$34$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$32, i64 %t$33)
@@ -1982,10 +1982,10 @@ entry:
   br label %arm_0_1
 arm_0_1:
   %t$3$fptr = inttoptr i64 %t$0 to ptr
-  %t$3$fgep = getelementptr i64, ptr %t$3$fptr, i64 0
+  %t$3$fgep = getelementptr inbounds i64, ptr %t$3$fptr, i64 0
   %t$3 = load i64, ptr %t$3$fgep
   %t$4$fptr = inttoptr i64 %t$0 to ptr
-  %t$4$fgep = getelementptr i64, ptr %t$4$fptr, i64 1
+  %t$4$fgep = getelementptr inbounds i64, ptr %t$4$fptr, i64 1
   %t$4 = load i64, ptr %t$4$fgep
   %t$18 = alloca i64
   store i64 %t$3, ptr %t$18
@@ -1993,7 +1993,7 @@ arm_0_1:
   %t$5 = call i64 @examples.aoc_2025_day_3.write_at_or_append(i64 %t$3, i64 %t$4, i64 %p$digit)
   %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$6$fptr = inttoptr i64 %t$0 to ptr
-  %t$6$fgep = getelementptr i64, ptr %t$6$fptr, i64 1
+  %t$6$fgep = getelementptr inbounds i64, ptr %t$6$fptr, i64 1
   %t$6 = load i64, ptr %t$6$fgep
   %t$7 = add i64 0, 1
   %t$8$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %t$6, i64 %t$7)
@@ -2007,7 +2007,7 @@ ovfpanic_8:
   unreachable
 ovfok_8:
   %t$11$fptr = inttoptr i64 %t$0 to ptr
-  %t$11$fgep = getelementptr i64, ptr %t$11$fptr, i64 2
+  %t$11$fgep = getelementptr inbounds i64, ptr %t$11$fptr, i64 2
   %t$11 = load i64, ptr %t$11$fgep
   %t$21 = alloca i64
   store i64 %t$5, ptr %t$21
@@ -2111,7 +2111,7 @@ entry:
 arm_0_5:
   %t$7 = add i64 0, 0
   %t$8$fptr = inttoptr i64 %t$4 to ptr
-  %t$8$fgep = getelementptr i64, ptr %t$8$fptr, i64 0
+  %t$8$fgep = getelementptr inbounds i64, ptr %t$8$fptr, i64 0
   %t$8 = load i64, ptr %t$8$fgep
   %t$19 = alloca i64
   store i64 %t$8, ptr %t$19
@@ -2624,10 +2624,10 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2$fptr = inttoptr i64 %p$value to ptr
-  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 0
+  %t$2$fgep = getelementptr inbounds i64, ptr %t$2$fptr, i64 0
   %t$2 = load i64, ptr %t$2$fgep
   %t$3$fptr = inttoptr i64 %p$value to ptr
-  %t$3$fgep = getelementptr i64, ptr %t$3$fptr, i64 1
+  %t$3$fgep = getelementptr inbounds i64, ptr %t$3$fptr, i64 1
   %t$3 = load i64, ptr %t$3$fgep
   %t$4 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.23, i64 0, i32 1, i64 0
   %t$5 = ptrtoint ptr %t$4 to i64
@@ -2726,7 +2726,7 @@ entry:
   br i1 %t$3, label %wrepack_hit_2, label %wrepack_next_2
 wrepack_hit_2:
   %t$4$fptr = inttoptr i64 %t$0 to ptr
-  %t$4$fgep = getelementptr i64, ptr %t$4$fptr, i64 0
+  %t$4$fgep = getelementptr inbounds i64, ptr %t$4$fptr, i64 0
   %t$4 = load i64, ptr %t$4$fgep
   %t$5$lo = zext i64 %t$1 to i128
   %t$5$hw = zext i64 %t$4 to i128
@@ -2769,7 +2769,7 @@ wrepack_next_14:
   br i1 %t$19, label %wrepack_hit_18, label %wrepack_next_18
 wrepack_hit_18:
   %t$20$fptr = inttoptr i64 %t$0 to ptr
-  %t$20$fgep = getelementptr i64, ptr %t$20$fptr, i64 0
+  %t$20$fgep = getelementptr inbounds i64, ptr %t$20$fptr, i64 0
   %t$20 = load i64, ptr %t$20$fgep
   %t$21$lo = zext i64 %t$1 to i128
   %t$21$hw = zext i64 %t$20 to i128
@@ -2795,7 +2795,7 @@ entry:
   br i1 %t$4, label %wrepack_hit_3, label %wrepack_next_3
 wrepack_hit_3:
   %t$5$fptr = inttoptr i64 %t$1 to ptr
-  %t$5$fgep = getelementptr i64, ptr %t$5$fptr, i64 0
+  %t$5$fgep = getelementptr inbounds i64, ptr %t$5$fptr, i64 0
   %t$5 = load i64, ptr %t$5$fgep
   %t$6$lo = zext i64 %t$2 to i128
   %t$6$hw = zext i64 %t$5 to i128
@@ -2808,7 +2808,7 @@ wrepack_next_3:
   br i1 %t$8, label %wrepack_hit_7, label %wrepack_next_7
 wrepack_hit_7:
   %t$9$fptr = inttoptr i64 %t$1 to ptr
-  %t$9$fgep = getelementptr i64, ptr %t$9$fptr, i64 0
+  %t$9$fgep = getelementptr inbounds i64, ptr %t$9$fptr, i64 0
   %t$9 = load i64, ptr %t$9$fgep
   %t$10$lo = zext i64 %t$2 to i128
   %t$10$hw = zext i64 %t$9 to i128
@@ -2869,7 +2869,7 @@ join_2:
   br i1 %t$14, label %wrepack_hit_13, label %wrepack_next_13
 wrepack_hit_13:
   %t$15$fptr = inttoptr i64 %t$3 to ptr
-  %t$15$fgep = getelementptr i64, ptr %t$15$fptr, i64 0
+  %t$15$fgep = getelementptr inbounds i64, ptr %t$15$fptr, i64 0
   %t$15 = load i64, ptr %t$15$fgep
   %t$16$lo = zext i64 %t$12 to i128
   %t$16$hw = zext i64 %t$15 to i128
@@ -2882,7 +2882,7 @@ wrepack_next_13:
   br i1 %t$18, label %wrepack_hit_17, label %wrepack_next_17
 wrepack_hit_17:
   %t$19$fptr = inttoptr i64 %t$3 to ptr
-  %t$19$fgep = getelementptr i64, ptr %t$19$fptr, i64 0
+  %t$19$fgep = getelementptr inbounds i64, ptr %t$19$fptr, i64 0
   %t$19 = load i64, ptr %t$19$fgep
   %t$20$lo = zext i64 %t$12 to i128
   %t$20$hw = zext i64 %t$19 to i128
@@ -2897,7 +2897,7 @@ wrepack_next_17:
 define i128 @vec_get_worker(i64 %p$index, i64 %p$vec) {
 entry:
   %t$0$fptr = inttoptr i64 %p$vec to ptr
-  %t$0$fgep = getelementptr i64, ptr %t$0$fptr, i64 0
+  %t$0$fgep = getelementptr inbounds i64, ptr %t$0$fptr, i64 0
   %t$0 = load i64, ptr %t$0$fgep
   %t$1$st = call i128 @vector_get_unboxed(i64 %t$0, i64 %p$index)
   %t$1 = trunc i128 %t$1$st to i64

@@ -180,10 +180,10 @@ entry:
 define i64 @examples.records_demo.read_budget_ms(i64 %p$s) {
 entry:
   %t$0$fptr = inttoptr i64 %p$s to ptr
-  %t$0$fgep = getelementptr i64, ptr %t$0$fptr, i64 2
+  %t$0$fgep = getelementptr inbounds i64, ptr %t$0$fptr, i64 2
   %t$0 = load i64, ptr %t$0$fgep
   %t$1$fptr = inttoptr i64 %t$0 to ptr
-  %t$1$fgep = getelementptr i64, ptr %t$1$fptr, i64 1
+  %t$1$fgep = getelementptr inbounds i64, ptr %t$1$fptr, i64 1
   %t$1 = load i64, ptr %t$1$fgep
   ret i64 %t$1
 }
@@ -194,7 +194,7 @@ entry:
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$2 = add i64 0, 443
   %t$3$fptr = inttoptr i64 %p$s to ptr
-  %t$3$fgep = getelementptr i64, ptr %t$3$fptr, i64 2
+  %t$3$fgep = getelementptr inbounds i64, ptr %t$3$fptr, i64 2
   %t$3 = load i64, ptr %t$3$fgep
   %t$5 = alloca i64
   store i64 %t$1, ptr %t$5
@@ -220,24 +220,24 @@ entry:
   call void @llvm.memset.p0.i64(ptr %t$12, i8 0, i64 8, i1 false)
   %t$13 = call i64 @sprout_gc_push_scan_root(ptr %t$12, i64 8)
   %t$0$fptr = inttoptr i64 %p$s to ptr
-  %t$0$fgep = getelementptr i64, ptr %t$0$fptr, i64 0
+  %t$0$fgep = getelementptr inbounds i64, ptr %t$0$fptr, i64 0
   %t$0 = load i64, ptr %t$0$fgep
   %t$12$0 = getelementptr i64, ptr %t$12, i64 0
   store i64 %t$0, ptr %t$12$0
   %t$1$fptr = inttoptr i64 %p$s to ptr
-  %t$1$fgep = getelementptr i64, ptr %t$1$fptr, i64 1
+  %t$1$fgep = getelementptr inbounds i64, ptr %t$1$fptr, i64 1
   %t$1 = load i64, ptr %t$1$fgep
   %t$2$fptr = inttoptr i64 %p$s to ptr
-  %t$2$fgep = getelementptr i64, ptr %t$2$fptr, i64 2
+  %t$2$fgep = getelementptr inbounds i64, ptr %t$2$fptr, i64 2
   %t$2 = load i64, ptr %t$2$fgep
   %t$3$fptr = inttoptr i64 %t$2 to ptr
-  %t$3$fgep = getelementptr i64, ptr %t$3$fptr, i64 0
+  %t$3$fgep = getelementptr inbounds i64, ptr %t$3$fptr, i64 0
   %t$3 = load i64, ptr %t$3$fgep
   %t$4$fptr = inttoptr i64 %p$s to ptr
-  %t$4$fgep = getelementptr i64, ptr %t$4$fptr, i64 2
+  %t$4$fgep = getelementptr inbounds i64, ptr %t$4$fptr, i64 2
   %t$4 = load i64, ptr %t$4$fgep
   %t$5$fptr = inttoptr i64 %t$4 to ptr
-  %t$5$fgep = getelementptr i64, ptr %t$5$fptr, i64 1
+  %t$5$fgep = getelementptr inbounds i64, ptr %t$5$fptr, i64 1
   %t$5 = load i64, ptr %t$5$fgep
   %t$6 = add i64 0, 2
   %t$7$agg = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %t$5, i64 %t$6)
@@ -295,13 +295,13 @@ entry:
 define i64 @examples.records_demo.describe(i64 %p$s) {
 entry:
   %t$0$fptr = inttoptr i64 %p$s to ptr
-  %t$0$fgep = getelementptr i64, ptr %t$0$fptr, i64 0
+  %t$0$fgep = getelementptr inbounds i64, ptr %t$0$fptr, i64 0
   %t$0 = load i64, ptr %t$0$fgep
   %t$1 = call i64 @__tc_ToString_String_to_string(i64 %t$0)
   %t$2 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.4, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
   %t$4$fptr = inttoptr i64 %p$s to ptr
-  %t$4$fgep = getelementptr i64, ptr %t$4$fptr, i64 1
+  %t$4$fgep = getelementptr inbounds i64, ptr %t$4$fptr, i64 1
   %t$4 = load i64, ptr %t$4$fgep
   %t$22 = alloca i64
   store i64 %p$s, ptr %t$22
@@ -429,7 +429,7 @@ entry:
   %t$9 = call i64 @examples.records_demo.describe(i64 %t$0)
   %t$10 = call i64 @print$spec_String(i64 %t$9)
   %t$11$fptr = inttoptr i64 %t$0 to ptr
-  %t$11$fgep = getelementptr i64, ptr %t$11$fptr, i64 2
+  %t$11$fgep = getelementptr inbounds i64, ptr %t$11$fptr, i64 2
   %t$11 = load i64, ptr %t$11$fgep
   %t$72 = alloca i64
   store i64 %t$11, ptr %t$72
@@ -461,14 +461,14 @@ arm_0_21:
   br label %arm_0_26
 arm_0_26:
   %t$28$fptr = inttoptr i64 %t$0 to ptr
-  %t$28$fgep = getelementptr i64, ptr %t$28$fptr, i64 0
+  %t$28$fgep = getelementptr inbounds i64, ptr %t$28$fptr, i64 0
   %t$28 = load i64, ptr %t$28$fgep
   %t$29 = call i64 @__tc_Eq_String_eq(i64 %t$28, i64 %t$17)
   %t$35 = trunc i64 %t$29 to i1
   br i1 %t$35, label %then_30, label %else_30
 then_30:
   %t$32$fptr = inttoptr i64 %t$0 to ptr
-  %t$32$fgep = getelementptr i64, ptr %t$32$fptr, i64 1
+  %t$32$fgep = getelementptr inbounds i64, ptr %t$32$fptr, i64 1
   %t$32 = load i64, ptr %t$32$fgep
   %t$33 = call i64 @__tc_Eq_Int_eq(i64 %t$32, i64 %t$20)
   br label %join_30
@@ -481,7 +481,7 @@ join_30:
   br i1 %t$41, label %then_36, label %else_36
 then_36:
   %t$38$fptr = inttoptr i64 %t$0 to ptr
-  %t$38$fgep = getelementptr i64, ptr %t$38$fptr, i64 2
+  %t$38$fgep = getelementptr inbounds i64, ptr %t$38$fptr, i64 2
   %t$38 = load i64, ptr %t$38$fgep
   %t$39 = call i64 @__tc_Eq_examples_records_demo_Timeouts_eq(i64 %t$38, i64 %t$25)
   br label %join_36
@@ -543,7 +543,7 @@ join_18:
   %t$49 = add i64 0, 8080
   %t$50 = call i64 @examples.records_demo.tag_env(i64 %t$49)
   %t$51$fptr = inttoptr i64 %t$50 to ptr
-  %t$51$fgep = getelementptr i64, ptr %t$51$fptr, i64 0
+  %t$51$fgep = getelementptr inbounds i64, ptr %t$51$fptr, i64 0
   %t$51 = load i64, ptr %t$51$fgep
   %t$86 = alloca i64
   store i64 %t$50, ptr %t$86
@@ -557,7 +557,7 @@ join_18:
   %t$54 = getelementptr inbounds { i64, [12 x i8] }, ptr @.str.9, i64 0, i32 1, i64 0
   %t$55 = ptrtoint ptr %t$54 to i64
   %t$56$fptr = inttoptr i64 %t$50 to ptr
-  %t$56$fgep = getelementptr i64, ptr %t$56$fptr, i64 1
+  %t$56$fgep = getelementptr inbounds i64, ptr %t$56$fptr, i64 1
   %t$56 = load i64, ptr %t$56$fgep
   %t$57 = call i64 @__tc_ToString_String_to_string(i64 %t$56)
   %t$91 = alloca i64
@@ -670,20 +670,20 @@ entry:
 define i64 @__tc_Eq_examples_records_demo_Timeouts_eq(i64 %p$left, i64 %p$right) {
 entry:
   %t$0$fptr = inttoptr i64 %p$left to ptr
-  %t$0$fgep = getelementptr i64, ptr %t$0$fptr, i64 0
+  %t$0$fgep = getelementptr inbounds i64, ptr %t$0$fptr, i64 0
   %t$0 = load i64, ptr %t$0$fgep
   %t$1$fptr = inttoptr i64 %p$right to ptr
-  %t$1$fgep = getelementptr i64, ptr %t$1$fptr, i64 0
+  %t$1$fgep = getelementptr inbounds i64, ptr %t$1$fptr, i64 0
   %t$1 = load i64, ptr %t$1$fgep
   %t$2 = call i64 @__tc_Eq_Int_eq(i64 %t$0, i64 %t$1)
   %t$9 = trunc i64 %t$2 to i1
   br i1 %t$9, label %then_3, label %else_3
 then_3:
   %t$5$fptr = inttoptr i64 %p$left to ptr
-  %t$5$fgep = getelementptr i64, ptr %t$5$fptr, i64 1
+  %t$5$fgep = getelementptr inbounds i64, ptr %t$5$fptr, i64 1
   %t$5 = load i64, ptr %t$5$fgep
   %t$6$fptr = inttoptr i64 %p$right to ptr
-  %t$6$fgep = getelementptr i64, ptr %t$6$fptr, i64 1
+  %t$6$fgep = getelementptr inbounds i64, ptr %t$6$fptr, i64 1
   %t$6 = load i64, ptr %t$6$fgep
   %t$7 = call i64 @__tc_Eq_Int_eq(i64 %t$5, i64 %t$6)
   br label %join_3
@@ -702,7 +702,7 @@ entry:
   %t$2 = getelementptr inbounds { i64, [14 x i8] }, ptr @.str.13, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
   %t$4$fptr = inttoptr i64 %p$value to ptr
-  %t$4$fgep = getelementptr i64, ptr %t$4$fptr, i64 0
+  %t$4$fgep = getelementptr inbounds i64, ptr %t$4$fptr, i64 0
   %t$4 = load i64, ptr %t$4$fgep
   %t$20 = alloca i64
   store i64 %p$value, ptr %t$20
@@ -724,7 +724,7 @@ entry:
   %t$9 = getelementptr inbounds { i64, [11 x i8] }, ptr @.str.15, i64 0, i32 1, i64 0
   %t$10 = ptrtoint ptr %t$9 to i64
   %t$11$fptr = inttoptr i64 %p$value to ptr
-  %t$11$fgep = getelementptr i64, ptr %t$11$fptr, i64 1
+  %t$11$fgep = getelementptr inbounds i64, ptr %t$11$fptr, i64 1
   %t$11 = load i64, ptr %t$11$fgep
   %t$29 = alloca i64
   store i64 %t$6, ptr %t$29
@@ -772,20 +772,20 @@ entry:
 define i64 @__tc_Eq_examples_records_demo_Server_eq(i64 %p$left, i64 %p$right) {
 entry:
   %t$0$fptr = inttoptr i64 %p$left to ptr
-  %t$0$fgep = getelementptr i64, ptr %t$0$fptr, i64 0
+  %t$0$fgep = getelementptr inbounds i64, ptr %t$0$fptr, i64 0
   %t$0 = load i64, ptr %t$0$fgep
   %t$1$fptr = inttoptr i64 %p$right to ptr
-  %t$1$fgep = getelementptr i64, ptr %t$1$fptr, i64 0
+  %t$1$fgep = getelementptr inbounds i64, ptr %t$1$fptr, i64 0
   %t$1 = load i64, ptr %t$1$fgep
   %t$2 = call i64 @__tc_Eq_String_eq(i64 %t$0, i64 %t$1)
   %t$9 = trunc i64 %t$2 to i1
   br i1 %t$9, label %then_3, label %else_3
 then_3:
   %t$5$fptr = inttoptr i64 %p$left to ptr
-  %t$5$fgep = getelementptr i64, ptr %t$5$fptr, i64 1
+  %t$5$fgep = getelementptr inbounds i64, ptr %t$5$fptr, i64 1
   %t$5 = load i64, ptr %t$5$fgep
   %t$6$fptr = inttoptr i64 %p$right to ptr
-  %t$6$fgep = getelementptr i64, ptr %t$6$fptr, i64 1
+  %t$6$fgep = getelementptr inbounds i64, ptr %t$6$fptr, i64 1
   %t$6 = load i64, ptr %t$6$fgep
   %t$7 = call i64 @__tc_Eq_Int_eq(i64 %t$5, i64 %t$6)
   br label %join_3
@@ -798,10 +798,10 @@ join_3:
   br i1 %t$16, label %then_10, label %else_10
 then_10:
   %t$12$fptr = inttoptr i64 %p$left to ptr
-  %t$12$fgep = getelementptr i64, ptr %t$12$fptr, i64 2
+  %t$12$fgep = getelementptr inbounds i64, ptr %t$12$fptr, i64 2
   %t$12 = load i64, ptr %t$12$fgep
   %t$13$fptr = inttoptr i64 %p$right to ptr
-  %t$13$fgep = getelementptr i64, ptr %t$13$fptr, i64 2
+  %t$13$fgep = getelementptr inbounds i64, ptr %t$13$fptr, i64 2
   %t$13 = load i64, ptr %t$13$fgep
   %t$14 = call i64 @__tc_Eq_examples_records_demo_Timeouts_eq(i64 %t$12, i64 %t$13)
   br label %join_10
