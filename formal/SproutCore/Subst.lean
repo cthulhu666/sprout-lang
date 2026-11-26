@@ -39,6 +39,7 @@ def Ty.app (θ : Nat → Ty) : Ty → Ty
   | .unit => .unit
   | .tup ts => .tup (Ty.appList θ ts)
   | .arr ps r e => mkArr (Ty.appList θ ps) (Ty.app θ r) e
+  | .adt n ts => .adt n (Ty.appList θ ts)
 
 def Ty.appList (θ : Nat → Ty) : List Ty → List Ty
   | [] => []
@@ -67,6 +68,10 @@ theorem Ty.app_arr (θ : Nat → Ty) (ps : List Ty) (r : Ty) (e : Eff) :
 
 theorem Ty.app_tup (θ : Nat → Ty) (ts : List Ty) :
     Ty.app θ (.tup ts) = .tup (ts.map (Ty.app θ)) := by
+  simp [Ty.app, Ty.appList_eq_map]
+
+theorem Ty.app_adt (θ : Nat → Ty) (n : String) (ts : List Ty) :
+    Ty.app θ (.adt n ts) = .adt n (ts.map (Ty.app θ)) := by
   simp [Ty.app, Ty.appList_eq_map]
 
 theorem Ty.inst_arr (us : List Ty) (ps : List Ty) (r : Ty) (e : Eff) :
@@ -169,6 +174,9 @@ theorem Ty.ok_mono {n m : Nat} (h : n ≤ m) : ∀ t : Ty, t.ok n = true → t.o
   | .arr ps r e, h' => by
     simp only [Ty.ok, Bool.and_eq_true] at *
     exact ⟨⟨Ty.okList_mono h ps h'.1.1, Ty.ok_mono h r h'.1.2⟩, h'.2⟩
+  | .adt _ ts, h' => by
+    simp only [Ty.ok] at *
+    exact Ty.okList_mono h ts h'
 
 theorem Ty.okList_mono {n m : Nat} (h : n ≤ m) :
     ∀ ts : List Ty, Ty.okList n ts = true → Ty.okList m ts = true
@@ -222,6 +230,9 @@ theorem Ty.app_ok (θ : Nat → Ty) (g : Nat) (hθ : ∀ n, (θ n).ok g = true) 
     simp only [gensOf, List.mem_append] at h
     exact Ty.ok_mkArr (Ty.appList_ok θ g hθ ps (Ty.NF_arr.mp hn).1 (fun i hi => h i (Or.inl hi)))
       (Ty.app_ok θ g hθ r (Ty.NF_arr.mp hn).2 (fun i hi => h i (Or.inr hi)))
+  | .adt _ ts, hn, h => by
+    simp only [Ty.app, Ty.ok]
+    exact Ty.appList_ok θ g hθ ts (Ty.NF_adt.mp hn) (by simpa [gensOf] using h)
 
 theorem Ty.appList_ok (θ : Nat → Ty) (g : Nat) (hθ : ∀ n, (θ n).ok g = true) :
     ∀ ts : List Ty, (∀ t ∈ ts, Ty.NF t) → (∀ i ∈ gensOfList ts, i < g) →
@@ -266,6 +277,10 @@ theorem Ty.inst_of_ok (ts : List Ty) : ∀ t : Ty, t.ok 0 = true → t.inst ts =
     simp only [Ty.inst]
     rw [Ty.instList_of_ok ts ps h.1.1, Ty.inst_of_ok ts r h.1.2]
     exact mkArr_keep (by simpa using h.2)
+  | .adt _ us, h => by
+    simp only [Ty.ok] at h
+    simp only [Ty.inst]
+    rw [Ty.instList_of_ok ts us h]
 
 theorem Ty.instList_of_ok (ts : List Ty) : ∀ us : List Ty, Ty.okList 0 us = true →
     Ty.instList ts us = us
@@ -308,6 +323,11 @@ theorem app_instTy (θ : Nat → Ty) (hθ : ∀ n, (θ n).ok 0 = true) (ms : Arr
     simp only [instTyList_eq_map, List.map_map] at h1
     simp only [instTy, Ty.app_arr, Ty.inst_mkArr, instTyList_eq_map, List.map_map]
     rw [h2, h1]
+  | .adt n ts, h => by
+    have := app_instTyList θ hθ ms ts (by simpa [gensOf] using h)
+    rw [Ty.appList_eq_map, Ty.instList_eq_map, Ty.appList_eq_map] at this
+    simp only [instTy, Ty.app_adt, Ty.inst, Ty.instList_eq_map, Ty.adt.injEq, true_and]
+    simpa [instTyList_eq_map] using this
 
 theorem app_instTyList (θ : Nat → Ty) (hθ : ∀ n, (θ n).ok 0 = true) (ms : Array Ty) :
     ∀ ts : List Ty, (∀ i ∈ gensOfList ts, i < ms.size) →
@@ -388,6 +408,10 @@ macro_rules
   | `(tactic| nf_rule) => `(tactic| exact Ty.NF.tup_params ‹_›)
 macro_rules
   | `(tactic| nf_rule) => `(tactic| (apply Ty.NF_tup.mpr; nf_close))
+macro_rules
+  | `(tactic| nf_rule) => `(tactic| exact Ty.NF.adt_params ‹_›)
+macro_rules
+  | `(tactic| nf_rule) => `(tactic| (refine Ty.NF_adt.mpr ?_; nf_close))
 macro_rules
   | `(tactic| nf_rule) => `(tactic| (rw [Ty.NF_mkArr]; constructor <;> nf_close))
 macro_rules
@@ -550,6 +574,15 @@ theorem zonkF_app : ∀ (k : Nat) (t : Ty) (s : CState),
       have := h1 θ hθ
       rw [Ty.app_arr, ← Ty.appList_eq_map] at this
       exact this
+    | adt n ts =>
+      dsimp only
+      refine Wp.bind (Wp.mono (hlist ts) ?_)
+      intro bs s2 ⟨e2, hb⟩
+      subst e2
+      refine Wp.pure' ⟨rfl, fun θ hθ => ?_⟩
+      rw [← h1 θ hθ]
+      simp only [Ty.app_adt, ← Ty.appList_eq_map]
+      rw [hb θ hθ]
     | _ => dsimp only; exact Wp.pure' ⟨rfl, h1⟩
 
 theorem zonk_app (t : Ty) (s : CState) :
@@ -596,6 +629,12 @@ theorem zonkF_nf : ∀ (k : Nat) (t : Ty) (s : CState), s.NF → t.NF →
       intro r' s3 ⟨e3, hr'⟩
       subst e3
       exact Wp.pure' ⟨rfl, Ty.NF_mkArr.mpr ⟨hb, hr'⟩⟩
+    | adt n ts =>
+      dsimp only
+      refine Wp.bind (Wp.mono (hlist ts (Ty.NF_adt.mp ht')) ?_)
+      intro bs s2 ⟨e2, hb⟩
+      subst e2
+      exact Wp.pure' ⟨rfl, Ty.NF_adt.mpr hb⟩
     | _ => dsimp only; exact Wp.pure' ⟨rfl, ht'⟩
 
 theorem zonk_nf (t : Ty) (s : CState) (hnf : s.NF) (htn : t.NF) :
@@ -658,6 +697,9 @@ theorem instTy_nf {ms : Array Ty} (hms : ∀ u ∈ ms, Ty.NF u) :
   | .bool, _, _ => by simp [instTy]
   | .str, _, _ => by simp [instTy]
   | .unit, _, _ => by simp [instTy]
+  | .adt _ ts, hn, h => by
+    simp only [instTy]
+    exact Ty.NF_adt.mpr (instTyList_nf hms ts (Ty.NF_adt.mp hn) (by simpa [gensOf] using h))
 
 theorem instTyList_nf {ms : Array Ty} (hms : ∀ u ∈ ms, Ty.NF u) :
     ∀ ts : List Ty, (∀ t ∈ ts, Ty.NF t) → (∀ i ∈ gensOfList ts, i < ms.size) →

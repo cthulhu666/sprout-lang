@@ -29,6 +29,7 @@ def Ty.skOf : Ty → List Nat
   | .skolem k => [k]
   | .tup ts => Ty.skOfList ts
   | .arr ps r _ => Ty.skOfList ps ++ Ty.skOf r
+  | .adt _ ts => Ty.skOfList ts
   | _ => []
 
 def Ty.skOfList : List Ty → List Nat
@@ -64,6 +65,13 @@ theorem Ty.SkLt.mono {B B' : Nat} {t : Ty} (h : t.SkLt B) (hB : B ≤ B') : t.Sk
 
 theorem Ty.SkLt_tup {B : Nat} {ts : List Ty} :
     (Ty.tup ts).SkLt B ↔ ∀ t ∈ ts, t.SkLt B := by
+  simp only [Ty.SkLt, Ty.skOf, mem_skOfList]
+  constructor
+  · intro h t ht k hk; exact h k ⟨t, ht, hk⟩
+  · rintro h k ⟨t, ht, hk⟩; exact h t ht k hk
+
+theorem Ty.SkLt_adt {B : Nat} {n : String} {ts : List Ty} :
+    (Ty.adt n ts).SkLt B ↔ ∀ t ∈ ts, t.SkLt B := by
   simp only [Ty.SkLt, Ty.skOf, mem_skOfList]
   constructor
   · intro h t ht k hk; exact h k ⟨t, ht, hk⟩
@@ -191,6 +199,7 @@ theorem genGo_isArr (tab : Array Ty) (r : Ty)
   | str => obtain ⟨q, qs, r2, e2, h⟩ := h; simp [genGo] at h
   | unit => obtain ⟨q, qs, r2, e2, h⟩ := h; simp [genGo] at h
   | tup ts => obtain ⟨q, qs, r2, e2, h⟩ := h; simp [genGo] at h
+  | adt _ ts => obtain ⟨q, qs, r2, e2, h⟩ := h; simp [genGo] at h
 
 
 /-- What `genGo` leaves for a type `t`: the table only grew and is still `TabOK`; the result is a
@@ -303,6 +312,17 @@ theorem genGo_spec (B : Nat) (θ : Nat → Ty) :
       have h1 := hin1 ids ⟨ex2.map (skId B) ++ ex, by rw [hids, hex2]; simp⟩
       have h2 := hin2 ids ⟨ex, hids⟩
       rw [h1, h2]
+  | .adt n ts, tab, hm, hg, hn, hc, hk, hT => by
+    have hsp := genGoList_spec B θ ts tab (by simpa [metasOf] using hm) (by simpa [gensOf] using hg)
+      (Ty.NF_adt.mp hn) hc (Ty.SkLt_adt.mp hk) hT
+    simp only [genGo]
+    rcases hp : genGoList [] tab ts with ⟨tab1, ts'⟩
+    rw [hp] at hsp
+    obtain ⟨hex, hT1, hok, hsk, hin⟩ := hsp
+    refine ⟨hex, hT1, by simpa [Ty.ok] using hok, by simpa [Ty.noSk] using hsk, ?_⟩
+    intro ids hids
+    simp only [Ty.inst, Ty.app]
+    rw [hin ids hids]
 
 theorem genGoList_spec (B : Nat) (θ : Nat → Ty) :
     ∀ (ts : List Ty) (tab : Array Ty), (∀ m ∈ metasOfList ts, θ m = .skolem (B + m)) →
@@ -399,6 +419,9 @@ theorem Ty.app_of_ok_gen (θ : Nat → Ty) {g : Nat} : ∀ t : Ty, t.ok g = true
     simp only [Ty.ok, Bool.and_eq_true, Bool.not_eq_true'] at h
     simp only [Ty.app, Ty.appList_of_ok_gen θ ps h.1.1, Ty.app_of_ok_gen θ r h.1.2]
     exact mkArr_keep (by simpa using h.2)
+  | .adt _ ts, h => by
+    simp only [Ty.ok] at h
+    simp only [Ty.app, Ty.appList_of_ok_gen θ ts h]
 
 theorem Ty.appList_of_ok_gen (θ : Nat → Ty) {g : Nat} :
     ∀ ts : List Ty, Ty.okList g ts = true → Ty.appList θ ts = ts

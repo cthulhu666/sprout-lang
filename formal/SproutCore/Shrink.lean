@@ -14,6 +14,16 @@ def shrinkAt {α : Type} [Inhabited α] (xs : List α) (f : α → List α) : Li
   (List.range xs.length).flatMap fun i =>
     (f xs[i]!).map fun y => xs.set i y
 
+/-- A pattern shrinks to `_`, or one of its parts shrinks. -/
+partial def shrinkPat : Pat → List Pat
+  | .wild => []
+  | .var _ => [.wild]
+  | .int n => [.wild] ++ (if n == 0 then [] else [.int 0])
+  | .bool _ | .unit => [.wild]
+  | .str s => [.wild] ++ (if s == "" then [] else [.str ""])
+  | .tup ps => [.wild] ++ (shrinkAt ps shrinkPat).map .tup
+  | .ctor c ps => [.wild] ++ (shrinkAt ps shrinkPat).map (.ctor c)
+
 mutual
 partial def shrinkStep : Step → List Step
   | .letS x r => (shrinkExpr r).map (.letS x ·)
@@ -40,6 +50,13 @@ partial def shrinkExpr : Expr → List Expr
     (List.range steps.length).map (fun i => Expr.doB (steps.eraseIdx i) final) ++
     (shrinkExpr final).map (.doB steps ·) ++
     (shrinkAt steps shrinkStep).map (.doB · final)
+  | .ctor _ => []
+  | .matchE scrut arms =>
+    [scrut] ++ arms.map (·.2) ++
+    (List.range arms.length).map (fun i => Expr.matchE scrut (arms.eraseIdx i)) ++
+    (shrinkExpr scrut).map (.matchE · arms) ++
+    (shrinkAt arms fun (p, e) => (shrinkPat p).map (·, e) ++ (shrinkExpr e).map (p, ·)).map
+      (.matchE scrut ·)
 end
 
 def shrinkSig : Option (Ty × Eff) → List (Option (Ty × Eff))
@@ -54,6 +71,14 @@ def shrinkDecl : Decl → List Decl
   | .letD n a i =>
     (if a.isSome then [Decl.letD n none i] else []) ++ (shrinkExpr i).map (.letD n a ·)
   | .mainFn sg b => (shrinkExpr b).map (.mainFn sg ·)
+  | .typeD n ps cs =>
+    -- a constructor dropped, a field dropped, a field made `Int`, the last parameter dropped
+    (if cs.length > 1 then (List.range cs.length).map fun i => Decl.typeD n ps (cs.eraseIdx i)
+      else []) ++
+    (shrinkAt cs fun (c, fs) =>
+      (List.range fs.length).map (fun j => (c, fs.eraseIdx j)) ++
+      (shrinkAt fs fun t => if t == .int then [] else [.int]).map (c, ·)).map (.typeD n ps ·) ++
+    (if ps.isEmpty then [] else [Decl.typeD n ps.dropLast cs])
 
 def shrinkProgram (p : Program) : List Program :=
   let ds := p.decls

@@ -664,7 +664,8 @@ theorem checkPlan_inv {p : Program} {pl : Plan} (h : checkPlan p = .ok pl) : Pla
   have hnodes : st.1.toList.map Node.toDecl = p.nodes ∧
       ∀ sg body, Decl.mainFn sg body ∈ p.decls ↔ ∃ pos, (pos, sg, body) ∈ st.2 := by
     let I : List Decl → Array Node × List (Nat × Option (Ty × Eff) × Expr) → Prop := fun pre s =>
-      s.1.toList.map Node.toDecl = pre.filter (fun d => match d with | .mainFn .. => false | _ => true) ∧
+      s.1.toList.map Node.toDecl =
+          pre.filter (fun d => match d with | .mainFn .. => false | .typeD .. => false | _ => true) ∧
         ∀ sg body, Decl.mainFn sg body ∈ pre ↔ ∃ pos, (pos, sg, body) ∈ s.2
     have := Except.forIn_prefix _ I p.decls ?_ ?_ p.decls [] _ st (by simp) ⟨by simp, by simp⟩ h1
     · exact this
@@ -693,6 +694,10 @@ theorem checkPlan_inv {p : Program} {pl : Plan} (h : checkPlan p = .ok pl) : Pla
           · exact Or.inl ⟨pos, hp⟩
           · simp only [Prod.mk.injEq] at hp
             exact Or.inr ⟨hp.2.1, hp.2.2⟩
+      | typeD n ps cs =>
+        simp only [pure, Except.pure, Except.ok.injEq, ForInStep.yield.injEq] at hf
+        subst hf
+        exact ⟨by simpa using hn, fun sg' body' => by simp [hm]⟩
     · intro pre d post s1 s2 hpre _ hf
       cases d <;> simp [pure, Except.pure] at hf
   dsimp only at h

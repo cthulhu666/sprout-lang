@@ -47,6 +47,10 @@ theorem Ty.elab_nf {σ : String → Ty} (hσ : ∀ s, (σ s).NF) :
         subst h
         exact Ty.NF_mkArr.mpr ⟨Ty.elabList_nf hσ ps ps' hps, Ty.elab_nf hσ r0 r' hr'⟩
     · cases h
+  | .adt _ ts, r, h => by
+    simp only [Ty.elab, Option.map_eq_some_iff] at h
+    obtain ⟨rs, hrs, rfl⟩ := h
+    exact Ty.NF_adt.mpr (Ty.elabList_nf hσ ts rs hrs)
 
 theorem Ty.elabList_nf {σ : String → Ty} (hσ : ∀ s, (σ s).NF) :
     ∀ (ts rs : List Ty), Ty.elabList σ ts = some rs → ∀ r ∈ rs, r.NF
@@ -92,6 +96,10 @@ theorem Ty.elab_wf {σ : String → Ty} {sz g : Nat} (hσ : ∀ s, Ty.WF sz g (�
         rw [Ty.WF_mkArr]
         exact Ty.WF_arr.mpr ⟨Ty.elabList_wf hσ ps ps' hps, Ty.elab_wf hσ r0 r' hr'⟩
     · cases h
+  | .adt _ ts, r, h => by
+    simp only [Ty.elab, Option.map_eq_some_iff] at h
+    obtain ⟨rs, hrs, rfl⟩ := h
+    exact Ty.WF_adt.mpr (Ty.elabList_wf hσ ts rs hrs)
 
 theorem Ty.elabList_wf {σ : String → Ty} {sz g : Nat} (hσ : ∀ s, Ty.WF sz g (σ s)) :
     ∀ (ts rs : List Ty), Ty.elabList σ ts = some rs → ∀ r ∈ rs, Ty.WF sz g r
@@ -144,6 +152,11 @@ theorem Ty.elab_app (θ : Nat → Ty) {σ : String → Ty} :
         rw [Ty.app_mkArr]
         simp
     · cases h
+  | .adt n ts, r, h => by
+    simp only [Ty.elab, Option.map_eq_some_iff] at h
+    obtain ⟨rs, hrs, rfl⟩ := h
+    have := Ty.elabList_app θ ts rs hrs
+    simp only [Ty.elab, this, Option.map_some, Ty.app_adt]
 
 theorem Ty.elabList_app (θ : Nat → Ty) {σ : String → Ty} :
     ∀ (ts rs : List Ty), Ty.elabList σ ts = some rs →

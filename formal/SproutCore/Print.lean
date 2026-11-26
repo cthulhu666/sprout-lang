@@ -23,6 +23,7 @@ def escapeStr (s : String) : String :=
       | '\n' => "\\n"
       | c => c.toString)) ""
 
+mutual
 /-- A type. `top` says an arrow needs no parentheses here. -/
 partial def pTy (top : Bool) : Ty → String
   | .named s => s
@@ -42,11 +43,39 @@ partial def pTy (top : Bool) : Ty → String
       | _ => pTy true r
     let s := ps' ++ " -> " ++ r' ++ (if e == .io then " !{IO}" else "")
     if top then s else "(" ++ s ++ ")"
+  | .adt n args => " ".intercalate (n :: args.map pTyArg)
+
+/-- A type argument or a constructor field: an applied type or an arrow is parenthesised. -/
+partial def pTyArg (t : Ty) : String :=
+  match t with
+  | .adt _ (_ :: _) | .arr .. => "(" ++ pTy true t ++ ")"
+  | _ => pTy false t
+end
+
+mutual
+/-- A pattern. A constructor's sub-patterns are space-separated atoms (`Cons x (Just y)`);
+`C(a, b)` would be `C` applied to one tuple pattern. -/
+partial def pPat : Pat → String
+  | .wild => "_"
+  | .var x => x
+  | .int n => toString n
+  | .bool b => if b then "true" else "false"
+  | .str s => "\"" ++ escapeStr s ++ "\""
+  | .unit => "()"
+  | .tup ps => "(" ++ ", ".intercalate (ps.map pPat) ++ ")"
+  | .ctor c [] => c
+  | .ctor c ps => " ".intercalate (c :: ps.map pPatArg)
+
+partial def pPatArg (p : Pat) : String :=
+  match p with
+  | .ctor _ (_ :: _) => "(" ++ pPat p ++ ")"
+  | _ => pPat p
+end
 
 def pad (n : Nat) : String := "".pushn ' ' n
 
 def isAtom : Expr → Bool
-  | .var _ | .int _ | .bool _ | .str _ | .unit | .tup _ | .app .. => true
+  | .var _ | .int _ | .bool _ | .str _ | .unit | .tup _ | .app .. | .ctor _ | .matchE .. => true
   | _ => false
 
 mutual
@@ -74,6 +103,11 @@ partial def pExpr (o : PrintOpts) (ind : Nat) : Expr → String
   | .notE e => "!" ++ pAtomish o ind e
   | .doB steps final =>
     "(" ++ pDo o ind steps final ++ ")"
+  | .ctor c => c
+  | .matchE scrut arms =>
+    -- one line, parenthesised, so its arms are not read against an enclosing block
+    "(match " ++ pAtomish o ind scrut ++ " with" ++
+      String.join (arms.map fun (p, e) => " | " ++ pPat p ++ " -> " ++ pAtomish o ind e) ++ ")"
 
 /-- A subexpression that must not bleed into its context. -/
 partial def pAtomish (o : PrintOpts) (ind : Nat) (e : Expr) : String :=
@@ -115,6 +149,10 @@ def pDecl (o : PrintOpts) : Decl → String
     s!"let {name}{a} = " ++ pExpr o 0 init
   | .mainFn sg body =>
     "fn main()" ++ pSig sg ++ " =\n  " ++ pBody o 2 body
+  | .typeD name params ctors =>
+    let head := " ".intercalate ("type" :: name :: params) ++ " ="
+    let arms := ctors.map fun (c, fs) => "\n  | " ++ " ".intercalate (c :: fs.map pTyArg)
+    head ++ String.join arms
 
 def printProgram (o : PrintOpts := {}) (p : Program) : String :=
   "\n\n".intercalate (p.decls.map (pDecl o)) ++ "\n"

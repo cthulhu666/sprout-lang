@@ -33,6 +33,8 @@ def Decl.Surf : Decl → Prop
   | .fn n ps sg b => FnInfo.Surf ⟨n, ps, sg, b⟩
   | .letD _ a i => (∀ t, a = some t → t.surf = true) ∧ i.Surf
   | .mainFn _ b => b.Surf
+  -- stage 2a: T2 covers programs without type declarations until 2c
+  | .typeD .. => False
 
 def Program.Surf (p : Program) : Prop := ∀ d ∈ p.decls, Decl.Surf d
 
@@ -275,12 +277,127 @@ theorem runPlan_sound {p : Program} {pl : Plan} (hinv : Plan.Inv p pl) (hp : p.S
       obtain ⟨pos, hpos⟩ := (hinv.mains_eq sg body).mp hm
       exact hdone _ hpos
 
+/-! A surface type has no `.adt`, so the kind check passes it. -/
+
+mutual
+theorem kindTy_of_surf (types : List (String × Nat)) :
+    ∀ t : Ty, t.surf = true → kindTy types t = .ok ()
+  | .named _, _ => rfl
+  | .mv _, h | .skolem _, h | .gen _, h | .adt _ _, h => by simp [Ty.surf] at h
+  | .int, _ | .bool, _ | .str, _ | .unit, _ => rfl
+  | .tup ts, h => by
+    simp only [Ty.surf] at h
+    simp only [kindTy, kindTys_of_surf types ts h]
+  | .arr ps r _, h => by
+    simp only [Ty.surf, Bool.and_eq_true] at h
+    simp only [kindTy, kindTys_of_surf types ps h.1, kindTy_of_surf types r h.2]; rfl
+
+theorem kindTys_of_surf (types : List (String × Nat)) :
+    ∀ ts : List Ty, Ty.surfList ts = true → kindTys types ts = .ok ()
+  | [], _ => rfl
+  | t :: ts, h => by
+    simp only [Ty.surfList, Bool.and_eq_true] at h
+    simp only [kindTys, kindTy_of_surf types t h.1, kindTys_of_surf types ts h.2]; rfl
+end
+
+theorem kindAnn_of_surf (types : List (String × Nat)) {a : Option Ty}
+    (h : ∀ t, a = some t → t.surf = true) : kindAnn types a = .ok () := by
+  cases a with
+  | none => rfl
+  | some t => exact kindTy_of_surf types t (h t rfl)
+
+mutual
+theorem kindExpr_of_surf (types : List (String × Nat)) :
+    ∀ e : Expr, e.Surf → kindExpr types e = .ok ()
+  | .var _, _ | .int _, _ | .bool _, _ | .str _, _ | .unit, _ => rfl
+  | .lam _ _ b, h => by
+    simp only [kindExpr, kindAnn_of_surf types h.1, kindExpr_of_surf types b h.2]; rfl
+  | .app f as, h => by
+    simp only [kindExpr, kindExpr_of_surf types f h.1, kindExprs_of_surf types as h.2]; rfl
+  | .letIn _ r b, h => by
+    simp only [kindExpr, kindExpr_of_surf types r h.1, kindExpr_of_surf types b h.2]; rfl
+  | .ite c t e, h => by
+    simp only [kindExpr, kindExpr_of_surf types c h.1, kindExpr_of_surf types t h.2.1,
+      kindExpr_of_surf types e h.2.2]; rfl
+  | .tup es, h => by simp only [kindExpr, kindExprs_of_surf types es h]
+  | .notE e, h => by simp only [kindExpr, kindExpr_of_surf types e h]
+  | .doB steps f, h => by
+    simp only [kindExpr, kindSteps_of_surf types steps h.1, kindExpr_of_surf types f h.2]; rfl
+  | .ctor _, h | .matchE _ _, h => h.elim
+
+theorem kindExprs_of_surf (types : List (String × Nat)) :
+    ∀ es : List Expr, Expr.SurfList es → kindExprs types es = .ok ()
+  | [], _ => rfl
+  | e :: es, h => by
+    simp only [kindExprs, kindExpr_of_surf types e h.1, kindExprs_of_surf types es h.2]; rfl
+
+theorem kindSteps_of_surf (types : List (String × Nat)) :
+    ∀ steps : List Step, Step.SurfList steps → kindSteps types steps = .ok ()
+  | [], _ => rfl
+  | .letS _ r :: rest, h => by
+    simp only [kindSteps, kindExpr_of_surf types r h.1, kindSteps_of_surf types rest h.2]; rfl
+  | .exprS e :: rest, h => by
+    simp only [kindSteps, kindExpr_of_surf types e h.1, kindSteps_of_surf types rest h.2]; rfl
+end
+
+theorem kindParams_of_surf (types : List (String × Nat)) :
+    ∀ ps : List (String × Option Ty), (∀ p ∈ ps, ∀ t, p.2 = some t → t.surf = true) →
+      kindParams types ps = .ok ()
+  | [], _ => rfl
+  | (_, a) :: ps, h => by
+    simp only [kindParams, kindAnn_of_surf types (h _ (List.mem_cons_self ..)),
+      kindParams_of_surf types ps (fun p hp => h p (List.mem_cons_of_mem _ hp))]; rfl
+
+theorem kindDecls_of_surf (types : List (String × Nat)) :
+    ∀ ds : List Decl, (∀ d ∈ ds, Decl.Surf d) → kindDecls types ds = .ok ()
+  | [], _ => rfl
+  | d :: ds, h => by
+    have hrest := kindDecls_of_surf types ds (fun d hd => h d (List.mem_cons_of_mem _ hd))
+    have hd : kindDecl types d = .ok () := by
+      have hs := h d (List.mem_cons_self ..)
+      cases d with
+      | fn n ps sg b =>
+        obtain ⟨hps, hsg, hb⟩ := hs
+        have hsg' : ∀ t, sg.map (·.1) = some t → t.surf = true := by
+          intro t ht
+          cases sg with
+          | none => cases ht
+          | some re => obtain ⟨r, e⟩ := re; cases ht; exact hsg r e rfl
+        simp only [kindDecl, kindParams_of_surf types ps hps, kindAnn_of_surf types hsg',
+          kindExpr_of_surf types b hb]; rfl
+      | letD _ a i =>
+        simp only [kindDecl, kindAnn_of_surf types hs.1, kindExpr_of_surf types i hs.2]; rfl
+      | mainFn _ b => exact kindExpr_of_surf types b hs
+      | typeD _ _ _ => rfl
+    simp only [kindDecls, hd, hrest]; rfl
+
+/-- A program without type declarations has the empty table. -/
+theorem checkTypes_of_surf {p : Program} (hp : p.Surf) : checkTypes p = .ok {} := by
+  have hd : p.typeDecls = [] := by
+    unfold Program.typeDecls
+    rw [List.filterMap_eq_nil_iff]
+    intro d hd
+    have := hp d hd
+    cases d <;> simp_all [Decl.Surf]
+  unfold checkTypes
+  simp [hd, kindDecls_of_surf _ p.decls hp]
+  rfl
+
 /-- **T2 for whole programs.** If the checker accepts a program whose written types are surface
 types and whose terms are surface terms (what the parser builds: no metavariable, skolem or `gen`),
 the declarative judgment types it. -/
 theorem checkProgram_sound {p : Program} {fuel : Nat} (hp : p.Surf)
     (h : checkProgram {} p fuel = .ok ()) : p.Typed := by
   unfold checkProgram at h
+  rw [bind_ok_iff] at h
+  obtain ⟨tab, htab, h⟩ := h
+  rw [checkTypes_of_surf hp] at htab
+  cases htab
+  change (do
+      let pl ← checkPlan p
+      match ((runPlan {} pl).run fuel).run {} with
+      | .ok _ => pure ()
+      | .error e => throw e) = Except.ok () at h
   rw [bind_ok_iff] at h
   obtain ⟨pl, hpl, h⟩ := h
   have hinv := checkPlan_inv hpl

@@ -26,6 +26,7 @@ SECTIONS = [
     ("spec-5.8-linear.md", r"^### 5\.8 Linear types", r"^### 5\.9 "),
     ("spec-7-typing-rules.md", r"^## 7\. Typing Rules", r"^## 8\. "),
     ("spec-10.10-main.md", r"^### 10\.10 Main entrypoint", r"^### 10\.11 "),
+    ("spec-8.5.1-kinds.md", r"^### 8\.5\.1 Kinds", r"^### `Applicative` class"),
 ]
 
 

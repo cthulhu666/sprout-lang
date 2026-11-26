@@ -87,6 +87,7 @@ def Ty.vars : Ty → List String
   | .named s => [s]
   | .tup ts => Ty.varsList ts
   | .arr ps r _ => Ty.varsList ps ++ r.vars
+  | .adt _ ts => Ty.varsList ts
   | _ => []
 def Ty.varsList : List Ty → List String
   | [] => []
@@ -115,6 +116,7 @@ def Ty.ok (n : Nat) : Ty → Bool
   | .unit => true
   | .tup ts => Ty.okList n ts
   | .arr ps r e => Ty.okList n ps && r.ok n && !Ty.mergeable ps r e
+  | .adt _ ts => Ty.okList n ts
 def Ty.okList (n : Nat) : List Ty → Bool
   | [] => true
   | t :: ts => t.ok n && Ty.okList n ts
@@ -128,6 +130,7 @@ def Ty.noSk : Ty → Bool
   | .skolem _ => false
   | .tup ts => Ty.noSkList ts
   | .arr ps r _ => Ty.noSkList ps && r.noSk
+  | .adt _ ts => Ty.noSkList ts
   | _ => true
 def Ty.noSkList : List Ty → Bool
   | [] => true
@@ -153,6 +156,7 @@ def Ty.elab (σ : String → Ty) : Ty → Option Ty
     match Ty.elabList σ ps, r.elab σ with
     | some ps', some r' => if r.isArr && e == .io then none else some (mkArr ps' r' e)
     | _, _ => none
+  | .adt n ts => (Ty.elabList σ ts).map (.adt n)
 def Ty.elabList (σ : String → Ty) : List Ty → Option (List Ty)
   | [] => some []
   | t :: ts =>
@@ -168,6 +172,7 @@ def Ty.inst (ts : List Ty) : Ty → Ty
   | .gen i => ts.getD i (.gen i)
   | .tup us => .tup (Ty.instList ts us)
   | .arr ps r e => mkArr (Ty.instList ts ps) (r.inst ts) e
+  | .adt n us => .adt n (Ty.instList ts us)
   | t => t
 def Ty.instList (ts : List Ty) : List Ty → List Ty
   | [] => []
@@ -255,6 +260,9 @@ inductive Flows : Ty → Ty → Prop
   /-- `() -> T` and `Unit -> T` are distinct and neither flows into the other (spec §7 rule 9). -/
   | nullary (ra re : Ty) (ea ee : Eff) :
       Flows ra re → ea.le ee = true → Flows (.arr [] ra ea) (.arr [] re ee)
+  /-- A type's arguments flow pointwise (spec §7 rule 8: "A type ARGUMENT is judged
+  covariantly"). -/
+  | adt (n : String) (as bs : List Ty) : FlowsAll as bs → Flows (.adt n as) (.adt n bs)
 
 inductive FlowsAll : List Ty → List Ty → Prop
   -- spec §7 rules 3, 12: pointwise, so the two lists have one length
@@ -502,7 +510,7 @@ open Judgment
 
 /-- The `fn` and `let` declarations, in source order. -/
 def Program.nodes (p : Program) : List Decl :=
-  p.decls.filter fun d => match d with | .mainFn .. => false | _ => true
+  p.decls.filter fun d => match d with | .mainFn .. => false | .typeD .. => false | _ => true
 
 /-- The program is well-typed. -/
 def Program.Typed (p : Program) : Prop :=

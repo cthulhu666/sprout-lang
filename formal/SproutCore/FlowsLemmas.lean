@@ -62,6 +62,7 @@ theorem Flows.refl_of_ok : ∀ t : Ty, t.ok 0 = true → Flows t t
   | .arr ps r e, h => by
     simp only [Ty.ok, Bool.and_eq_true] at h
     exact flows_arr_refl r e (Flows.refl_of_ok r h.1.2) ps (FlowsAll.refl_of_ok ps h.1.1)
+  | .adt n ts, h => Flows.adt n _ _ (FlowsAll.refl_of_ok ts (by simpa [Ty.ok] using h))
 
 theorem FlowsAll.refl_of_ok : ∀ ts : List Ty, Ty.okList 0 ts = true → FlowsAll ts ts
   | [], _ => FlowsAll.nil
