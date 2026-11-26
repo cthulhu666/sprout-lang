@@ -142,7 +142,7 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   # IRLoadEnvSlot is a pure i64 load — does NOT trigger GC.
   | sprout_ir.IRLoadEnvSlot _ _ _ _ -> false
   # PR 2.5: pattern-matching ops — all three are non-trigger by design.
-  # IRGetTag / IRGetField lower to @sprout_tag / @sprout_field, pure reads.
+  # IRGetTag lowers to @sprout_tag, IRGetField to an inline load; both pure reads.
   # IRAbortMatch never allocates.
   # See docs/archive/pr-2.5-pattern-matching-plan.md "Rooting" section.
   | sprout_ir.IRGetTag _ _ -> false

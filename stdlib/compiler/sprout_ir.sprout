@@ -398,8 +398,8 @@ export type IROp (..) =
   #   's' (String)           -> IRTHeap
   #   'p' (ADT|closure|tuple) -> IRTHeap
   #   '_' (type-var)         -> IRTUnknown   (conservative — avoid missed roots)
-  # Lowers to: %result = call i64 @sprout_field(i64 %scrut-handle, i64 <idx>)
-  # @sprout_field is a pure read; no allocation. NOT a GC trigger.
+  # Lowers to an inline load: inttoptr + getelementptr + load of word <idx>.
+  # A pure read; no allocation. NOT a GC trigger.
   # field-kind drives ir_rooting heap-vs-scalar classification of <result>.
   | IRGetField String String Int IRType
   # B1 inline vector access. These ops replace `vector_get_direct` / `vector_mutset`

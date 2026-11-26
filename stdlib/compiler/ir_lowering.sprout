@@ -374,7 +374,11 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
   | sprout_ir.IRGetTag r s ->
       "  " ++ r ++ " = call i64 @sprout_tag(i64 " ++ s ++ ")"
   | sprout_ir.IRGetField r s i _kind ->
-      "  " ++ r ++ " = call i64 @sprout_field(i64 " ++ s ++ ", i64 " ++ int_to_string(i) ++ ")"
+      # Inline load, not a call: LLVM can merge repeated reads of one field. Safe because the
+      # GC is non-moving and every field write is an IR `store` or an opaque call, both clobbers.
+      "  " ++ r ++ "$fptr = inttoptr i64 " ++ s ++ " to ptr\n" ++
+      "  " ++ r ++ "$fgep = getelementptr i64, ptr " ++ r ++ "$fptr, i64 " ++ int_to_string(i) ++ "\n" ++
+      "  " ++ r ++ " = load i64, ptr " ++ r ++ "$fgep"
   # B1 inline vector access (Double reads, non-heap-scalar stores).
   # VectorVal { i64 len@0, i64 cap@8, i64* data@16 }; data lives at i64-index 2. Unchecked: ast_to_ir has already emitted the null +
   # bounds guard blocks that dominate these. Temps derive from the unique result SSA.
@@ -625,7 +629,6 @@ let runtime_declares: List RuntimeDeclare =
    # heap-typed fields. Called once per constructor in @main's entry block.
    decl("i64", "sprout_register_ctor", "i64, ptr, i64, ptr"),
    decl("i64", "sprout_tag", "i64"),
-   decl("i64", "sprout_field", "i64, i64"),
    RuntimeDeclare(name = "sprout_abort_match", text = "declare void @sprout_abort_match() noreturn\n"),
    # Backs the IRPanic terminator of the `/` divide-by-zero guard.
    decl("i64", "panic", "i64"),

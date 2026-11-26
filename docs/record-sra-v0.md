@@ -244,8 +244,9 @@ Then smoke shape, golden IR (read the diff), GC stress, reseed, `just dod`, benc
    (2M iterations of `q_mul` + `q_rot`, -O2, 9 interleaved runs, best/median) 374/383 ms with
    `SPROUT_OPT_OFF=rec_inline`, 125/127 ms with the pass, 104/104 ms hand-expanded. The compiler's
    self-compile time does not move outside noise (4.1–4.3 s either way; IR +0.15%). The gap is
-   repeated `q.v` loads: `sprout_field` is declared without `readonly`, so LLVM cannot merge
-   them. Declaring it `memory(read)` in the emitted IR gave 87.6 ms for both.
+   repeated `q.v` loads: `sprout_field` was an opaque call, so LLVM could not merge them.
+   Declaring it `memory(read)` in the emitted IR gave 87.6 ms for both.
 3. Follow-ups: `do`-let and `if`-tailed builders, now the BACKLOG entry **`rec_inline` gaps**;
-   the `sprout_field` load gap, BACKLOG **`sprout_field` is not declared read-only**; callees
-   compiled though every call inlined, BACKLOG **Fully inlined callees are still compiled**.
+   callees compiled though every call inlined, BACKLOG **Fully inlined callees are still
+   compiled**. The `q.v` reload gap is closed: field reads lower to an inline load, which LLVM
+   merges. Same bench: 126/128 → 62/64 ms with the pass, hand-expanded 104/106 → 62/64 ms.

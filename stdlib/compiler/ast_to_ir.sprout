@@ -1451,7 +1451,7 @@ fn do_bind_unbox_target(e: typed_ast.TypedExpr, params: List String, captures: D
 #                 br %is, do_short_K, do_cont_K
 #   do_short_K:   Maybe: %nv = Nothing; Result: nothing (the Err box is the value)
 #                 br do_done_K
-#   do_cont_K:    %p = sprout_field(%e, 0); bind pat to %p; rest of the do block
+#   do_cont_K:    %p = field 0 of %e; bind pat to %p; rest of the do block
 #                 <rest_final>: br do_done_K
 #   do_done_K:    %result = phi [%nv or %e, do_short_K], [rest's value, <rest_final>]
 fn translate_do_bind_short(kind: ShortCircuit, pat: ast.Pattern, e: typed_ast.TypedExpr,
